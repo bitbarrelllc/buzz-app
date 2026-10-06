@@ -114,7 +114,7 @@ it.each([undefined, "", "http://builderlab.example"])(
     new HostService(root);
     const cards = new SettingsCardsService(root);
     const community = communityFixture(null);
-    provideKnownCommunities(root, community.viewer);
+    const knownCommunities = provideKnownCommunities(root, community.viewer);
     const agents = provideAgents(root, community);
     try {
       runtime.reconcile([
@@ -144,6 +144,8 @@ it.each([undefined, "", "http://builderlab.example"])(
         ),
       ).toEqual([]);
       expect(agents.types()).toHaveLength(0);
+      // No sign-in is possible, so no sync owner runs and the rail is told nothing.
+      expect(knownCommunities.status).not.toHaveBeenCalled();
       cleanup();
       render(<AgentsPage agents={agents} relay={community.relay} />);
       const user = userEvent.setup();
