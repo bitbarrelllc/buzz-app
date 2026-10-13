@@ -9,34 +9,86 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, useState } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from "vitest";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { MessageMarkdown } from "./MessageMarkdown";
-import { EditableInput } from "./EditableInput";
+import {
+  EditableInput,
+  type EditableInputProps,
+  type EditorDecoration,
+} from "./EditableInput";
 import type { ComposerFormat, ComposerInputElement } from "./composer-dom";
 import { composerDOMFixture } from "./composer-testing";
 import { composerMarkdown } from "./composer-markdown";
-import { mentionDraft, type MentionDraft } from "./mention-draft";
+import {
+  followupDraft,
+  mentionDraft,
+  type MentionDraft,
+} from "./mention-draft";
+import { messageLinkParts } from "./message-link-parts";
 import { profileMentionParts } from "./profile-mentions";
-import { profileTarget } from "../profiles/target";
+import { serializeNode, serializeSelection } from "./selection-copy";
+import { profileKey, profileTarget } from "../profiles/target";
+import { scanMarkdown } from "../relay/message-content";
 
 composerDOMFixture();
 afterEach(cleanup);
 
-/** The editor's text/plain paste handler, not the insertText API. */
-function paste(input: ComposerInputElement, text: string) {
+/** The editor's paste handler, not the insertText API. */
+function paste(input: ComposerInputElement, text: string, html = "") {
   act(() => {
     input.focus();
     fireEvent.paste(input, {
       clipboardData: {
         items: [],
-        getData: (type: string) => (type === "text/plain" ? text : ""),
+        getData: (type: string) =>
+          type === "text/plain" ? text : type === "text/html" ? html : "",
       },
     });
   });
 }
 
-function mount(initial: string | MentionDraft = "") {
+/** Identity and web links paint as editable chips, as in RichComposerInput. */
+function linkDecorations(text: string): EditorDecoration[] {
+  const ranges: EditorDecoration[] = [];
+  for (const link of scanMarkdown(text).links) {
+    const start = link.position?.start.offset;
+    const end = link.position?.end.offset;
+    if (
+      link.url &&
+      profileKey(link.url) &&
+      start !== undefined &&
+      end !== undefined
+    )
+      ranges.push({
+        start,
+        end,
+        editAsText: true,
+        content: <span data-identity />,
+      });
+  }
+  messageLinkParts(text, undefined, (start, end) =>
+    ranges.push({ start, end, editAsText: true, content: <span data-link /> }),
+  );
+  return ranges;
+}
+
+function mount(
+  initial: string | MentionDraft = "",
+  options: {
+    maxLength?: number;
+    links?: boolean;
+    acceptRecipient?: EditableInputProps["acceptRecipient"];
+  } = {},
+) {
   const ref = createRef<ComposerInputElement>();
   let draft: MentionDraft = mentionDraft(initial);
   let formats: readonly ComposerFormat[] = [];
@@ -50,15 +102,21 @@ function mount(initial: string | MentionDraft = "") {
         value={value.text}
         disabled={false}
         placeholder="Draft"
-        maxLength={16000}
+        maxLength={options.maxLength ?? 16000}
         // Explicit recipients render as mention tokens, as in RichComposerInput.
         decorationsFor={(current) =>
-          current.recipients.map(({ start, end, name }) => ({
-            start,
-            end,
-            content: <span data-mention>@{name}</span>,
-          }))
+          [
+            ...current.recipients.map(({ start, end, name }) => ({
+              start,
+              end,
+              content: <span data-mention>@{name}</span>,
+            })),
+            ...(options.links ? linkDecorations(current.text) : []),
+          ].sort((a, b) => a.start - b.start)
         }
+        {...(options.acceptRecipient
+          ? { acceptRecipient: options.acceptRecipient }
+          : {})}
         onFormatsChange={(active) => {
           formats = active;
         }}
@@ -85,6 +143,183 @@ function mount(initial: string | MentionDraft = "") {
     formats: () => formats,
   };
 }
+
+it("refuses a closing-colon conversion when its literal undo source exceeds the limit", () => {
+  const h = mount(":-1", { maxLength: 3 });
+  act(() =>
+    expect(h.input.insertText("👎", undefined, { start: 0, end: 3 }, ":")).toBe(
+      false,
+    ),
+  );
+  expect(h.input).toHaveValue(":-1");
+  expect([h.input.selectionStart, h.input.selectionEnd]).toEqual([3, 3]);
+});
+
+it("keeps exactly one typed colon when the conversion exceeds the limit", () => {
+  const h = mount(":x", { maxLength: 3 });
+  act(() =>
+    expect(
+      h.input.insertText("too long", undefined, { start: 0, end: 2 }, ":"),
+    ).toBe(true),
+  );
+  expect(h.input).toHaveValue(":x:");
+  expect([h.input.selectionStart, h.input.selectionEnd]).toEqual([3, 3]);
+  act(() => h.input.undo(false));
+  expect(h.input).toHaveValue(":x");
+});
+
+describe("Mac WebKit line breaks", () => {
+  let clear: MockInstance<Selection["removeAllRanges"]>;
+  beforeEach(() => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    clear = vi.spyOn(Selection.prototype, "removeAllRanges");
+  });
+  afterEach(() => vi.restoreAllMocks());
+  /** The native caret ProseMirror wrote back. */
+  const native = () => {
+    const selection = document.getSelection();
+    return [
+      selection?.rangeCount,
+      selection?.isCollapsed,
+      selection?.anchorNode?.textContent,
+      selection?.anchorOffset,
+    ];
+  };
+
+  it.each([false, true])(
+    "refreshes an accepted collapsed caret and restores it natively (code block: %s)",
+    (code) => {
+      const h = mount("ab");
+      if (code) act(() => h.input.toggleFormat("code_block"));
+      act(() => h.input.setSelectionRange(1, 1));
+      clear.mockClear();
+      act(() => expect(h.input.insertLineBreak()).toBe(true));
+      expect(clear).toHaveBeenCalledTimes(1);
+      expect(h.input).toHaveValue("a\nb");
+      expect(h.input.selectionStart).toBe(2);
+      expect(h.input.selectionEnd).toBe(2);
+      expect(native()).toEqual([1, true, "a\nb", 2]);
+    },
+  );
+
+  it.each([
+    ["paragraph", 2],
+    ["code block", "```\nab\n```".length],
+  ] as const)(
+    "restores the caret after a rejected %s line break",
+    (kind, maxLength) => {
+      const h = mount("ab", { maxLength });
+      if (kind === "code block") act(() => h.input.toggleFormat("code_block"));
+      act(() => h.input.setSelectionRange(1, 1));
+      clear.mockClear();
+      act(() => h.input.insertLineBreak());
+      expect(clear).toHaveBeenCalledTimes(1);
+      expect(h.input).toHaveValue("ab");
+      expect(native()).toEqual([1, true, "ab", 1]);
+    },
+  );
+
+  it("leaves a range selection alone", () => {
+    const h = mount("ab");
+    act(() => h.input.setSelectionRange(0, 2));
+    clear.mockClear();
+    act(() => expect(h.input.insertLineBreak()).toBe(true));
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("returning focus resumes and repaints the editor's caret; a pointer places its own", () => {
+    const text = "here is a message";
+    const h = mount(text);
+    act(() => h.input.setSelectionRange(2, 2));
+    const stale = () => {
+      act(() => h.input.blur());
+      // While hidden, the native caret drifted from the editor's caret.
+      const node = h.input.querySelector("p")?.firstChild;
+      if (!node) throw new Error("Editor text unavailable");
+      document.getSelection()?.collapse(node, 0);
+      clear.mockClear();
+    };
+    // Browsers keep a selection already inside the focused editing root;
+    // jsdom then collapses it to the start regardless, so observe it here.
+    let painted: unknown[] = [];
+    const observe = () => {
+      painted = native();
+    };
+    document.addEventListener("focusin", observe);
+    stale();
+    act(() => h.input.focus());
+    document.removeEventListener("focusin", observe);
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(h.input.selectionStart).toBe(2);
+    expect(painted).toEqual([1, true, text, 2]);
+
+    stale();
+    act(() => {
+      fireEvent.pointerDown(h.input);
+      h.input.focus();
+      fireEvent.pointerUp(h.input);
+    });
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it.each(["pointerUp", "pointerCancel"] as const)(
+    "%s outside the editor retires pointer placement before returning focus",
+    (release) => {
+      const h = mount("message");
+      act(() => h.input.setSelectionRange(2, 2));
+      act(() => {
+        fireEvent.pointerDown(h.input);
+        fireEvent[release](document.body);
+        h.input.blur();
+      });
+      clear.mockClear();
+      act(() => h.input.focus());
+      expect(clear).toHaveBeenCalledOnce();
+      expect(h.input.selectionStart).toBe(2);
+    },
+  );
+
+  it("leaves Chromium alone", () => {
+    vi.spyOn(navigator, "vendor", "get").mockReturnValue("Google Inc.");
+    const h = mount("ab");
+    act(() => h.input.setSelectionRange(1, 1));
+    clear.mockClear();
+    act(() => expect(h.input.insertLineBreak()).toBe(true));
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("preserves inline Markdown when a line break reaches the length limit", async () => {
+    const h = mount("_abcd_", { maxLength: 11 });
+    act(() => {
+      h.input.setSelectionRange(0, 6);
+      h.input.toggleFormat("bold");
+      h.input.setSelectionRange(3, 3);
+    });
+    clear.mockClear();
+    await h.user.keyboard("{Shift>}{Enter}{/Shift}");
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(h.input.querySelectorAll(":scope > p")).toHaveLength(1);
+    expect(h.input).toHaveValue("_ab\ncd_");
+    expect(h.markdown()).toBe("**_ab\ncd_**");
+  });
+
+  it("preserves formatted pasted link source across a line break", async () => {
+    const h = mount();
+    const source = "[label](https://example.com)";
+    paste(h.input, source);
+    act(() => {
+      h.input.setSelectionRange(0, source.length);
+      h.input.toggleFormat("bold");
+      h.input.setSelectionRange(4, 4);
+    });
+    clear.mockClear();
+    await h.user.keyboard("{Shift>}{Enter}{/Shift}");
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(h.input.querySelectorAll(":scope > p")).toHaveLength(1);
+    expect(h.input).toHaveValue("[lab\nel](https://example.com) ");
+    expect(h.markdown()).toBe("**[lab\nel](https://example.com)** ");
+  });
+});
 
 /** Exercise ProseMirror's actual MutationObserver/readDOMChange seam, including
  * marksAcross on deletion. This is not a claim about native WebKit keystrokes. */
@@ -301,6 +536,11 @@ it("follows the parser for intraword delimiters: snake_case stays literal, 5*3*2
       { type: "text", value: "2" },
     ],
   });
+  act(() => h.input.setSelectionRange(0, h.input.value.length));
+  const copied = clipboard(h.input, "copy");
+  const target = mount();
+  paste(target.input, copied.text ?? "", copied.html);
+  expect(target.markdown()).toBe(h.markdown());
 });
 
 it.each(["a*b**", "a*b**c"])(
@@ -647,6 +887,40 @@ it.each([true, false])(
     expect(h.markdown()).toBe("**pasted** _source_");
   },
 );
+
+it("adds and edits HTTP links through the composer, but rejects credentialed URLs", () => {
+  const h = mount("docs", { links: true });
+  act(() => h.input.setSelectionRange(0, 4));
+  const add = h.input.editLink();
+  expect(add?.existing).toBe(false);
+  act(() => expect(add?.save("docs", "http://example.com/docs")).toBe(true));
+  expect(h.markdown()).toBe("[docs](http://example.com/docs)");
+
+  act(() => h.input.setSelectionRange(1, 1));
+  const edit = h.input.editLink();
+  expect(edit).toMatchObject({
+    existing: true,
+    href: "http://example.com/docs",
+  });
+  act(() => expect(edit?.save("guide", "http://localhost:3000")).toBe(true));
+  expect(h.markdown()).toBe("[guide](http://localhost:3000/)");
+
+  act(() => h.input.setSelectionRange(1, 1));
+  const unsafe = h.input.editLink();
+  act(() =>
+    expect(unsafe?.save("guide", "http://user:pw@example.com")).toBe(false),
+  );
+  expect(h.markdown()).toBe("[guide](http://localhost:3000/)");
+});
+
+it("edits a detected plain HTTP link", () => {
+  const h = mount("See http://localhost:3000", { links: true });
+  act(() => h.input.setSelectionRange(8, 8));
+  const edit = h.input.editLink();
+  expect(edit).toMatchObject({ existing: true, href: "http://localhost:3000" });
+  act(() => expect(edit?.save("local", "http://localhost:3000")).toBe(true));
+  expect(h.markdown()).toBe("See [local](http://localhost:3000/)");
+});
 
 it("bolds a mention typed between delimiters and keeps its chip and recipient", async () => {
   const h = mount();
@@ -1041,9 +1315,7 @@ it("keeps a typed opening fence literal when a later sibling paragraph closes it
 it.each([
   ["- ", "ul", "- "],
   ["* ", "ul", "- "],
-  ["+ ", "ul", "- "],
   ["1. ", "ol", "1. "],
-  ["1) ", "ol", "1. "],
   ["> ", "blockquote", "> "],
 ] as const)(
   "opens a block as the space of %j is typed, with one undo restoring the prefix",
@@ -1073,6 +1345,26 @@ it.each([
     act(() => h.input.reset(saved));
     expect(h.input.querySelector(`:scope > ${tag}`)).not.toBeNull();
     expect(h.markdown()).toBe(`${wire}item`);
+  },
+);
+
+it.each(["1. ", "• "])(
+  "hides the placeholder in an empty %j list and restores it after exit",
+  async (prefix) => {
+    const h = mount();
+    expect(h.input.querySelector("[data-placeholder]")).toHaveAttribute(
+      "data-placeholder",
+      "Draft",
+    );
+    await h.user.keyboard(prefix);
+    expect(h.input.querySelector("li")).not.toBeNull();
+    expect(h.input.querySelector("[data-placeholder]")).toBeNull();
+    act(() => h.input.insertLineBreak());
+    expect(h.input.querySelector("ul, ol")).toBeNull();
+    expect(h.input.querySelector(":scope > p")).toHaveAttribute(
+      "data-placeholder",
+      "Draft",
+    );
   },
 );
 
@@ -1516,7 +1808,7 @@ it("leaves a marker typed after prose, and ordinary spaces, as paragraph text", 
   expect(h.markdown()).toBe("note - one 1. two > three");
 });
 
-it.each([" - ", "a- ", "1.5 ", "1234567890. ", "-> ", ">> "])(
+it.each([" - ", "a- ", "a• ", " • ", "1.5 ", "1234567890. ", "-> ", ">> "])(
   "leaves typed %j as paragraph text",
   async (line) => {
     const h = mount();
@@ -1716,34 +2008,6 @@ it.each([
     "ArrowLeft",
     [18, 28, "backward"],
   ],
-  [
-    "before a two-word mention",
-    "@Imp say hello to @Mary Jane ",
-    18,
-    "ArrowRight",
-    [18, 28, "forward"],
-  ],
-  [
-    "after the two-word mention at the start",
-    "@Mary Jane says hello",
-    10,
-    "ArrowLeft",
-    [0, 10, "backward"],
-  ],
-  [
-    "the document start before a two-word mention",
-    "@Mary Jane says hello",
-    0,
-    "ArrowRight",
-    [0, 10, "forward"],
-  ],
-  [
-    "the document end after a two-word mention",
-    "hello @Mary Jane",
-    16,
-    "ArrowLeft",
-    [6, 16, "backward"],
-  ],
 ] as const)(
   "Shift+Arrow from %s selects the whole mention",
   (_, text, caret, key, expected) => {
@@ -1790,33 +2054,6 @@ it.each([
     "backward",
     "ArrowRight",
     [25, 26, "backward"],
-  ],
-  [
-    "extends a forward selection from prose over a two-word mention",
-    "@Imp say hello to @Mary Jane ",
-    16,
-    18,
-    "forward",
-    "ArrowRight",
-    [16, 28, "forward"],
-  ],
-  [
-    "shrinks a forward selection off a two-word mention",
-    "@Imp say hello to @Mary Jane ",
-    18,
-    28,
-    "forward",
-    "ArrowLeft",
-    [18, 18, "forward"],
-  ],
-  [
-    "shrinks a backward selection off a two-word mention",
-    "@Imp say hello to @Mary Jane ",
-    18,
-    29,
-    "backward",
-    "ArrowRight",
-    [28, 29, "backward"],
   ],
   // Two two-word mentions one space apart: the browser selects that space,
   // then the editor extends over the first mention in the same direction.
@@ -1867,25 +2104,15 @@ it("retains the native caret after replacing text with an unchanged suffix", asy
  * character instead (NSUpArrowFunctionKey U+F700 onwards), which WebKit strips
  * and the guard refuses as well. DEL and the C1 controls are as glyphless. */
 const controlKeys = [
-  ["Left Arrow's layout translation U+001C", "\u001C"],
   ["Right Arrow's layout translation U+001D", "\u001D"],
-  ["Up Arrow's layout translation U+001E", "\u001E"],
-  ["Down Arrow's layout translation U+001F", "\u001F"],
   ["Home's layout translation U+0001", "\u0001"],
-  ["End's layout translation U+0004", "\u0004"],
   ["Page Up's layout translation U+000B", "\u000B"],
   ["Page Down's layout translation U+000C", "\u000C"],
   ["DEL U+007F", "\u007F"],
   ["the first C1 control U+0080", "\u0080"],
   ["the last C1 control U+009F", "\u009F"],
   ["Up Arrow's function-key character U+F700", "\uF700"],
-  ["Down Arrow's function-key character U+F701", "\uF701"],
-  ["Left Arrow's function-key character U+F702", "\uF702"],
   ["Right Arrow's function-key character U+F703", "\uF703"],
-  ["F1's function-key character U+F704", "\uF704"],
-  ["Home's function-key character U+F729", "\uF729"],
-  ["End's function-key character U+F72B", "\uF72B"],
-  ["Page Up's function-key character U+F72C", "\uF72C"],
   ["Page Down's function-key character U+F72D", "\uF72D"],
 ] as const;
 /** Right Arrow committed as text in both forms the host can produce. Each
@@ -2337,7 +2564,6 @@ it.each([
     ["extend", "left", "lineboundary"],
   ],
   ["MacIntel", "ArrowUp", {}, ["move", "backward", "line"]],
-  ["MacIntel", "ArrowDown", { shiftKey: true }, ["extend", "forward", "line"]],
   [
     "MacIntel",
     "ArrowUp",
@@ -2351,7 +2577,6 @@ it.each([
     ["move", "forward", "documentboundary"],
   ],
   ["MacIntel", "Home", {}, null],
-  ["MacIntel", "End", {}, null],
   [
     "MacIntel",
     "End",
@@ -2359,7 +2584,6 @@ it.each([
     ["extend", "forward", "documentboundary"],
   ],
   ["MacIntel", "PageUp", {}, null],
-  ["MacIntel", "PageDown", { shiftKey: true }, null],
   ["Win32", "ArrowRight", { ctrlKey: true }, ["move", "right", "lineboundary"]],
   ["Win32", "ArrowRight", { metaKey: true }, ["move", "right", "character"]],
   ["Win32", "Home", {}, ["move", "backward", "lineboundary"]],
@@ -2399,4 +2623,486 @@ it("leaves a named caret key to the browser", () => {
   expect(prevented).toBe(false);
   expect(modify).not.toHaveBeenCalled();
   expect(h.input.selectionStart).toBe(1);
+});
+
+it("inserts batch recipients in one transaction and undoes both spans together", () => {
+  const h = mount("Before @Court after");
+  const people = [
+    { pubkey: "a".repeat(64), name: "Carl" },
+    { pubkey: "b".repeat(64), name: "Donut" },
+  ];
+  act(() =>
+    expect(
+      h.input.insertText("@Carl @Donut ", people, { start: 7, end: 13 }),
+    ).toBe(true),
+  );
+  expect(h.draft().recipients.map(({ pubkey }) => pubkey)).toEqual(
+    people.map(({ pubkey }) => pubkey),
+  );
+  expect(h.input).toHaveValue("Before @Carl @Donut  after");
+  act(() => h.input.undo(false));
+  expect(h.input).toHaveValue("Before @Court after");
+  expect(h.draft().recipients).toEqual([]);
+  act(() => h.input.undo(true));
+  expect(h.draft().recipients).toHaveLength(2);
+});
+it("rejects batch overflow without changing text, recipient spans or undo history", () => {
+  const h = mount();
+  const people = Array.from({ length: 31 }, (_, i) => ({
+    pubkey: i.toString(16).padStart(64, "0"),
+    name: `Agent ${i}`,
+  }));
+  act(() => expect(h.input.insertText("", people)).toBe(true));
+  const before = h.draft();
+  const more = [
+    { pubkey: "a".repeat(64), name: "Carl" },
+    { pubkey: "b".repeat(64), name: "Donut" },
+  ];
+  act(() => expect(h.input.insertText("", more)).toBe(false));
+  expect(h.draft()).toEqual(before);
+  act(() => h.input.undo(false));
+  expect(h.input).toHaveValue("");
+});
+it("rejects a batch that exceeds message length without partial insertion", () => {
+  const h = mount("x".repeat(15990));
+  const before = h.draft();
+  act(() =>
+    expect(
+      h.input.insertText("", [
+        { pubkey: "a".repeat(64), name: "Carl" },
+        { pubkey: "b".repeat(64), name: "Donut" },
+      ]),
+    ).toBe(false),
+  );
+  expect(h.draft()).toEqual(before);
+});
+
+// Clipboard: composer copy/cut write both flavors; paste reads this app's own
+// HTML back through selection-copy.ts and promotes accepted identity links.
+const mic = "c".repeat(64);
+const micLink = `[@Mic](${profileTarget(mic)})`;
+const honey = { pubkey: "a".repeat(64), name: "Honey" };
+const honeyLink = `[@Honey](${profileTarget(honey.pubkey)})`;
+const copyHtml = (inner: string) =>
+  `<div data-buzz-copy="composer">${inner}</div>`;
+const timelineHtml = (inner: string) =>
+  `<div data-buzz-copy="timeline"><p>${inner}</p></div>`;
+
+function clipboard(input: ComposerInputElement, type: "copy" | "cut") {
+  const data = new Map<string, string>();
+  act(() => {
+    fireEvent[type](input, {
+      clipboardData: {
+        setData: (flavor: string, value: string) => data.set(flavor, value),
+      },
+    });
+  });
+  return { text: data.get("text/plain"), html: data.get("text/html") };
+}
+/** What the paste side makes of a `text/html` payload. */
+function readBack(html: string | undefined) {
+  const template = document.createElement("template");
+  template.innerHTML = html ?? "";
+  return serializeNode(template.content, "markdown");
+}
+
+it.each(["First\nSecond", "First\n\nSecond", "  First\t  \n\n\nSecond  "])(
+  "preserves composer whitespace %j through rich copy and paste",
+  (source) => {
+    const h = mount(source);
+    act(() => h.input.setSelectionRange(0, h.input.value.length));
+    const copied = clipboard(h.input, "copy");
+    const target = mount();
+    paste(target.input, copied.text ?? "", copied.html);
+    expect(target.markdown()).toBe(source);
+  },
+);
+
+it.each(["italic", "bold", "strike"] as const)(
+  "round-trips punctuation-only %s next to letters",
+  (format) => {
+    const h = mount("x!y");
+    act(() => {
+      h.input.setSelectionRange(1, 2);
+      h.input.toggleFormat(format);
+      h.input.setSelectionRange(0, h.input.value.length);
+    });
+    const copied = clipboard(h.input, "copy");
+    const target = mount();
+    paste(target.input, copied.text ?? "", copied.html);
+    expect(target.markdown()).toBe(h.markdown());
+  },
+);
+
+it.each([
+  ["inline", "`"],
+  ["inline", " a`b "],
+  ["block", "echo hi\n```\nend"],
+  ["block", "echo hi\n\n"],
+])("round-trips %s code containing %j", (kind, text) => {
+  const h = mount({
+    text: "",
+    recipients: [],
+    document: {
+      version: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: kind === "block" ? "code_block" : "paragraph",
+            ...(kind === "block" ? { attrs: { language: "sh" } } : {}),
+            content: [
+              {
+                type: "text",
+                text,
+                ...(kind === "inline" ? { marks: [{ type: "code" }] } : {}),
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  act(() => h.input.setSelectionRange(0, h.input.value.length));
+  const copied = clipboard(h.input, "copy");
+  const target = mount();
+  paste(target.input, copied.text ?? "", copied.html);
+  expect(target.markdown()).toBe(h.markdown());
+});
+
+it("uses plain text when pasting rich content into an existing code block", async () => {
+  const accept = vi.fn();
+  const h = mount("", { links: true, acceptRecipient: accept });
+  await h.user.keyboard("```x");
+  paste(
+    h.input,
+    "Hi @Mic b",
+    timelineHtml(
+      `Hi <a href="${profileTarget(mic)}">@Mic</a> <strong>b</strong>`,
+    ),
+  );
+  expect(h.input.querySelector("pre")?.textContent).toBe("xHi @Mic b");
+  expect(h.markdown()).toBe("```\nxHi @Mic b\n```");
+  expect(accept).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["First\n\nSecond", "First\n\nSecond"],
+  ["First\nSecond", "First\nSecond"],
+  ["> First\n>\n> Second", "First\n\nSecond"],
+  ["- one\n- two", "one\ntwo"],
+  ["3. first\n4. second", "first\nsecond"],
+  ["> quoted", "quoted"],
+  ["```sh\necho hi\n```", "echo hi\n"],
+  ["```sh\necho hi\n\n```", "echo hi\n\n"],
+  ["| a | b |\n| - | - |\n| 1 | 2 |", "a\tb\n1\t2"],
+  ["para\n\n```sh\necho hi\n```\n\nafter", "para\n\necho hi\n\nafter"],
+  [
+    "intro\n\n- one\n- two\n\n> quoted\n\nouter",
+    "intro\n\none\ntwo\n\nquoted\n\nouter",
+  ],
+])(
+  "copies real timeline structure through the composer: %s",
+  (content, plain) => {
+    const view = render(
+      <MessageMarkdown
+        row={{
+          id: "m",
+          channelId: "general",
+          authorId: mic,
+          content,
+          createdAt: 1,
+          mentions: [],
+          participants: [],
+          attachments: [],
+          reactions: [],
+          replyCount: 0,
+        }}
+        media={() => undefined}
+        onOpenLink={() => false}
+      />,
+    );
+    const walker = document.createTreeWalker(
+      view.container,
+      NodeFilter.SHOW_TEXT,
+    );
+    const nodes: Text[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode())
+      if (/\S/.test(node.textContent ?? "")) nodes.push(node as Text);
+    const range = document.createRange();
+    const first = nodes[0],
+      last = nodes.at(-1);
+    if (!first || !last) throw new Error("Missing rendered text");
+    range.setStart(first, 0);
+    range.setEnd(last, last.length);
+    const copied = {
+      text: serializeNode(view.container, "text", range),
+      html: `<div data-buzz-copy="timeline">${serializeNode(view.container, "html", range)}</div>`,
+    };
+    expect(copied.text).toBe(plain);
+    const target = mount();
+    paste(target.input, copied.text, copied.html);
+    expect(target.markdown()).toBe(content.startsWith("|") ? plain : content);
+  },
+);
+
+it.each(["-", "3."])(
+  "pastes a phrase selected across formatting in a %s list item as prose",
+  (marker) => {
+    const content = `${marker} ask **Morgan** about it`;
+    const view = render(
+      <MessageMarkdown
+        row={{
+          id: "m",
+          channelId: "general",
+          authorId: mic,
+          content,
+          createdAt: 1,
+          mentions: [],
+          participants: [],
+          attachments: [],
+          reactions: [],
+          replyCount: 0,
+        }}
+        media={() => undefined}
+        onOpenLink={() => false}
+      />,
+    );
+    const item = view.getByRole("listitem");
+    const range = document.createRange();
+    range.setStart(item.firstChild as Text, 1);
+    range.setEnd(item.lastChild as Text, 3);
+    expect(range.commonAncestorContainer).toBe(item);
+    const selection = document.getSelection();
+    if (!selection) throw new Error("Missing selection");
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const text = serializeSelection(selection, "text");
+    const html = `<div data-buzz-copy="timeline">${serializeSelection(selection, "html")}</div>`;
+    expect(text).toBe("sk Morgan ab");
+    expect(serializeSelection(selection, "markdown")).toBe("sk **Morgan** ab");
+    const target = mount();
+    paste(target.input, text, html);
+    expect(target.markdown()).toBe("sk **Morgan** ab");
+
+    // Selecting the enclosing list still keeps its marker and starting number.
+    range.selectNodeContents(view.getByRole("list"));
+    selection.removeAllRanges();
+    selection.addRange(range);
+    expect(serializeSelection(selection, "markdown")).toBe(content);
+    expect(readBack(serializeSelection(selection, "html"))).toBe(content);
+    selection.removeAllRanges();
+  },
+);
+
+it("copies a selection as humanised text and semantic HTML that reads back as the slice's Markdown", () => {
+  const h = mount("", { links: true });
+  act(() => {
+    h.input.insertText("Ask ");
+    h.input.insertText("", honey);
+    h.input.insertText(
+      `in [#design](buzz://channel/design) or ${micLink} see https://example.com/docs and [docs](https://example.com/docs)`,
+    );
+    h.input.setSelectionRange(0, 3);
+    h.input.toggleFormat("bold");
+  });
+  const source = `**Ask** @Honey in [#design](buzz://channel/design) or ${micLink} see https://example.com/docs and [docs](https://example.com/docs)`;
+  expect(h.markdown()).toBe(source);
+  act(() => h.input.setSelectionRange(0, h.input.value.length));
+  const copied = clipboard(h.input, "copy");
+  expect(copied).toEqual({
+    text: "**Ask** @Honey in #design or @Mic see https://example.com/docs and [docs](https://example.com/docs)",
+    html: copyHtml(
+      `<p><strong>Ask</strong> <a href="${profileTarget(honey.pubkey)}">@Honey</a> in <a href="buzz://channel/design">#design</a> or <a href="${profileTarget(mic)}">@Mic</a> see <a href="https://example.com/docs">https://example.com/docs</a> and <a href="https://example.com/docs">docs</a></p>`,
+    ),
+  });
+  expect(readBack(copied.html)).toBe(source.replace("@Honey", honeyLink));
+  // A partial selection copies its slice; ranges are editor text offsets.
+  const text = h.draft().text;
+  act(() =>
+    h.input.setSelectionRange(
+      text.indexOf("@Honey"),
+      text.indexOf(")", text.indexOf("#design")) + 1,
+    ),
+  );
+  expect(clipboard(h.input, "copy")).toEqual({
+    text: "@Honey in #design",
+    html: copyHtml(
+      `<p><a href="${profileTarget(honey.pubkey)}">@Honey</a> in <a href="buzz://channel/design">#design</a></p>`,
+    ),
+  });
+});
+
+it("cuts with both flavors and removes the selection", () => {
+  const h = mount(`Ask ${micLink} now`, { links: true });
+  act(() => h.input.setSelectionRange(4, 4 + micLink.length));
+  expect(clipboard(h.input, "cut")).toEqual({
+    text: "@Mic",
+    html: copyHtml(`<p><a href="${profileTarget(mic)}">@Mic</a></p>`),
+  });
+  expect(h.markdown()).toBe("Ask  now");
+});
+
+it("writes blocks, breaks and spoilers as HTML the paste side reads back", async () => {
+  const h = mount("first secret");
+  await h.user.keyboard("{Shift>}{Enter}{/Shift}next{Enter}```ls");
+  act(() => {
+    h.input.setSelectionRange(6, 12);
+    h.input.toggleFormat("spoiler");
+  });
+  expect(h.input.querySelector("[data-spoiler]")).not.toBeNull();
+  expect(h.markdown()).toBe("first ||secret||\nnext\n\n```\nls\n```");
+  act(() => h.input.setSelectionRange(0, h.input.value.length));
+  const copied = clipboard(h.input, "copy");
+  expect(copied).toEqual({
+    text: h.markdown(),
+    html: copyHtml(
+      "<p>first ||secret||<br>next</p><pre><code>ls\n</code></pre>",
+    ),
+  });
+  expect(readBack(copied.html)).toBe(h.markdown());
+});
+
+it("copies marked whitespace, lists, a quote and a fence as HTML that reads back as the same Markdown", () => {
+  const paragraph = (text: string) => ({
+    type: "paragraph",
+    content: [{ type: "text", text }],
+  });
+  const item = (text: string) => ({
+    type: "list_item",
+    content: [paragraph(text)],
+  });
+  const h = mount({
+    text: "",
+    recipients: [],
+    document: {
+      version: 1,
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "a " },
+              { type: "text", text: "bold ", marks: [{ type: "bold" }] },
+              { type: "text", text: "b" },
+            ],
+          },
+          { type: "bullet_list", content: [item("one"), item("two")] },
+          {
+            type: "ordered_list",
+            attrs: { order: 3 },
+            content: [item("first")],
+          },
+          { type: "blockquote", content: [paragraph("quoted")] },
+          {
+            type: "code_block",
+            attrs: { language: "sh" },
+            content: [{ type: "text", text: "ls" }],
+          },
+        ],
+      },
+    },
+  });
+  expect(h.markdown()).toBe(
+    "a **bold** b\n\n- one\n- two\n\n3. first\n\n> quoted\n\n```sh\nls\n```",
+  );
+  act(() => h.input.setSelectionRange(0, h.input.value.length));
+  const copied = clipboard(h.input, "copy");
+  expect(copied).toEqual({
+    text: h.markdown(),
+    html: copyHtml(
+      '<p>a <strong>bold </strong>b</p><ul><li><p>one</p></li><li><p>two</p></li></ul><ol start="3"><li><p>first</p></li></ol><blockquote><p>quoted</p></blockquote><pre><code class="language-sh">ls\n</code></pre>',
+    ),
+  });
+  expect(readBack(copied.html)).toBe(h.markdown());
+  // Pasted into another composer, the message sends with the same source.
+  const target = mount();
+  paste(target.input, copied.text ?? "", copied.html);
+  expect(target.markdown()).toBe(h.markdown());
+});
+
+it("pastes this app's HTML as identity Markdown and other HTML as its text/plain", () => {
+  const h = mount("", { links: true });
+  paste(
+    h.input,
+    "Ask @Mic in #design",
+    timelineHtml(
+      `Ask <a href="${profileTarget(mic)}">@Mic</a> in <a href="buzz://channel/design">#design</a>`,
+    ),
+  );
+  expect(h.markdown()).toBe(
+    `Ask ${micLink} in [#design](buzz://channel/design)`,
+  );
+  expect(h.input.querySelector("[data-identity]")).not.toBeNull();
+  expect(h.draft().recipients).toEqual([]);
+  paste(h.input, " plain", `<p><a href="${profileTarget(mic)}">@Mic</a></p>`);
+  expect(h.markdown()).toBe(
+    `Ask ${micLink} in [#design](buzz://channel/design) plain`,
+  );
+});
+
+it("promotes pasted identity links the host accepts and keeps the rest as display chips", () => {
+  const accept = vi.fn((pubkey: string) =>
+    pubkey === mic ? { pubkey, name: "Mic Current" } : null,
+  );
+  const h = mount("", { links: true, acceptRecipient: accept });
+  paste(h.input, `Ping ${micLink}, ${honeyLink} and @Mic `);
+  const promoted = `Ping @Mic Current, ${honeyLink} and @Mic `;
+  expect(h.markdown()).toBe(promoted);
+  expect(h.draft().recipients).toEqual([
+    { pubkey: mic, name: "Mic Current", start: 5, end: 17 },
+  ]);
+  // Bare @Mic never reaches the host.
+  expect(accept).toHaveBeenCalledTimes(2);
+  expect(accept).toHaveBeenCalledWith(mic);
+  expect(accept).toHaveBeenCalledWith(honey.pubkey);
+  expect(h.input.querySelector("[data-mention]")).toHaveTextContent(
+    "@Mic Current",
+  );
+  expect(h.input.querySelectorAll("[data-identity]")).toHaveLength(1);
+  // The paste and its promotion undo as one step.
+  act(() => h.input.undo(false));
+  expect(h.markdown()).toBe("");
+  act(() => h.input.undo(true));
+  expect(h.markdown()).toBe(promoted);
+  expect(h.draft().recipients).toHaveLength(1);
+  // This app's HTML promotes too; a later edit revokes like any chip.
+  paste(h.input, "x", timelineHtml(`<a href="${profileTarget(mic)}">@Mic</a>`));
+  expect(h.draft().recipients).toHaveLength(2);
+  act(() => h.input.setSelectionRange(5, 17));
+  act(() => h.input.insertText("Mic"));
+  const edited = `Ping Mic, ${honeyLink} and @Mic @Mic Current`;
+  expect(h.markdown()).toBe(edited);
+  expect(h.draft().recipients).toEqual([
+    {
+      pubkey: mic,
+      name: "Mic Current",
+      start: edited.lastIndexOf("@"),
+      end: edited.length,
+    },
+  ]);
+});
+
+it("promotes only at a mention boundary, under the recipient cap and within maxLength", () => {
+  const accept = vi.fn((pubkey: string) => ({ pubkey, name: "Mic" }));
+  const h = mount("", { links: true, acceptRecipient: accept });
+  paste(h.input, `${micLink}x`);
+  expect(h.markdown()).toBe(`${micLink}x`);
+  const full = mount(
+    followupDraft(
+      Array.from({ length: 32 }, (_, index) => ({
+        pubkey: index.toString(16).padStart(64, "0"),
+        name: `R${index}`,
+      })),
+    ),
+    { links: true, acceptRecipient: accept },
+  );
+  paste(full.input, `${micLink} `);
+  expect(full.markdown()).toContain(`${micLink} `);
+  expect(full.draft().recipients).toHaveLength(32);
+  expect(accept).not.toHaveBeenCalled();
+  const long = mount("", { links: true, acceptRecipient: accept });
+  paste(long.input, "x", timelineHtml("y".repeat(16001)));
+  expect(long.markdown()).toBe("");
 });

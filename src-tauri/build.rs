@@ -1,4 +1,12 @@
+#[path = "src/enterprise_adapter_url.rs"]
+mod enterprise_adapter_url;
+#[path = "src/enterprise_auth_build.rs"]
+mod enterprise_auth_build;
+#[path = "src/enterprise_relay_url.rs"]
+mod enterprise_relay_url;
+
 fn main() {
+    configure_enterprise_auth();
     // Release builds enable the updater only when both values are supplied; its
     // `plugins.updater` config comes from the same values via `tauri build --config`.
     println!("cargo:rerun-if-env-changed=BUZZ_UPDATER_PUBLIC_KEY");
@@ -34,16 +42,29 @@ fn main() {
             "huddle_close",
             "huddle_pcm",
             "huddle_touch",
+            "pairing_account",
+            "pairing_start",
+            "pairing_status",
+            "pairing_confirm",
+            "pairing_deny",
+            "pairing_cancel",
             "identity_restore",
             "identity_import",
             "identity_create",
             "identity_export",
+            "sign_out",
+            "sign_out_wipe_refusal",
+            "identity_prepare_remote_agent_authorization",
+            "identity_sign_builderlab_binding",
+            "enterprise_login_gate",
             "relay_sign",
             "relay_decode_read_state",
             "relay_sign_read_state",
             "relay_publish_read_state",
             "relay_http",
             "relay_workflow_runs",
+            "relay_project_git",
+            "relay_project_git_cancel",
             "relay_channel_sign",
             "relay_channel_publish",
             "relay_kit_sign",
@@ -52,15 +73,24 @@ fn main() {
             "relay_direct_message",
             "relay_decode_sidebar",
             "relay_sign_sidebar",
+            "relay_decode_reminders",
+            "relay_sign_reminder",
             "relay_agent_resolve",
+            "relay_git_authorization",
             "relay_agent_log_proof",
             "relay_agent_observer",
+            "relay_archive",
             "relay_agent_memories_read",
             "relay_agent_library",
+            "relay_upload_begin",
+            "relay_upload_chunk",
             "relay_upload",
             "relay_upload_cancel",
             "media_download",
+            "media_copy_image",
+            "media_stream_base",
             "get_os_idle_seconds",
+            "workspace_pick_folder",
             "plugin_import_folder",
             "plugin_import_git",
             "plugin_import_install",
@@ -72,31 +102,32 @@ fn main() {
             "plugin_recover",
             "plugin_host_run_command",
             "plugin_host_request",
-            "agent_control_create_prepare",
-            "agent_control_create_authorize",
-            "agent_control_create_commit",
-            "agent_control_creation_profile",
-            "agent_control_snapshot",
-            "agent_control_log_challenge",
-            "agent_control_read_log",
-            "pi_install",
-            "agent_security",
-            "agent_control_save",
-            "agent_control_save_defaults",
-            "agent_control_start_on_app_launch",
-            "agent_control_delete",
-            "agent_control_action",
-            "agent_control_attach_mention",
-            "agent_control_import_preview",
-            "agent_control_import_commit",
-            "agent_control_local_clone_settings",
-            "agent_control_clone_settings",
-            "agent_control_use_here",
-            "agent_models_begin",
-            "agent_models_cancel",
-            "agent_models_run",
+            "plugin_host_process_spawn",
+            "plugin_host_process_write",
+            "plugin_host_process_kill",
+            "oauth_callback_begin",
+            "oauth_callback_wait",
+            "oauth_callback_cancel",
+            "app_agent_list",
+            "app_agent_create",
+            "app_agent_portable",
+            "app_agent_port",
+            "app_agent_rename",
+            "app_agent_set_picture",
+            "app_agent_delete",
+            "app_agent_forget",
+            "app_agent_publish",
+            "app_agent_publish_profile",
+            "app_agent_query",
+            "app_agent_upload",
+            "app_agent_media",
+            "app_agent_remember",
+            "app_agent_claim",
+            "app_agent_release",
             "title_bar_double_click",
             "notification_show",
+            "notification_permission_state",
+            "request_notification_access",
             "dock_permission",
             "unread_indicator_set",
             "deep_link_take",
@@ -118,4 +149,26 @@ fn main() {
         ])),
     )
     .expect("Could not build Tauri resources")
+}
+
+fn configure_enterprise_auth() {
+    const RELAYS: &str = "BUZZ_BUILD_ENTERPRISE_AUTH_RELAYS";
+    const ADAPTER: &str = "BUZZ_BUILD_ENTERPRISE_AUTH_ADAPTER_BASE_URL";
+    println!("cargo:rerun-if-env-changed={RELAYS}");
+    println!("cargo:rerun-if-env-changed={ADAPTER}");
+
+    let relays = std::env::var(RELAYS).ok();
+    let adapter = std::env::var(ADAPTER).ok();
+    let configured = enterprise_auth_build::validate_enterprise_auth_build_config(
+        relays.as_deref(),
+        adapter.as_deref(),
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+
+    if let Some(relays) = configured.relays.as_deref() {
+        println!("cargo:rustc-env={RELAYS}={relays}");
+    }
+    if let Some(adapter) = configured.adapter.as_deref() {
+        println!("cargo:rustc-env={ADAPTER}={adapter}");
+    }
 }

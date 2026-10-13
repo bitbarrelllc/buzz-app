@@ -106,59 +106,6 @@ it.each(["bottom", "side"] as const)(
   },
 );
 
-it("activates an existing tool tab without mounting a duplicate drawer", async () => {
-  const user = userEvent.setup();
-  const activateTab = vi.fn(() => true);
-  const panel: RegisteredPanel = {
-    id: "terminal",
-    key: "fixture/terminal",
-    pluginId: "fixture",
-    revision: "1",
-    title: "Terminal",
-    matches: () => false,
-    channelLauncher: ({ toggle }) => (
-      <button type="button" onClick={() => toggle("terminal")}>
-        Terminal
-      </button>
-    ),
-    component: () => <p>Duplicate drawer</p>,
-  };
-  const entries = [panel];
-  const panels: Panels = {
-    snapshot: () => entries,
-    subscribe: () => () => {},
-    register: () => {},
-    resolve: () => undefined,
-  };
-  function Harness() {
-    const drawer = useChannelPanels(
-      panels,
-      {
-        scope: "scope",
-        viewer: "viewer",
-        channelId: "alpha",
-        channelName: "Alpha",
-        relayUrl: "wss://example.com",
-      },
-      undefined,
-      activateTab,
-    );
-    return (
-      <>
-        {drawer.launchers}
-        {drawer.content}
-      </>
-    );
-  }
-  render(<Harness />);
-  await user.click(screen.getByRole("button", { name: "Terminal" }));
-  expect(activateTab).toHaveBeenCalledExactlyOnceWith(panel);
-  expect(screen.queryByText("Duplicate drawer")).toBeNull();
-  activateTab.mockReturnValue(false);
-  await user.click(screen.getByRole("button", { name: "Terminal" }));
-  expect(screen.getByText("Duplicate drawer")).toBeVisible();
-});
-
 it("opens the host member picker only while the launcher binding is current", async () => {
   const openMembers = vi.fn();
   let requested: (() => void) | undefined;
@@ -196,7 +143,6 @@ it("opens the host member picker only while the launcher binding is current", as
         channelName: "Alpha",
         relayUrl: "wss://example.com",
       },
-      undefined,
       undefined,
       openMembers,
     ).launchers;

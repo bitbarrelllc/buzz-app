@@ -10,12 +10,16 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+import closeRequest from "../../../src-tauri/src/close-request.js?raw";
 import { PanelWorkspace, usePanelTabTitle } from "./PanelWorkspace";
 import { PanelSubview } from "./PanelSubview";
 import { PanelDock } from "./PanelDock";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 function Profile({ authorized }: { authorized: boolean }) {
   usePanelTabTitle("Ada");
   const [log, setLog] = useState(false);
@@ -253,6 +257,37 @@ test("a restored workspace leaves existing focus alone but fresh selections and 
   expect(tab("Harness log")).toHaveFocus();
 });
 
+test("choosing a tab with the pointer resumes its composer; the keyboard stays in the tabs", async () => {
+  const user = userEvent.setup();
+  function Harness() {
+    const [value, select] = useState("One");
+    return (
+      <PanelWorkspace
+        value={value}
+        select={select}
+        items={["One", "Two"].map((id) => ({
+          id,
+          label: id,
+          content: (
+            <>
+              <button type="button">{`${id} action`}</button>
+              <input aria-label={`${id} reply`} data-tab-focus="" />
+            </>
+          ),
+        }))}
+      />
+    );
+  }
+  render(<Harness />);
+  await user.click(tab("Two"));
+  expect(screen.getByRole("textbox", { name: "Two reply" })).toHaveFocus();
+  await user.click(tab("One"));
+  expect(screen.getByRole("textbox", { name: "One reply" })).toHaveFocus();
+  act(() => tab("One").focus());
+  await user.keyboard("{ArrowRight}{Enter}");
+  expect(tab("Two")).toHaveFocus();
+});
+
 test("Escape cancelling IME composition does not close the tab", () => {
   render(<Fixture />);
   const draft = screen.getByRole("textbox", { name: "Thread draft" });
@@ -264,4 +299,154 @@ test("Escape cancelling IME composition does not close the tab", () => {
   fireEvent.keyDown(draft, { key: "Escape" });
   expect(draft).not.toBeInTheDocument();
   expect(tab("Ada")).toHaveFocus();
+});
+
+// Exercise the exact script evaluated by the native menu, not a second shortcut
+// implementation. Geometry is the only browser-only boundary stubbed in jsdom.
+const requestClose = () =>
+  new Function(
+    "window",
+    "document",
+    "Event",
+    `return eval(${JSON.stringify(closeRequest)})`,
+  )(window, document, Event) as "handled" | "unhandled";
+const visibleWorkspace = () =>
+  vi
+    .spyOn(HTMLElement.prototype, "getClientRects")
+    .mockReturnValue([{ width: 500, height: 500 }] as unknown as DOMRectList);
+
+test("native Close closes the active tab from outside the pane, commits each request, and falls back only on the next press", () => {
+  visibleWorkspace();
+  render(
+    <StrictMode>
+      <input aria-label="Main composer" />
+      <Fixture />
+    </StrictMode>,
+  );
+  screen.getByRole("textbox", { name: "Main composer" }).focus();
+  act(() => {
+    expect(requestClose()).toBe("handled");
+    expect(within(tabs()).queryByRole("tab", { name: "Thread" })).toBeNull();
+    expect(tab("Ada")).toHaveFocus();
+    // No async yield: a held native accelerator must see the next selection.
+    expect(requestClose()).toBe("handled");
+    expect(screen.getByText("No open panels")).toBeVisible();
+    expect(requestClose()).toBe("unhandled");
+  });
+});
+
+test("native Close uses the selected local detail, not its parent tab", async () => {
+  visibleWorkspace();
+  const user = userEvent.setup();
+  render(<Fixture />);
+  await user.click(tab("Ada"));
+  await user.click(screen.getByRole("button", { name: "Open log" }));
+  screen.getByRole("textbox", { name: "Log filter" }).focus();
+  act(() => expect(requestClose()).toBe("handled"));
+  expect(within(tabs()).queryByRole("tab", { name: "Harness log" })).toBeNull();
+  expect(tab("Ada")).toHaveFocus();
+  expect(tab("Thread")).toBeInTheDocument();
+});
+
+for (const hiddenProps of [
+  { hidden: true },
+  { inert: true },
+  { "aria-hidden": true as const },
+]) {
+  test(`native Close preserves retained tabs under ${Object.keys(hiddenProps)[0]}`, () => {
+    visibleWorkspace();
+    const view = render(
+      <div {...hiddenProps}>
+        <Fixture />
+      </div>,
+    );
+    act(() => expect(requestClose()).toBe("unhandled"));
+    view.rerender(
+      <div>
+        <Fixture />
+      </div>,
+    );
+    expect(tab("Thread")).toBeInTheDocument();
+    expect(tab("Ada")).toBeInTheDocument();
+  });
+}
+
+test("native Close ignores a CSS-hidden workspace and disposes its consumer on unmount", () => {
+  const rects = visibleWorkspace();
+  const view = render(<Fixture />);
+  rects.mockReturnValue([] as unknown as DOMRectList);
+  act(() => expect(requestClose()).toBe("unhandled"));
+  expect(tab("Thread")).toBeInTheDocument();
+  view.unmount();
+  act(() => expect(requestClose()).toBe("unhandled"));
+});
+
+test("native Close is consumed by a modal even without tabs, and never closes behind it", () => {
+  visibleWorkspace();
+  const view = render(
+    <>
+      <dialog open aria-label="Dialog" />
+      <Fixture />
+    </>,
+  );
+  act(() => expect(requestClose()).toBe("handled"));
+  expect(tab("Thread")).toBeInTheDocument();
+  view.rerender(<div role="dialog" aria-modal="true" />);
+  act(() => expect(requestClose()).toBe("handled"));
+  view.unmount();
+  expect(requestClose()).toBe("unhandled");
+});
+
+test("a consumed native Close request cannot close another workspace", () => {
+  visibleWorkspace();
+  render(
+    <>
+      <Fixture />
+      <Fixture />
+    </>,
+  );
+  act(() => expect(requestClose()).toBe("handled"));
+  expect(screen.getAllByRole("tab", { name: "Thread" })).toHaveLength(1);
+  expect(screen.getAllByRole("tab", { name: "Ada" })).toHaveLength(2);
+});
+
+test("background tab selection does not take focus from a modal", () => {
+  const view = render(
+    <>
+      <div role="dialog" aria-modal="true">
+        <input aria-label="Modal search" />
+      </div>
+      <PanelWorkspace
+        value="one"
+        select={() => {}}
+        focusOnMount={false}
+        items={["one", "two"].map((id) => ({
+          id,
+          label: id,
+          content: <p>{id} body</p>,
+        }))}
+      />
+    </>,
+  );
+  const search = screen.getByRole("textbox", { name: "Modal search" });
+  act(() => search.focus());
+  view.rerender(
+    <>
+      <div role="dialog" aria-modal="true">
+        <input aria-label="Modal search" />
+      </div>
+      <PanelWorkspace
+        value="two"
+        select={() => {}}
+        focusOnMount={false}
+        items={["one", "two"].map((id) => ({
+          id,
+          label: id,
+          content: <p>{id} body</p>,
+        }))}
+      />
+    </>,
+  );
+  expect(search).toHaveFocus();
+  expect(tab("two")).toHaveAttribute("aria-selected", "true");
 });

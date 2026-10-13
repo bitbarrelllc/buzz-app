@@ -54,7 +54,6 @@ export const BASE_UI_PARTS = {
     docs: "accordion",
     module: "@base-ui/react/accordion",
   },
-  toast: { name: "Toast", docs: "toast", module: "@base-ui/react/toast" },
   tooltip: {
     name: "Tooltip",
     docs: "tooltip",
@@ -112,6 +111,20 @@ export type ComponentDefinition = {
 
 export const COMPONENTS: readonly ComponentDefinition[] = [
   {
+    slug: "empty-state",
+    name: "EmptyState",
+    purpose:
+      "Explain an empty collection, introduce setup, or present a status action.",
+    behavior:
+      "Static content with a decorative icon, grouped copy, and an optional action. Uses label-sm/body-sm type, a 48ch measure, and logical spacing; callers distinguish empty results from loading or errors.",
+    variants: ["with action", "informational"],
+    status: "proposed",
+    collection: "components",
+    source: "shared/design-system/ui/EmptyState.tsx",
+    baseUi: [],
+    composes: [],
+  },
+  {
     slug: "calendar",
     name: "Calendar",
     purpose: "Choose a date using a month grid.",
@@ -142,13 +155,13 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     purpose:
       "Compact feedback without moving the page or hiding recovery actions.",
     behavior:
-      "Base UI owns announcements, focus, expiry and dismissal; unresolved recovery stays visible.",
+      "Sonner owns bottom-right placement, announcements, expiry and swipe dismissal. Buzz supplies themed content and an expanded, scrollable recovery stack. F6 focuses notifications.",
     variants: ["transient", "actionable", "dismissible"],
     status: "core",
     collection: "components",
     source: "shared/design-system/ui/Toast.tsx",
-    baseUi: [BASE_UI_PARTS.toast],
-    composes: ["icon-button"],
+    baseUi: [],
+    composes: ["button", "icon-button"],
   },
   {
     slug: "alert-dialog",
@@ -181,7 +194,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     purpose: "A shared modal frame with title, content and actions.",
     behavior:
       "Base UI owns focus, positioning, dismissal and transition presence; shared motion tokens animate entry and exit.",
-    variants: ["default", "expanded", "motion none", "flex body"],
+    variants: ["default", "wide", "expanded", "motion none", "flex body"],
     status: "proposed",
     collection: "components",
     source: "shared/design-system/ui/Dialog.tsx",
@@ -308,6 +321,49 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     composes: ["panel-header"],
   },
   {
+    slug: "theme-picker",
+    name: "ThemePicker",
+    purpose:
+      "Choose System, Light, or Dark using miniature interface previews.",
+    behavior: "Shared radio keyboard navigation and accessible choice labels.",
+    variants: ["default"],
+    status: "proposed",
+    collection: "components",
+    owner: "Buzz Settings",
+    source: "shared/design-system/ui/ThemePicker.tsx",
+    baseUi: [],
+    composes: ["field", "radio-group"],
+  },
+  {
+    slug: "keyboard-shortcut",
+    name: "KeyboardShortcut",
+    purpose:
+      "Present one keyboard chord in a quiet capsule with spoken key names.",
+    behavior: "Semantic keyboard hint; not interactive.",
+    variants: ["default"],
+    status: "proposed",
+    collection: "components",
+    owner: "Buzz Settings",
+    source: "shared/design-system/ui/KeyboardShortcut.tsx",
+    baseUi: [],
+    composes: [],
+  },
+  {
+    slug: "settings-group",
+    name: "SettingsGroup",
+    purpose:
+      "A subtle bordered container for related settings rows or form fields.",
+    behavior:
+      "Presentation only; children retain their labels, state, and interactions.",
+    variants: ["rows", "form"],
+    status: "proposed",
+    collection: "components",
+    owner: "Buzz Settings",
+    source: "shared/design-system/ui/SettingsGroup.tsx",
+    baseUi: [],
+    composes: [],
+  },
+  {
     slug: "preference-row",
     name: "PreferenceRow",
     purpose:
@@ -358,7 +414,9 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "outline",
       "inverted",
       "link",
-      "size: xs | sm | md | lg",
+      "size: inline | xs | sm | md (default) | lg",
+      "shape: capsule (default) | control (12px)",
+      "SurfaceButton: artwork layout with shared activation and focus (proposed)",
       "loading",
     ],
     status: "proposed",
@@ -386,8 +444,9 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "chrome",
       "avatar",
       "media",
-      "shape: round (default) | control | row-end",
-      "size: xs (20px, 12px icon) | sm (32px) | md (40px) | lg (52px)",
+      "bare (glyph-state toggle, no background in any state; 20px artwork at sm)",
+      "shape: control (default, 10px) | round (avatar default) | row-end",
+      "size: xs (20px, 12px icon) | sm (default, 32px, 16px icon) | md (40px) | lg (52px)",
       "legacy aliases: quiet, solid, compact, toolbar, default, large",
     ],
     status: "proposed",
@@ -403,12 +462,65 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     purpose:
       "Show a person or agent with an image or stable fallback. Use a circle for a person and a squircle for an agent, based on identity data supplied by the caller.",
     behavior: "Base UI Avatar.",
-    variants: ["small", "default", "large", "fill", "circle", "squircle"],
+    variants: [
+      "compact",
+      "small",
+      "default",
+      "large",
+      "fill",
+      "circle",
+      "squircle",
+    ],
     status: "proposed",
     collection: "components",
     owner: "desktop-new Messages",
     source: "shared/design-system/ui/Avatar.tsx",
     baseUi: [BASE_UI_PARTS.avatar],
+    composes: [],
+  },
+  {
+    slug: "avatar-stack",
+    name: "AvatarStack",
+    purpose:
+      "Show up to three overlapping identities and an overflow count on one line. The enclosing control supplies the accessible name.",
+    behavior:
+      "Decorative artwork composed from Avatar; identity data stays with the caller.",
+    variants: ["compact", "small", "circle", "squircle", "overflow count"],
+    status: "proposed",
+    collection: "components",
+    owner: "Messages",
+    source: "shared/design-system/ui/AvatarStack.tsx",
+    baseUi: [],
+    composes: ["avatar"],
+  },
+  {
+    slug: "typing-dots",
+    name: "TypingDots",
+    purpose:
+      "Show received/waiting activity with unison breathing, and working activity with staggered dots. The caller supplies the state and accessible text.",
+    behavior:
+      "CSS-only decorative motion. Reduced motion keeps the dots still; receipt detection and lifecycle state stay with the feature.",
+    variants: ["waiting", "working (default)", "reduced motion"],
+    status: "proposed",
+    collection: "components",
+    owner: "Messages",
+    source: "shared/design-system/ui/TypingDots.tsx",
+    baseUi: [],
+    composes: [],
+  },
+  {
+    slug: "shimmer-text",
+    name: "ShimmerText",
+    purpose:
+      "Give a short live-work label, such as an agent's current step, a moving sheen while that work is live.",
+    behavior:
+      "CSS-only decorative motion over subtle-to-standard text roles. Reduced motion shows plain text; the caller decides when work is live.",
+    variants: ["active (default)", "inactive", "reduced motion"],
+    status: "proposed",
+    collection: "components",
+    owner: "Messages",
+    source: "shared/design-system/ui/ShimmerText.tsx",
+    baseUi: [],
     composes: [],
   },
   {
@@ -482,8 +594,9 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
     slug: "tabs",
     name: "Tabs",
     purpose:
-      "Switch between sibling views. Choose chrome for the app backdrop, panel for a plain surface, workspace for combined panes, or navigation for 12rem tabs with icons or avatars. Closable tabs provide a sibling close button and support Delete. The caller owns selection, retained content, and the next selection after closing.",
-    behavior: "Base UI Tabs.",
+      "Switch between sibling views. Choose chrome for the app backdrop, panel for a plain surface, workspace for combined panes, or navigation for content-sized tabs capped at 12rem with icons or avatars. Closable tabs provide a sibling close button and support Delete. The caller owns selection, retained content, and the next selection after closing.",
+    behavior:
+      "Base UI Tabs. Hosts may opt movable tabs into Panel Swap title-only dragging using TabDragFeedback; hosts own hit testing, cancellation and the committed order.",
     variants: ["chrome", "panel", "workspace", "navigation"],
     status: "proposed",
     collection: "components",
@@ -657,7 +770,8 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "compact",
       "links",
       "checkbox choices",
-      "radio choices",
+      "radio choices: check (default) | highlight",
+      "group label: default | quiet",
       "nested submenus",
     ],
     status: "proposed",

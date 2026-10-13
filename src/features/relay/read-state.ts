@@ -1,6 +1,14 @@
 import { newer, type RelayEvent } from "./events";
-import { retainReadState, retainReadOrder } from "./read-state-retention";
-import type { ReadStateHost } from "./read-state-host";
+import {
+  markMessage,
+  retainLocalRead,
+  retainReadState,
+  type CoveredFrontier,
+} from "./read-state-retention";
+import {
+  ReadStateTimestampRejected,
+  type ReadStateHost,
+} from "./read-state-host";
 import {
   effectiveFrontier,
   EMPTY_READ_STATE,
@@ -72,6 +80,27 @@ const same = (a: unknown, b: unknown): boolean => {
     )
   );
 };
+/** Reserve and journal are disjoint; only the journal is eligible for sync. */
+const localState = (journal: ReadJournal): ReadState =>
+  Object.freeze({
+    frontiers: Object.freeze({
+      ...journal.reserve,
+      ...journal.state.frontiers,
+    }),
+    overrides: journal.state.overrides,
+  });
+/** Which broader mark covers a mark, as in `CoveredFrontier`. `home` gives
+ * the channel of a message when it is known: from a loaded message, or from
+ * a channel saved with the mark. */
+export type MarkCoverage = Readonly<{
+  covered: (
+    key: string,
+    frontier: (key: string) => number | undefined,
+    home: (id: string) => string | undefined,
+  ) => string | undefined;
+  /** The channel of a loaded, verified message. */
+  home: (id: string) => string | undefined;
+}>;
 /** One durable domain owner. Read intent is not cache; one tab never saves over another's intent. */
 export function createReadState({
   viewer,
@@ -99,6 +128,8 @@ export function createReadState({
   const listeners = new Set<() => void>();
   let journal: ReadJournal | undefined;
   let state: ReadState = EMPTY_READ_STATE;
+  // Message evidence (and so ancestry) belongs to unread, which registers this.
+  let coverage: MarkCoverage | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let refreshing: Promise<void> | undefined;
   let publishing: Promise<void> | undefined;
@@ -137,10 +168,53 @@ export function createReadState({
       emit();
     }
   };
+  /**
+   * Checked inside the storage transaction with the journal it will replace,
+   * so a fence on local intent sees other windows' saves, not this cache.
+   */
+  type Validity = (current: ReadJournal) => boolean;
   function queue<T>(job: () => Promise<T>): Promise<T> {
     const next = work.then(job);
     work = next.catch(() => {});
     return next;
+  }
+  const homeLookup =
+    (saved: Readonly<Record<string, string>> = {}) =>
+    (id: string) =>
+      saved[id] ?? coverage?.home(id);
+  const coveredWith = (
+    home: (id: string) => string | undefined,
+  ): CoveredFrontier | undefined =>
+    coverage && ((key, frontier) => coverage?.covered(key, frontier, home));
+  /** `retainLocalRead`, with the channels of the messages that the kept
+   * marks name. Each save records the channel of every loaded message that a
+   * kept mark names, so the mark can still be covered after a reload. */
+  function retainMarks(
+    current: ReadJournal,
+    states: readonly ReadState[],
+    recent: Readonly<Record<string, number>>,
+    learned: Readonly<Record<string, string>> = {},
+  ) {
+    const home = homeLookup({ ...current.homes, ...learned });
+    const kept = retainLocalRead(
+      states,
+      recent,
+      current.clientId,
+      current.reserve,
+      coveredWith(home),
+    );
+    const homes: Record<string, string> = {};
+    for (const key of [
+      ...Object.keys(kept.state.frontiers),
+      ...Object.keys(kept.reserve),
+    ]) {
+      const id = markMessage(key);
+      const channel = id === undefined ? undefined : home(id);
+      // A channel the saved record cannot hold is used for this save's
+      // pruning but not kept, so it cannot make the whole save fail.
+      if (id !== undefined && contextId(channel)) homes[id] = channel;
+    }
+    return { ...kept, homes: Object.freeze(homes) };
   }
   async function save(
     change: (current: ReadJournal) => ReadJournal,
@@ -153,7 +227,7 @@ export function createReadState({
     });
     if (closed) return saved;
     journal = saved;
-    state = saved.state;
+    state = localState(saved);
     if (announce) broadcast?.postMessage("changed");
     emit();
     return saved;
@@ -257,15 +331,13 @@ export function createReadState({
           "Read-state observation cancelled",
           "AbortError",
         );
-      const state = retainReadState(
-        [current.state, ...decoded.map(({ parsed }) => parsed.state)],
-        current.recent ?? {},
-        current.clientId,
-      );
       return {
         ...current,
-        state,
-        recent: retainReadOrder(state, current.recent ?? {}),
+        ...retainMarks(
+          current,
+          [current.state, ...decoded.map(({ parsed }) => parsed.state)],
+          current.recent ?? {},
+        ),
       };
     });
     if (closed || generation !== epoch) return;
@@ -339,7 +411,7 @@ export function createReadState({
     key: string,
     timestamp: number | undefined,
     unread: boolean | undefined,
-    valid: () => boolean,
+    valid: Validity,
     clearLocalKeys: readonly string[] = [key],
   ): Promise<ReadMutationResult> {
     return queue(async () => {
@@ -350,7 +422,7 @@ export function createReadState({
         throw new Error("Read-state sync unsupported by this host");
       try {
         const saved = await save((current) => {
-          if (!valid()) throw new Error("Reading observation expired");
+          if (!valid(current)) throw new Error("Reading observation expired");
           if (
             !contextId(key) ||
             (timestamp !== undefined && !uint32(timestamp))
@@ -361,16 +433,21 @@ export function createReadState({
             timestamp === undefined
               ? (current.recent ?? {})
               : { ...current.recent, [key]: revision };
-          const nextState =
+          const kept =
             timestamp === undefined
-              ? current.state
-              : retainReadState(
+              ? {
+                  state: current.state,
+                  recent,
+                  reserve: current.reserve ?? {},
+                  homes: current.homes ?? {},
+                }
+              : retainMarks(
+                  current,
                   [
                     current.state,
                     { frontiers: { [key]: timestamp }, overrides: {} },
                   ],
                   recent,
-                  current.clientId,
                 );
           const localUnread = { ...current.localUnread };
           // Automatic observations do not clear explicit local manual-unread intent.
@@ -380,8 +457,10 @@ export function createReadState({
           return {
             ...current,
             revision,
-            state: nextState,
-            recent: retainReadOrder(nextState, recent),
+            state: kept.state,
+            recent: kept.recent,
+            reserve: kept.reserve,
+            homes: kept.homes,
             localUnread,
             acceptedRevision:
               timestamp === undefined &&
@@ -430,8 +509,8 @@ export function createReadState({
           await save((current) => current, false);
           if (!journal) throw new Error("Saved read state unavailable");
           attemptedRevision = journal.revision;
-          // An unknown previous outcome must retry the exact saved signed bytes first.
-          if (journal.pending) await publishPending(signal);
+          // Unknown outcomes retry exact bytes; only expired, rejected state may be renewed.
+          if (journal.pending) await publishPending(signal, true);
           if (journal.revision <= journal.acceptedRevision) return;
           const coordinate = `read-state:${journal.slot}`;
           const events = await reader.read(
@@ -457,6 +536,7 @@ export function createReadState({
             journal.recent ?? {},
             journal.clientId,
             READ_STATE_PLAINTEXT_BYTES,
+            coveredWith(homeLookup(journal.homes)),
           );
           const payload = readBlob(journal.clientId, publishingState, (key) =>
             effectiveFrontier(publishingState, key),
@@ -510,16 +590,30 @@ export function createReadState({
     });
     return publishing;
   }
-  async function publishPending(signal: AbortSignal) {
+  async function publishPending(signal: AbortSignal, recover = false) {
     const before = journal;
     const pending = before?.pending;
     if (!pending || !before) return;
     if (!host?.publish) throw new Error("Read-state publication unavailable");
     health({ status: "pending", error: undefined });
-    await host.publish(pending.event, signal);
+    let expired = false;
+    try {
+      await host.publish(pending.event, signal);
+    } catch (error) {
+      // A timestamp refusal also covers future clock skew. Only renew old state,
+      // outside the signer's 60s clock allowance, and at most once per flush.
+      if (
+        !recover ||
+        !(error instanceof ReadStateTimestampRejected) ||
+        pending.event.created_at >= now() - 60
+      )
+        throw error;
+      expired = true;
+    }
     signal.throwIfAborted();
-    // Acknowledgement is not coordinate observation. Keep the same signed bytes until readback.
-    health({ status: "accepted" });
+    // Acknowledgement is not coordinate observation. An expired retry may also
+    // have been stored before its original response was lost.
+    if (!expired) health({ status: "accepted" });
     const events = await reader.read(
       [
         {
@@ -535,14 +629,31 @@ export function createReadState({
     const own = slots.get(`read-state:${before.slot}`);
     const payload = (await decode([pending.event], signal))[0]?.parsed;
     if (!payload) throw new Error("Saved read-state decode missing");
-    if (
-      !own ||
-      own.parsed.clientId !== before.clientId ||
-      !same(mergeReadStates(own.parsed.state, payload.state), own.parsed.state)
-    )
-      throw new Error(
-        "Read-state accepted; coordinate observation still pending",
-      );
+    if (own && own.parsed.clientId !== before.clientId)
+      throw new Error("Read-state slot conflict; publication blocked");
+    const observed =
+      !!own &&
+      same(mergeReadStates(own.parsed.state, payload.state), own.parsed.state);
+    if (!observed) {
+      if (!expired)
+        throw new Error(
+          "Read-state accepted; coordinate observation still pending",
+        );
+      // Keep the old envelope until its replacement is saved by flush. Merge its
+      // plaintext durably without acknowledging it or erasing newer local intent.
+      await save((current) => {
+        if (current.pending?.event.id !== pending.event.id) return current;
+        return {
+          ...current,
+          ...retainMarks(
+            current,
+            [current.state, payload.state],
+            current.recent ?? {},
+          ),
+        };
+      });
+      return;
+    }
     const saved = await save((current) => {
       if (current.pending?.event.id !== pending.event.id) return current;
       const { pending: _pending, ...rest } = current;
@@ -563,6 +674,24 @@ export function createReadState({
     state: () => state,
     localUnread: (key: string) => journal?.localUnread[key],
     revision: () => journal?.revision ?? 0,
+    /** Lets the next save drop marks that broader marks already cover. */
+    setCoverage(next: MarkCoverage | undefined) {
+      coverage = next;
+    },
+    /** The saved channel of a message that a kept mark names. */
+    home: (id: string) => journal?.homes?.[id],
+    /** Saves channels found for marked messages (from signed events) and
+     * drops the marks that they show are covered. Like a synced update, this
+     * changes no read, so it publishes nothing. */
+    learnHomes: (found: Readonly<Record<string, string>>) =>
+      queue(async () => {
+        await ready;
+        if (!journal || closed) return;
+        await save((current) => ({
+          ...current,
+          ...retainMarks(current, [current.state], current.recent ?? {}, found),
+        }));
+      }),
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {
@@ -576,7 +705,7 @@ export function createReadState({
     read: (
       key: string,
       timestamp: number,
-      valid: () => boolean,
+      valid: Validity,
       explicit = false,
       clearLocalKeys?: readonly string[],
     ) =>
@@ -587,11 +716,8 @@ export function createReadState({
         valid,
         clearLocalKeys,
       ),
-    clearLocalUnread: (
-      key: string,
-      keys: readonly string[],
-      valid: () => boolean,
-    ) => mutate(key, undefined, false, valid, keys),
+    clearLocalUnread: (key: string, keys: readonly string[], valid: Validity) =>
+      mutate(key, undefined, false, valid, keys),
     /** Atomic explicit subtree read; local-only hosts clear intent without fabricating frontiers. */
     readMessages: (
       messages: readonly Readonly<{
@@ -601,7 +727,7 @@ export function createReadState({
         rootId?: string | undefined;
       }>[],
       clearForce: string | undefined,
-      valid: () => boolean,
+      valid: Validity,
     ) =>
       queue(async () => {
         await ready;
@@ -609,18 +735,19 @@ export function createReadState({
           throw new Error("Saved read state unavailable; retry storage first");
         try {
           const saved = await save((current) => {
-            if (!valid()) throw new Error("Reading observation expired");
+            if (!valid(current)) throw new Error("Reading observation expired");
             if (
               messages.some(
                 ({ key, timestamp }) => !contextId(key) || !uint32(timestamp),
               )
             )
               throw new Error("Invalid read frontier");
+            const currentState = localState(current);
             if (
               capability !== "frontier-sync" &&
               messages.some(
                 ({ key, timestamp, channelId, rootId }) =>
-                  (effectiveFrontier(current.state, key, channelId, rootId) ??
+                  (effectiveFrontier(currentState, key, channelId, rootId) ??
                     -1) < timestamp,
               )
             )
@@ -637,18 +764,25 @@ export function createReadState({
               delete localUnread[key];
             }
             if (clearForce) delete localUnread[clearForce];
-            const nextState = Object.keys(frontiers).length
-              ? retainReadState(
+            const kept = Object.keys(frontiers).length
+              ? retainMarks(
+                  current,
                   [current.state, { frontiers, overrides: {} }],
                   recent,
-                  current.clientId,
                 )
-              : current.state;
+              : {
+                  state: current.state,
+                  recent,
+                  reserve: current.reserve ?? {},
+                  homes: current.homes ?? {},
+                };
             return {
               ...current,
               revision,
-              state: nextState,
-              recent: retainReadOrder(nextState, recent),
+              state: kept.state,
+              recent: kept.recent,
+              reserve: kept.reserve,
+              homes: kept.homes,
               localUnread,
               acceptedRevision: Object.keys(frontiers).length
                 ? current.acceptedRevision

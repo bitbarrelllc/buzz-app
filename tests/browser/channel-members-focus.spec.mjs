@@ -57,7 +57,7 @@ test.beforeEach(async ({ page }) => {
 // A real mounted member dialog and shared session, but no relay or external write.
 test("identity menus preserve modal focus and addition returns focus only to its owner", async ({
   page,
-}, testInfo) => {
+}) => {
   const { errors } = watchPageErrors(page);
   for (const moved of [false, true]) {
     await page.goto(url);
@@ -67,6 +67,28 @@ test("identity menus preserve modal focus and addition returns focus only to its
     await search.fill("Morgan");
     const add = dialog.getByRole("button", { name: /Add Morgan/ });
     await expect(add).toBeEnabled();
+    if (!moved) {
+      // The Enter row uses the dialog's floating selection, not the panel's.
+      const fills = await dialog
+        .locator("[data-highlighted]")
+        .evaluate((row) => {
+          const probe = (token) => {
+            const element = document.createElement("div");
+            element.style.background = `var(${token})`;
+            row.parentElement.append(element);
+            const color = getComputedStyle(element).backgroundColor;
+            element.remove();
+            return color;
+          };
+          return {
+            row: getComputedStyle(row).backgroundColor,
+            floating: probe("--affordance-floating-selected"),
+            panel: probe("--affordance-selected"),
+          };
+        });
+      expect(fills.floating).not.toBe(fills.panel);
+      expect(fills.row).toBe(fills.floating);
+    }
     const identity = dialog.getByRole("button", {
       name: /Open profile for Morgan/,
     });
@@ -139,73 +161,6 @@ test("identity menus preserve modal focus and addition returns focus only to its
         : search,
     ).toBeFocused();
   }
-  await page.goto(url);
-  await page.getByRole("button", { name: "Edit team", exact: true }).click();
-  const team = page.getByRole("dialog", { name: "Team", exact: true });
-  const checkbox = team.getByRole("checkbox", { name: /Morgan/ });
-  const card = page.getByRole("dialog", {
-    name: "Morgan identity",
-    exact: true,
-  });
-  // No prior checkbox focus: the wrapper itself cannot receive focus.
-  await expect(checkbox).not.toBeFocused();
-  await checkbox.hover();
-  await expect(card).toBeVisible();
-  const copy = card.getByRole("button", { name: "Copy npub", exact: true });
-  await copy.click();
-  await expect(copy).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(card).not.toBeVisible();
-  await expect(team).toBeVisible();
-  await expect(checkbox).toBeFocused();
-  await expect(checkbox).not.toBeChecked();
-  await page.mouse.move(0, 0);
-  await team.getByRole("textbox").focus();
-  for (const mode of ["light", "dark"]) {
-    await page.evaluate((mode) => {
-      document.documentElement.className = mode;
-      document.documentElement.dataset.colorMode = mode;
-    }, mode);
-    for (const width of [390, 800, 1280]) {
-      await page.setViewportSize({ width, height: 900 });
-      await checkbox.hover();
-      await expect(card).toBeVisible();
-      await expect(card).toContainText("Owner unavailable");
-      await card.evaluate(async (element) => {
-        await Promise.all(element.getAnimations().map((a) => a.finished));
-      });
-      const bounds = await card.boundingBox();
-      expect(bounds.x).toBeGreaterThanOrEqual(0);
-      expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
-      await page.screenshot({
-        path: testInfo.outputPath(`identity-${mode}-${width}.png`),
-      });
-      await page.mouse.move(0, 0);
-      await team.getByRole("textbox").focus();
-      await expect(card).not.toBeVisible();
-    }
-  }
-  await team.getByRole("textbox").focus();
-  await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
-  await page.clock.pauseAt(new Date("2026-01-01T01:00:00Z"));
-  try {
-    await page.keyboard.press("Tab");
-    await page.keyboard.press("Tab");
-    await expect(card.getByRole("button", { name: "Copy npub" })).toBeFocused();
-  } finally {
-    await page.clock.resume();
-  }
-  await expect(checkbox).toHaveAccessibleDescription(/Tab to reach Copy npub/);
-  await expect(checkbox).toHaveAttribute(
-    "aria-details",
-    await card.getAttribute("id"),
-  );
-  await expect(checkbox).not.toHaveAttribute("aria-haspopup");
-  await page.keyboard.press("Escape");
-  await expect(card).not.toBeVisible();
-  await expect(checkbox).toBeFocused();
-  await page.keyboard.press("Space");
-  await expect(checkbox).toBeChecked();
   expect(errors).toEqual([]);
 });
 
@@ -285,161 +240,6 @@ test("longer inline keys leave multiword candidate Add actions clickable", async
 
 // Browser-only: scrolling moves real rows under a still pointer, and the wheel
 // is hit tested through the top layer.
-test("scrolling dismisses a hovered identity preview and keeps the wheel", async ({
-  page,
-}) => {
-  const { errors } = watchPageErrors(page);
-  const { card, name, offset } = await scrollableTeam(page);
-  const pitch =
-    (await name(2).boundingBox()).y - (await name(1).boundingBox()).y;
-
-  await name(3).hover();
-  await opened(card(3));
-  // The document capture listener must ignore scrolling outside the trigger's
-  // ancestry. Wait for the real scroll event and its rendering update first.
-  await page.evaluate(async () => {
-    const unrelated = document.createElement("div");
-    unrelated.style.cssText =
-      "position:fixed;top:0;left:0;width:1px;height:1px;overflow:auto;scrollbar-width:none;pointer-events:none";
-    const content = document.createElement("div");
-    content.style.height = "2px";
-    unrelated.append(content);
-    document.body.append(unrelated);
-    try {
-      await new Promise((resolve) => {
-        unrelated.addEventListener(
-          "scroll",
-          () => requestAnimationFrame(resolve),
-          {
-            once: true,
-          },
-        );
-        unrelated.scrollTop = 1;
-      });
-    } finally {
-      unrelated.remove();
-    }
-  });
-  await expect(card(3)).toHaveAttribute("data-open", "");
-  // The pointer stays on the same row, so only the scroll can dismiss. While
-  // it exits, the preview still follows its row and must not be hit tested.
-  const nudge = 4;
-  const dismissed = await card(3).evaluateHandle((popup) => ({
-    pointerEvents: new Promise((resolve) =>
-      new MutationObserver(
-        () =>
-          popup.hasAttribute("data-open") ||
-          resolve(getComputedStyle(popup).pointerEvents),
-      ).observe(popup, { attributes: true }),
-    ),
-  }));
-  await page.mouse.wheel(0, nudge);
-  expect(await dismissed.evaluate(({ pointerEvents }) => pointerEvents)).toBe(
-    "none",
-  );
-  await page.mouse.wheel(0, pitch - nudge);
-  await expect.poll(offset).toBe(pitch);
-  await expect(card(3)).toHaveCount(0);
-  // Rows now travel toward where each preview sat above its row. A preview
-  // that stayed would slide under the pointer and take the wheel.
-  await page.mouse.wheel(0, pitch);
-  await expect.poll(offset).toBe(2 * pitch);
-  for (const step of [1, 0]) {
-    await page.mouse.wheel(0, -pitch);
-    await expect.poll(offset).toBe(step * pitch);
-  }
-  await page.mouse.move(0, 0);
-  await expect(page.locator(".buzz-preview-card")).toHaveCount(0);
-  expect(errors).toEqual([]);
-});
-
-// Browser-only: focusing a clipped row really scrolls it into view.
-test("a keyboard-focused identity preview survives the scroll that reveals its row", async ({
-  page,
-}) => {
-  const { errors } = watchPageErrors(page);
-  const { team, card, list, offset } = await scrollableTeam(page);
-  const row = (index) =>
-    team.getByRole("checkbox", { name: new RegExp(`^Agent ${index} `) });
-  await team.getByRole("textbox").focus();
-  let revealed = 0;
-  for (let index = 1; index <= 7; index++) {
-    const before = await offset();
-    const scrolled = await list.evaluateHandle((element) => ({
-      event: new Promise((resolve) =>
-        element.addEventListener("scroll", () => resolve(), { once: true }),
-      ),
-    }));
-    await page.keyboard.press("Tab");
-    await expect(row(index)).toBeFocused();
-    if ((await offset()) !== before) {
-      // The preview has seen this scroll before Tab asks it for its action.
-      await scrolled.evaluate(({ event }) => event);
-      revealed++;
-    }
-    await page.keyboard.press("Tab");
-    await expect(
-      card(index).getByRole("button", { name: "Copy npub", exact: true }),
-    ).toBeFocused();
-  }
-  expect(revealed).toBeGreaterThan(0);
-
-  // Scrolled away from its focused row, the preview stays open but hidden,
-  // and Tab continues down the list instead of entering it.
-  await page.keyboard.press("Shift+Tab");
-  await expect(row(7)).toBeFocused();
-  // Focus can be observable before WebKit finishes its native reveal scroll.
-  // Cross that rendering boundary before issuing the separate scroll-away.
-  await list.evaluate(async (element) => {
-    await new Promise(requestAnimationFrame);
-    if (element.scrollTop === 0) return;
-    await new Promise((resolve) => {
-      element.addEventListener("scroll", () => requestAnimationFrame(resolve), {
-        once: true,
-      });
-      element.scrollTop = 0;
-    });
-  });
-  await expect.poll(offset).toBe(0);
-  await expect(row(7)).toBeFocused();
-  const preview = page.locator('[data-open][aria-label="Agent 7 identity"]');
-  await expect(preview).toBeHidden();
-  await expect(preview).toHaveCount(1);
-  await page.keyboard.press("Tab");
-  await expect(row(8)).toBeFocused();
-  expect(errors).toEqual([]);
-});
-
-async function scrollableTeam(page) {
-  await page.goto(`${url}?team`);
-  await page.getByRole("button", { name: "Edit team", exact: true }).click();
-  const team = page.getByRole("dialog", { name: "Team", exact: true });
-  await expect(team.getByRole("checkbox")).toHaveCount(12);
-  await team.evaluate(async (element) => {
-    await Promise.all(
-      element.getAnimations({ subtree: true }).map((a) => a.finished),
-    );
-  });
-  const name = (index) => team.getByText(`Agent ${index}`, { exact: true });
-  const list = await name(1).evaluateHandle((element) => {
-    let scroller = element.parentElement;
-    while (getComputedStyle(scroller).overflowY !== "auto")
-      scroller = scroller.parentElement;
-    return scroller;
-  });
-  return {
-    team,
-    name,
-    list,
-    card: (index) =>
-      page.getByRole("dialog", {
-        name: `Agent ${index} identity`,
-        exact: true,
-      }),
-    offset: () => list.evaluate((element) => element.scrollTop),
-  };
-}
-
 async function opened(popup) {
   await expect(popup).toHaveAttribute("data-open", "");
   await expect(popup).not.toHaveAttribute("data-starting-style");
@@ -447,89 +247,6 @@ async function opened(popup) {
     .poll(() => popup.evaluate((element) => element.getAnimations().length))
     .toBe(0);
 }
-
-// Pause at the actual exit boundary, not a runner-speed-dependent sleep.
-async function holdPreviewExit(page) {
-  await page.evaluate(() => {
-    new MutationObserver((records) => {
-      for (const { target } of records)
-        if (
-          target instanceof HTMLElement &&
-          target.matches(".buzz-preview-card[data-ending-style]")
-        )
-          for (const animation of target.getAnimations()) animation.pause();
-    }).observe(document.body, {
-      attributes: true,
-      attributeFilter: ["data-ending-style"],
-      subtree: true,
-    });
-  });
-  return {
-    held: (popup) =>
-      expect
-        .poll(() =>
-          popup.evaluate((element) =>
-            element.getAnimations().some((a) => a.playState === "paused"),
-          ),
-        )
-        .toBe(true),
-    release: () =>
-      page.evaluate(() => {
-        for (const animation of document.getAnimations())
-          if (animation.playState === "paused") animation.finish();
-      }),
-  };
-}
-
-test("Escape returns focus only while the closing identity preview still owns it", async ({
-  page,
-}) => {
-  const { errors } = watchPageErrors(page);
-  for (const move of ["none", "search", "tab"]) {
-    await page.goto(url);
-    await page.getByRole("button", { name: "Edit team", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Team", exact: true });
-    const search = dialog.getByRole("textbox");
-    const identity = dialog.getByRole("checkbox", { name: /Morgan/ });
-    await identity.hover();
-    const card = page.getByRole("dialog", {
-      name: "Morgan identity",
-      exact: true,
-    });
-    await opened(card);
-    const copy = card.getByRole("button", { name: "Copy npub", exact: true });
-    await copy.click();
-    await expect(copy).toBeFocused();
-    const exit = await holdPreviewExit(page);
-    const next = dialog.getByRole("button", { name: "Close", exact: true });
-    try {
-      await page.keyboard.press("Escape");
-      await exit.held(card);
-      if (move === "search") {
-        // The still-visible preview may overlap the left of the search field.
-        // Click its exposed right edge, as a user can during the exit.
-        const bounds = await search.boundingBox();
-        await search.click({
-          position: { x: bounds.width - 24, y: bounds.height / 2 },
-        });
-        await expect(search).toBeFocused();
-      } else if (move === "tab") {
-        await identity.focus();
-        await page.keyboard.press("Tab");
-        await expect(next).toBeFocused();
-      }
-      await expect(card).toHaveCount(1);
-    } finally {
-      await exit.release();
-    }
-    await expect(card).toHaveCount(0);
-    await expect(
-      move === "search" ? search : move === "tab" ? next : identity,
-    ).toBeFocused();
-    await expect(dialog).toBeVisible();
-  }
-  expect(errors).toEqual([]);
-});
 
 test("inline member identity geometry and separate addition focus", async ({
   page,
@@ -613,7 +330,10 @@ test("inline member identity geometry and separate addition focus", async ({
     // Browser-only: an unbadged identity centers at rest and moves up to
     // reveal its key, without shifting the avatar, row or Add action.
     const row = add.locator("../..");
-    const name = row.getByText("Morgan", { exact: true });
+    // The typed letters are underlined in their own <mark>; measure the name.
+    const name = row
+      .getByText("Morgan", { exact: true })
+      .locator("xpath=ancestor-or-self::*[not(self::mark)][1]");
     const key = row.locator('[aria-hidden="true"].text-mono');
     await search.hover();
     await expect(key).toBeHidden();
@@ -1262,3 +982,157 @@ test("member role dropdown fits beside search and preserves modal focus", async 
     await expect(action).toBeFocused();
   }
 });
+
+// The same live dialog node must retain its focus trap while visual steps exit;
+// jsdom cannot prove crossfade hit testing, geometry or error placement.
+for (const rejected of [false, true]) {
+  test(`member confirmation replaces one modal and reports only errors (rejected: ${rejected})`, async ({
+    page,
+  }, testInfo) => {
+    const { errors } = watchPageErrors(page);
+    await page.goto(
+      `${url}?administration${rejected ? "&reject-removal" : ""}`,
+    );
+    await page
+      .getByRole("button", { name: "Channel members", exact: true })
+      .click();
+    const members = page.getByRole("dialog", {
+      name: "Channel members",
+      exact: true,
+    });
+    const popupId = await members.getAttribute("id");
+    const search = members.getByRole("searchbox");
+    await search.fill("Morgan");
+    const choose = async () => {
+      await expect(members.locator(".buzz-dialog-step")).toHaveCount(1);
+      await members
+        .getByRole("button", { name: /Open profile for Morgan/ })
+        .hover();
+      await members
+        .getByRole("button", { name: "Actions for Morgan", exact: true })
+        .click();
+      await page
+        .getByRole("menuitem", { name: "Remove from channel", exact: true })
+        .click();
+      const confirmation = page.getByRole("dialog", {
+        name: "Remove member from channel",
+        exact: true,
+      });
+      await expect(confirmation).toHaveAttribute("id", popupId);
+      await expect(
+        page.locator('[role="dialog"][aria-modal="true"]'),
+      ).toHaveCount(1);
+      await expect(page.locator(".buzz-dialog-backdrop")).toHaveCount(1);
+      await expect(confirmation.getByRole("searchbox")).toHaveCount(0);
+      await expect(
+        confirmation.getByRole("button", { name: "Cancel", exact: true }),
+      ).toBeFocused();
+      // Exit completes without leaving invisible hit targets over the new step.
+      await expect(confirmation.locator(".buzz-dialog-step")).toHaveCount(1);
+      return confirmation;
+    };
+    // Dismissal and confirmation layout are independent of the relay outcome.
+    if (!rejected) {
+      for (const dismiss of [
+        "Cancel",
+        "Back to channel members",
+        "Escape",
+        "outside",
+      ]) {
+        const confirmation = await choose();
+        if (dismiss === "Escape") await page.keyboard.press("Escape");
+        else if (dismiss === "outside") await page.mouse.click(4, 4);
+        else
+          await confirmation
+            .getByRole("button", { name: dismiss, exact: true })
+            .click();
+        await expect(search).toHaveValue("Morgan");
+        await expect(search).toBeFocused();
+        await expect(members).toHaveAttribute("id", popupId);
+      }
+    }
+    const confirmation = await choose();
+    if (!rejected) {
+      for (const mode of ["light", "dark"]) {
+        await page.evaluate((mode) => {
+          document.documentElement.classList.toggle("dark", mode === "dark");
+          document.documentElement.setAttribute("data-color-mode", mode);
+        }, mode);
+        for (const width of [390, 800, 1280]) {
+          await page.setViewportSize({ width, height: 900 });
+          await expect(confirmation).toBeInViewport({ ratio: 1 });
+          // WebKit rounds an inner scrollport's IntersectionObserver ratio below
+          // one for fractional button widths. Check the actual viewport bounds.
+          const actionBounds = await confirmation
+            .getByRole("button", { name: "Remove member", exact: true })
+            .boundingBox();
+          expect(actionBounds.x).toBeGreaterThanOrEqual(0);
+          expect(actionBounds.x + actionBounds.width).toBeLessThanOrEqual(
+            width,
+          );
+          expect(actionBounds.y).toBeGreaterThanOrEqual(0);
+          expect(actionBounds.y + actionBounds.height).toBeLessThanOrEqual(900);
+          await confirmation.screenshot({
+            path: testInfo.outputPath(`confirmation-${mode}-${width}.png`),
+          });
+        }
+      }
+    }
+    await confirmation
+      .getByRole("button", { name: "Remove member", exact: true })
+      .click();
+    await page.evaluate(() => window.focusFixture.published);
+    await expect(search).toBeFocused();
+    await expect(
+      members.getByRole("button", { name: /Open profile for Morgan/ }),
+    ).toBeVisible();
+    await expect(
+      members.getByText(/Checking permissions and waiting/),
+    ).toHaveCount(0);
+    await expect(members.getByRole("alert")).toHaveCount(0);
+    await page.evaluate(() => window.focusFixture.confirm());
+    if (rejected) {
+      const error = members
+        .getByRole("alert")
+        .filter({ hasText: "Permission changed" });
+      await expect(error).toBeVisible();
+      await expect(
+        members
+          .getByRole("region", { name: "Member list" })
+          .getByText("Permission changed"),
+      ).toHaveCount(0);
+      await expect(page.locator(".buzz-toast")).toHaveCount(0);
+      await expect(
+        members.getByRole("button", { name: /Open profile for Morgan/ }),
+      ).toBeVisible();
+      const errorBox = await error.boundingBox();
+      const listBox = await members
+        .getByRole("region", { name: "Member list" })
+        .boundingBox();
+      expect(errorBox.y + errorBox.height).toBeLessThanOrEqual(listBox.y);
+      for (const mode of ["light", "dark"]) {
+        await page.evaluate((mode) => {
+          document.documentElement.classList.toggle("dark", mode === "dark");
+          document.documentElement.setAttribute("data-color-mode", mode);
+        }, mode);
+        for (const width of [390, 800, 1280]) {
+          await page.setViewportSize({ width, height: 900 });
+          await expect(error).toBeInViewport({ ratio: 1 });
+          await members.screenshot({
+            path: testInfo.outputPath(`error-${mode}-${width}.png`),
+          });
+        }
+      }
+    } else {
+      await expect(
+        members
+          .getByRole("region", { name: "Members", exact: true })
+          .getByRole("button", { name: /Open profile for Morgan/ }),
+      ).toHaveCount(0);
+      await expect(page.locator(".buzz-toast")).toHaveCount(0);
+      await expect(members.getByRole("alert")).toHaveCount(0);
+    }
+    await expect(members.getByText("Member change confirmed.")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+}

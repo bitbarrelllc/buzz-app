@@ -1,3 +1,4 @@
+import { projectSidebarRecord } from "./sidebar-registers.ts";
 import type { RelayEvent } from "./events.ts";
 import type { RelayReader } from "./reader.ts";
 
@@ -45,6 +46,16 @@ export type SidebarAssignmentMutator = (
   signal: AbortSignal,
   source?: "personal",
 ) => Promise<SidebarGroups>;
+export type SidebarGroupSource = "legacy" | "personal";
+export type SidebarSectionRemovalWriter = (
+  sectionId: string,
+  signal: AbortSignal,
+) => Promise<SidebarGroups>;
+export type SidebarSectionRemovalMutator = (
+  sectionId: string,
+  signal: AbortSignal,
+  source: SidebarGroupSource,
+) => Promise<SidebarGroups>;
 export type SidebarStarMutator = (
   intent: Readonly<{ channelId: string; starred: boolean }>,
   signal: AbortSignal,
@@ -84,7 +95,7 @@ export function projectSidebarPreferences(
     muted: [],
   };
   if (sections !== undefined) {
-    const data = object(sections);
+    const data = projectSidebarRecord("channel-sections", object(sections));
     if (
       data.version !== 1 ||
       !Array.isArray(data.sections) ||
@@ -139,7 +150,7 @@ export function projectSidebarPreferences(
     }
   }
   if (sort !== undefined) {
-    const data = object(sort);
+    const data = projectSidebarRecord("channel-sort", object(sort));
     if (data.version !== 1) throw new Error("Unsupported sidebar sort");
     const entries = Object.entries(object(data.groups));
     if (entries.length > 104) throw new Error("Sidebar sort budget exceeded");

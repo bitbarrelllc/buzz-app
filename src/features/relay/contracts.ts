@@ -49,6 +49,8 @@ export type ChannelSummary = Readonly<{
 }>;
 export type Profile = Readonly<{
   name: string;
+  /** The name is an identity fragment, not a name supplied by kind-0 content. */
+  nameIsFallback?: true;
   picture?: string;
   about?: string;
   /** Self-declared NIP-05 identifier; not proof of DNS verification. */
@@ -67,6 +69,8 @@ export type Attachment = Readonly<{
   name?: string;
   /** Sender/relay-claimed duration in seconds; display hint, corrected by the element. */
   duration?: number;
+  waveform?: readonly number[];
+  voiceNote?: true;
   dimensions?: Readonly<{ width: number; height: number }>;
   /** Validated message-carried BlurHash; decoded locally only for presentation. */
   blurhash?: string;
@@ -85,6 +89,10 @@ export type ChannelMessage = Readonly<{
   delivery?: Delivery | undefined;
   deliveryError?: string | undefined;
   authorId: string;
+  /** Actual signing key when relay attribution makes authorId a different identity. */
+  signerId?: string | undefined;
+  /** Display-only owner attested by this community’s explicit relay signer. */
+  workflowOwnerId?: string | undefined;
   /** Unix seconds from the signed event. */
   createdAt: number;
   /** Effective send ms (valid `ms` tag, else createdAt * 1000); ordered by `compareMessages`. */
@@ -94,6 +102,9 @@ export type ChannelMessage = Readonly<{
   sourceContent?: string;
   /** Original kind 40002, regardless of edits; self-declared display evidence, not authority. */
   agentEnvelope?: true;
+  /** Signed `audience` tag of the original event: `agents` is coordination
+   * between agents, shown quietly. Absent means everyone; unknown values too. */
+  audience?: "agents";
   /** Original kind 40008. Untrusted display metadata; content stays a raw patch. */
   diff?: Readonly<{
     filePath?: string | undefined;
@@ -106,8 +117,9 @@ export type ChannelMessage = Readonly<{
   huddle?: Readonly<{ room: string; state: "started" | "ended" }>;
   /** Current body came from a replacement edit; original recipients do not bind its prose. */
   edited?: true;
-  /** Attachment removal changed the signed body; new text adjacency cannot bind identities. */
-  attachmentContentRemoved?: true;
+  /** Offsets in `content` where attachment removal joined once-separate text; a
+   * bound name never spans one. */
+  attachmentSeams?: readonly number[];
   /** Pubkeys named by signed `p` tags. Identity never comes from prose. */
   mentions: readonly string[];
   /** Signed two-field mention tags bind display only; never notification recipients. */
@@ -158,6 +170,30 @@ export type ChannelWindow = Readonly<{
 }>;
 /** Post-write discovery opts into writer reads; browsing keeps the default. */
 export type ChannelReadOptions = ReadOptions & Pick<ReadFilter, "consistency">;
+export type PublicChannelSearch = Readonly<{
+  channels: readonly ChannelSummary[];
+  /** The relay returned a full metadata page, so some channels were not checked. */
+  partial: boolean;
+}>;
+/** What a channel-only link may show about a channel the reader may not have
+ * joined. `withheld` means a completed lookup found nothing it may show: the
+ * relay withholds a private channel's metadata from non-members, so private,
+ * deleted and never-valid channels look the same. */
+export type ChannelReference =
+  | Readonly<{ state: "unknown" }>
+  | Readonly<{ state: "withheld" }>
+  | Readonly<{
+      state: "found";
+      name: string;
+      description?: string;
+      channelType?: ChannelSummary["channelType"];
+      private: boolean;
+      hidden: boolean;
+      archived: boolean;
+      joined: boolean;
+      /** Only when the viewer may see the roster. */
+      members?: number;
+    }>;
 /** Reads are side-effect-free; snapshots retain identity until their value changes.
  * Commands are idempotent requests; the store decides whether network work is needed. */
 export interface ChannelQueries {
@@ -168,13 +204,35 @@ export interface ChannelQueries {
     channelIds: readonly string[],
     options?: ChannelReadOptions,
   ): Promise<void>;
+  /** Name lookup for active public channels the viewer has not joined. Matches
+   * become readable through `get`; they never enter list(). */
+  searchPublic?(
+    query: string,
+    options?: ReadOptions & { limit?: number; exact?: boolean },
+  ): Promise<PublicChannelSearch>;
+  /** Synchronous: the last `searchPublic` answer's channels that still match
+   * `query` and are still open previews. Keeps rows while the next search
+   * runs, even across a remount. */
+  matchPublic?(
+    query: string,
+    options?: { exact?: boolean },
+  ): readonly ChannelSummary[];
+  /** Current reference state from local evidence; never reads. */
+  describe?(channelId: string): ChannelReference;
+  /** Demand a background lookup for a reference that isn't `found`, until the
+   * returned release. The store coalesces requests into bounded reads, keeps
+   * a `withheld` answer for a few minutes, backs off after failures,
+   * rechecks demanded references when either ends, and notifies list
+   * subscribers. */
+  refer?(channelId: string): () => void;
   /** Exact re-read of one already-listed channel's roster, merged into the
    * ready list. `resolve` admits channels the list lacks; this confirms a
-   * membership change on one it already carries, without a full rediscovery. */
+   * membership change on one it already carries, without a full rediscovery.
+   * Returns true only when the read supplied a fresh roster. */
   refreshRoster?(
     channelId: string,
     options?: ChannelReadOptions,
-  ): Promise<void>;
+  ): Promise<boolean>;
   subscribeList(listener: () => void): () => void;
   window(channelId: string): ChannelWindow;
   subscribeWindow(channelId: string, listener: () => void): () => void;

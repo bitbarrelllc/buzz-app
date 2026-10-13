@@ -24,6 +24,14 @@ arbitrary file paths or application commands. Web keeps ordinary browser link
 behavior. Adding the native opener requires rebuilding/restarting desktop;
 frontend hot reload alone is not enough.
 
+HTTP(S) links rendered in messages expose **Open in browser** and **Copy link**
+on right-click or long-press, or with Shift+F10 / the Context Menu key while focused.
+**Open in browser** uses the same `_blank` fallback above without consulting pane
+handlers; both actions retain the original URL, including query and fragment.
+Normal and modified clicks are unchanged. Internal `buzz://` links and links outside
+message content retain their existing behavior. Copy failures show a dismissible
+notice and can be retried from the link menu.
+
 Settings independently enables/disables Channels and GitHub. Disabling GitHub
 removes its link handler and open panel; shared channel data remains available.
 Channels is required by the current host; optional page removal does not dispose
@@ -131,14 +139,19 @@ sidebar coordinates must match what the sidebar signer produces, and every
 other coordinate must satisfy the recipe contract.
 
 Move channel, Create new, exclusive Starred placement and startup presentation also
-belong to this persistent sidebar. Rows in saved groups and **Channels** can also be
-dragged with a pointer onto another saved group or **Channels**; the drop is the same
-Move intent, with the same gate, optimistic placement, rollback notice and Retry.
+belong to this persistent sidebar. Rows in saved groups, **Starred** and **Channels**
+can also be dragged with a pointer onto another saved group, **Starred** or
+**Channels**; the drop is the same Move intent, with the same gate, optimistic
+placement, rollback notice and Retry.
 Only a channel's select surface starts a drag, the surface its row menu wraps; its
 sessions and session draft do not.
-Starred, Forums and Direct messages take no part in dragging, and the row menu
-remains the keyboard path. The session serializes placement, sort and mute
-writes through one queue, retaining one confirmed preferences snapshot beneath
+**Starred** accepts drops only when it is already visible; starting a drag does
+not reveal an empty section. Use the row menu to star the first channel.
+Dropping into Starred stars the channel; dropping out assigns the destination
+and clears its star, just like the row menu. Forums and Direct
+messages take no part in dragging, and the row menu remains the keyboard path. The
+session serializes placement, sort and mute writes through one queue, retaining
+one confirmed preferences snapshot beneath
 pending Move and Sort projections. Each confirmation updates only its owned fields
 before reapplying pending intent; failure cannot roll back unrelated confirmed
 state. Field-only confirmations cannot recover a failed full preference read or
@@ -172,14 +185,14 @@ outside the parent menu trigger, as do child-session rows.
 
 Sidebar create-channel dialogs stay available on other pages. Channel admission
 (creation plus verified viewer membership) is fenced to the originating relay
-session and navigates to a normal conversation destination. Remaining template
-setup continues in that session; failure produces a dismissible notice without
+session and navigates to a normal conversation destination. Remaining setup from a
+receipt saved by an earlier build continues in that session; failure produces a dismissible notice without
 navigating again. Frozen setup receipts and delivery evidence remain saved, but
-there is no template Resume or automatic startup continuation. An uncertain
+there is no setup Resume or automatic startup continuation. An uncertain
 admission keeps the original form locked to its channel identity. **Retry channel**
 checks that creation first; if delivery remains unknown, an explicit click may
 republish only the exact saved Create event, with the same UUID and signature.
-It never continues template writes or retries in the background. Successful recovery opens that channel and reports
+It never continues setup writes or retries in the background. Successful recovery opens that channel and reports
 any unfinished setup for manual inspection. Closing/reopening retains the attempt;
 after session replacement, unresolved ordinary creations (including pre-upgrade
 Outbox entries) restore for the same identity-preserving retry. Already-admitted partial
@@ -195,9 +208,35 @@ conversation content and unmount when leaving Messages.
 
 Each sidebar section can independently select **A–Z** (the default) or **Recent**.
 The development broker and packaged native host save these choices in the desktop-compatible encrypted
-kind-30078 `channel-sort` record: `{ version: 1, groups: { ... } }`. A–Z removes
-that group's override. Saving preserves unrelated fields and choices present in
-the record read before publication.
+kind-30078 `channel-sort` record: `{ version: 1, groups: { ... }, meta: { v: 1, g: { ... } } }`.
+A–Z writes a null register and removes that group's legacy override. Sections use
+`meta: { v: 1, s: { ... }, a: { ... } }`: per-section name/icon/order/live registers
+and per-channel assignments. Upgraded readers project metadata as authoritative;
+writers regenerate the legacy fields and preserve unrelated registers, including
+section deletion (`live=false`) and assignment/sort reset (`null`) tombstones.
+Stars and mutes keep their existing `updatedAt` entries, not this register schema.
+
+A register is `[version, device, value]`, with a nonnegative safe-integer millisecond
+version and 16 lowercase hex device ID. Meta-less relay heads import at event
+seconds × 1,000 with the zero device ID. Edits exceed every observed register
+version and use a random in-memory device ID. Sections sort by canonical `(order,id)`
+and project dense display orders; new sections append after the canonical live
+maximum. Orphan assignments are omitted from the legacy projection, not deleted
+from metadata. Read projection accepts Desktop string values on retained section
+name/icon registers; only projected live text receives UI length limits. Already
+satisfied intents return without rewriting the head, including assignment removal
+when its register is absent, explicitly null, or points to a nonprojecting section.
+Actual rewrites still reject
+out-of-policy retained values rather than dropping or truncating them.
+Unsupported/malformed metadata fails closed, including unknown fields;
+this is not general forward-schema salvage. Live projection caps remain 100
+sections, 1,000 assignments and 104 sort overrides; retained tombstones are bounded
+by the existing 128 KiB plaintext budget, not live counts. Native signing/admission
+additionally requires legacy fields to equal the validated register projection.
+
+Saving preserves unrelated top-level fields and known register choices present in
+the strong head read before publication. This is wire-format compatibility, not
+the older Desktop's local-authoritative register cache or automatic reconciler.
 
 Persistence is **whole-record last-write-wins**, not conflict-safe per-section
 merging. Two devices can read the same record and save different sections; the
@@ -207,10 +246,10 @@ Read-back checks the requested section at that moment; it cannot detect an unsee
 choice overwritten in another section or guarantee preservation against later
 writes. “Independent” describes selecting a mode per section, not simultaneous
 cross-device save guarantees. Retaining the shared record preserves compatibility
-with existing desktop writers; per-section conflict resolution would require a
-coordinated persistence change.
+with existing desktop writers; convergence across unseen heads would require a
+separately designed reconciliation lifecycle or atomic relay support.
 
-`dev/sidebar-sort.test.mjs` deterministically exercises that accepted limitation
+`browser-host/sidebar-sort.test.mjs` deterministically exercises that accepted limitation
 through the real mutation helper: another section saves and confirms between a
 read and publication, then the stale whole-record replacement wins and also
 confirms. This is contract coverage, not a concurrency fix.
@@ -220,11 +259,12 @@ confirms. This is contract coverage, not a concurrency fix.
 The **+** action in the DMs sidebar header opens **New message**, a routed empty
 conversation in Messages. The header remains available before the first DM exists. Its inline **To:**
 field owns a paginated people picker and up to eight recipient chips, excluding
-this viewer. Agent profiles are offered only when their exact public key appears
-in the ready native control snapshot for this community. Public profile hints and
-the compatibility library do not establish control; this filter also applies to
-searches and cached results. Selected agent chips are revalidated against the
-current ready control snapshot before a fresh open and again before enqueueing.
+this viewer. Agent profiles are offered only when their exact public key is one of the viewer's
+local agents (Agents) for this community, the `managed` choices of
+`session.agentChoices`. Public profile hints and the inventory library do not
+qualify; this filter also applies to searches and cached results. Selected agent
+chips are revalidated against the current local agents before a fresh open and
+again before enqueueing.
 Already queued messages retain exact-event recovery. Namesake identities show
 unambiguous shared public-key labels in their options and selected chips. Human profiles remain available while controls load
 or fail. The shared popover hugs shorter result lists up to ten rows (or available
@@ -299,8 +339,7 @@ and modeled upstream I/O; it does not send messages to a live community.
 The conversation header’s **Channel actions** ellipsis opens the shared, default-size
 (non-compact) menu. **View channel details** is first and opens or focuses the existing
 Channel Settings tab; selecting it again never closes the pane. Editing is available
-from that pane, not directly from the menu. **View canvas**, optional **Save as template…** and
-**New session**, **Move channel**, **Mute/Unmute**, and **Mark as Read/Unread**
+from that pane, not directly from the menu. **View canvas**, **New session**, **Move channel**, **Mute/Unmute**, and **Mark as Read/Unread**
 reuse the sidebar’s action composition and persistent mutation/recovery owners.
 Move replaces the redundant Personal group shortcut. Permission-gated lifecycle
 actions follow in **Leave → Archive → Delete** order, with Delete in the shared
@@ -309,7 +348,7 @@ action; their permissions are not inferred from stream channels. Members retains
 Session headings are unchanged. Header moves and dialog cancellation return focus
 to the ellipsis, while session creation hands focus to its composer. Read-only, cached, archived and DM eligibility stays
 with the existing capabilities. Opening the menu reads permissions, never publishes
-a lifecycle command. Menu Escape/outside dismissal returns to the header; Canvas, template
+a lifecycle command. Menu Escape/outside dismissal returns to the header; Canvas
 and lifecycle confirmation cancellation also return there. Dialog owners outlive menu dismissal,
 while channel/session navigation retires header-origin dialogs. Canvas is bound to
 its opening channel and visit, so navigation never mounts another channel’s editor.
@@ -324,16 +363,19 @@ New session and the mute/read group. Lifecycle items use shared leading icons an
 a separator only when they resolve and earlier actions exist. Right-click
 and keyboard access reuse the existing row trigger; no ⋮ control or second popup
 is added. Session creation, attention actions and child-session navigation keep
-their existing owners; sessions do not receive lifecycle actions. Move/Star/grouping
+their existing owners. Session-typed channels in Messages use these same permission-checked
+actions, including the standard header menu and Channel Settings. Existing Canvas
+and organization entry points come with that shared menu; the session
+transcript layout, Share behavior and recipient rules do not change. Move/Star/grouping
 controls share this popup with independent eligibility; lifecycle actions do not
 change shared-menu styling.
 
 The row menu resolves fresh relay-authored metadata (`39000`), administrators
 (`39001`) and membership (`39002`) at exact channel coordinates before offering
 Archive/Unarchive/Delete/Leave or DM Hide. Archive and Unarchive require a direct
-owner/admin role;
-Delete is offered to a direct owner or a member with verified ownership evidence
-for an owner-role agent; the last direct owner cannot Leave. The menu omits Leave
+owner/admin role or verified ownership evidence for an owner-role agent, matching
+the relay and desktop. Delete is offered to a direct owner or a member with that
+same evidence; the last direct owner cannot Leave. The menu omits Leave
 when it is forbidden, without an ownership-transfer explanation. Action labels
 have no trailing ellipsis. DMs offer Hide only.
 
@@ -342,10 +384,11 @@ owners' latest signed kind-0 profiles in bounded exact-author batches, then veri
 the unique NIP-OA tag, target binding, owner signature and conditions against the
 profile event. Display-only owner fields and agent hints never qualify. The
 existing shared verifier owns these checks; no new relay query or deployment is
-needed. Direct owners, DMs, archived channels and Archive/Unarchive/Leave
-execution do not require these optional profile reads. A failed five-second owner-profile lookup
-preserves independently established Archive/Leave, omits Delete and exposes
-"Delete check unavailable" with explicit retry in both surfaces. Settings keeps
+needed. Direct owners, DMs, Leave, and actions a direct role already grants do
+not require these optional profile reads. A failed five-second owner-profile lookup
+preserves independently established actions, omits the owner-agent actions and,
+on an active channel, exposes "Delete check unavailable" with explicit retry in
+both surfaces. Settings keeps
 its retry button focusable and busy during a fresh read, without retaining stale
 actions. Pending progress stays inside the button spinner, not a duplicate visible
 status sentence. If focus is still on recovery when the read finishes, it moves to the
@@ -377,7 +420,7 @@ channel** in its tools area, using one fresh lifecycle permission check. Each
 entry follows its own permission result: a last owner can Archive/Delete even
 though Leave is forbidden, while an ordinary admin without owner-agent evidence can Archive but not Delete.
 Forbidden entries are omitted; failed checks offer retry and unsupported
-connections explain unavailability. DMs, sessions and read-only nonmember/cached views have no channel
+connections explain unavailability. DMs and read-only nonmember/cached views have no channel
 lifecycle entries. Archived channels cannot be deleted:
 the relay rejects Delete while archived. A direct owner/admin can restore it with
 **Unarchive channel**, which replaces Archive in the same Settings position, before
@@ -390,10 +433,18 @@ messages, membership and open Settings, replacing Archive with Unarchive after a
 fresh permission read. The conversation stays selected after reload; archived
 write restrictions still apply. When refreshed Settings actions remount, focus
 returns to its persistent Settings-tab close control instead of an unrelated sidebar row;
-joined archived channels remain available by name in search, labeled **Archived
-channel**, but stay out of the sidebar and Recent activity. Open the search result
-and Settings to restore it. This uses the existing membership discovery and exact
-navigation, not a new archived-channel directory or nonmember discovery.
+joined archived channels, including session conversations, remain available by name
+in search, labeled **Archived channel**, but stay out of the sidebar and Recent
+activity. After navigating away, open the search result and Settings to restore it.
+This uses the existing membership discovery and exact
+navigation, not a new archived-channel directory.
+
+Search also finds active public channels the viewer has not joined, by name,
+labeled **Public channel · not joined** after joined matches. Opening one shows the
+read-only preview. The preview offers **Join channel**; after the relay confirms
+membership, the channel joins the sidebar and the composer becomes available and
+focused. Joining a channel is not available for DMs, private, archived or session
+conversations. See [relay queries](relay-queries.md#public-channel-name-search-and-join).
 Unarchive publishes the existing narrow `9002` command with `archived=false` and
 requires fresh relay metadata with a missing/false archive tag before updating
 shared discovery; a missing record is not success. Restoration returns the sidebar
@@ -452,16 +503,15 @@ navigation to a hidden DM remains supported.
 ## Channel-management modal dismissal
 
 Channel-management modals explicitly opt into the shared Dialog's backdrop-click
-cancellation. Canvas, Members, lifecycle confirmations, new sections, personal
-groups and templates/teams use the same Close/Cancel path for outside clicks.
+cancellation. Canvas, Members, lifecycle confirmations, new sections and personal
+groups use the same Close/Cancel path for outside clicks.
 Create and Edit details use their Close path: untouched forms close immediately;
 changed drafts require discard confirmation, while explicit Cancel discards immediately.
 Clicks inside or in portaled controls do not dismiss them.
 The non-modal Settings panel is unchanged; the shared Dialog default stays opt-in.
 
-Canvas reload, template/team deletion and template replacement use nested shared
-Dialogs rather than host-owned confirmation prompts. Cancel, Close, Escape or a
-backdrop click dismisses only that confirmation, keeps the parent draft/library,
+Canvas reload uses a nested shared Dialog rather than a host-owned confirmation
+prompt. Cancel, Close, Escape or a backdrop click dismisses only that confirmation, keeps the parent draft,
 and never executes the action. Confirmations initially focus Cancel and return
 focus to their initiating control; lifecycle focus remains sidebar-owned.
 
@@ -543,15 +593,14 @@ workflow.
 
 Both forms show Description immediately; Create opens with Name focused and keeps
 Description optional. The workflows intentionally remain distinct: Create owns
-template setup plus frozen creation retry; Edit shows the
+frozen creation retry; Edit shows the
 saved description, retains custom durations, and owns authority/conflict checks,
 Save/Cancel and check-only uncertainty recovery. Create still trims optional
 Description on submission; Edit preserves its exact text and can explicitly clear it.
 
 Both dialogs opt into backdrop dismissal and guard Close, Escape and backdrop
 dismissal with an in-dialog discard confirmation when the draft differs. Comparison covers raw
-text, staged privacy and effective duration; Create also compares accepted template
-setup, treating the opening group's automatic default as initial data. Reverting
+text, staged privacy and effective duration. Reverting
 all fields removes the warning. Pending operations still block dismissal, and
 frozen/uncertain requests remain owned by recovery rather than being offered for
 discard. Returning from a discard confirmation focuses Name and retains the draft.
@@ -561,11 +610,11 @@ that destination for the draft and titles the modal **Create a channel in [icon]
 [group name]**, reusing the sidebar's decorative Unicode/custom-emoji renderer.
 Opening from the general Channels section stays ungrouped and uses **Create a
 channel**. Group placement remains managed through the left-nav Move action.
-Group template defaults and frozen retry input remain unchanged; unavailable groups
+Frozen retry input remains unchanged; unavailable groups
 block a new create rather than silently falling back to a different destination.
 
 Create's session and existing creation helper also use `canonicalDetailsName`,
-including template preflight and ordinary recovery matching. New frozen intent and
+including ordinary recovery matching. New frozen intent and
 signed names retain the relay's Unicode rules: trim Unicode White_Space and leading
 hashes, preserve U+FEFF, then enforce the code-point limit. This is cleanup, not a
 new invisible-character policy. Recovery derives its comparison name without
@@ -589,7 +638,7 @@ this community can view the channel's full history. Continue
 only stages the choice; Create channel or Save changes still performs the write. Cancel/Escape or
 the confirmation's Close control leaves the switch unchanged and returns to the
 intact form with focus on the switch. All other draft fields—including Create's
-selected destination and accepted template setup—survive either path. The consequence
+selected destination—survive either path. The consequence
 is shown once in the confirmation body, connected as the dialog's accessible description.
 **Don’t show me this again** is saved only on **Continue** and skips both public and
 private warnings. It is a device-local preference shared by Create and Edit for the
@@ -709,8 +758,8 @@ join ownership observation, so the first character cannot mount/enrich the entir
 known-agent inventory. Unchanged identity rows retain their rendered
 profile/avatar/menu trees across query and loading updates; changed names, permissions,
 manager evidence, presence and invitation state still update through their existing owners.
-Current-member avatars and rows open the existing Profiles panel when its contribution
-is enabled; the Members dialog closes and closing the profile returns focus to the
+Current-member avatars and rows open a profile panel when a plugin contributes one
+(none is bundled now); the Members dialog closes and closing the profile returns focus to the
 Channel members button. Names and smaller, muted inline **managed by** hints sit
 centered at rest with no pills. Hover reveals a longer abbreviated npub underneath
 using the existing 140ms height/opacity transition, just like invitation rows;
@@ -719,20 +768,20 @@ keyboard focus and reduced motion reveal it immediately. The abbreviation shows
 abbreviated: no dwell timer, inline expansion, copy icon, or identity card. Shared
 identity previews on other surfaces remain unchanged. Available presence status
 stays on the profile control. The manager link opens
-Profiles with the same focus handoff; row-profile and owner-profile controls are
+the profile panel with the same focus handoff; row-profile and owner-profile controls are
 siblings, never nested. Every current member has a separate
 ellipsis button (not nested inside profile navigation), with **View profile** first,
 then **View owner profile** for agents with verified ownership and available profile
 navigation, or **Send message** for other humans on a DM-capable connection,
 followed by permitted administration actions. Copying the full npub belongs to
-Profiles, not the member or invitation menu.
+the profile panel, not the member or invitation menu.
 Send message reuses the session's verified direct-message opener and the current
 conversation navigation owner; it sends no message automatically. One dialog-owned
 waiter blocks duplicate opens, shows pending/error status and allows explicit retry.
 Closing Members cancels that waiter and suppresses late navigation; a successful
 handoff leaves destination focus alone. Owner/self protection, missing
 writer support and pending/uncertain writes suppress mutations, not the profile
-menu. If Profiles is unavailable, View profile is disabled. Pointer hover, keyboard
+menu. If no profile panel is available, View profile is disabled. Pointer hover, keyboard
 focus and an open menu reveal the reserved action slot without moving row content;
 non-hover/touch input keeps the trigger visible. Right-click, Context Menu and
 Shift+F10 open the same action list through the shared context menu. The ellipsis
@@ -746,7 +795,7 @@ Escape returns focus to the originating row
 control; profile navigation hands focus to the panel and returns to the external
 Channel members button when closed. Invitation rows reuse the same avatar, name,
 managed-by hint and public-key hover/focus presentation, without a channel-role
-badge. Their avatars and identity rows open Profiles just like current members;
+badge. Their avatars and identity rows open the profile panel just like current members;
 only the separate, extra-small prominent **Add / Adding…** button invites someone.
 Invitation results expose the same identity menu through right-click, long-press,
 Context Menu or Shift+F10 only, with no ellipsis button. Add stays separate and
@@ -754,7 +803,7 @@ there are no role/removal actions. People and agent avatars both use the
 shared 32px default size. Both row types
 share a 48px minimum height, growing with their content rather than
 clipping it; profile targets fill the row height, with identity and actions centered.
-Profile navigation stays available during an invitation; missing Profiles support
+Profile navigation stays available during an invitation; a missing profile panel
 leaves the identity static without disabling the separate Add button.
 The dialog retains its shared surface. A quiet `border-standard` outline frames
 one scrolling viewport, with Owners, Admins, Members, Agents and Not in this channel
@@ -856,8 +905,10 @@ another non-owner member:
 | Target role | Change role | Remove from this channel |
 | --- | --- | --- |
 | Admin / Member / Guest | Admin / Member, excluding the current role | Yes |
-| Bot | No conversion | Yes |
+| Bot | Admin / Member, after explicit confirmation | Yes |
 | Owner, self, unknown or inconsistent | No | No |
+
+Agent identity is independent of channel role. Explicitly promoting a Bot to Admin grants authority to that agent’s own public key and preserves its verified agent identity; the human owner’s roles do not confer authority.
 
 The menu deliberately omits **Make guest** while Guest's permission contract is
 unsettled: the inspected relay message path does not enforce the role's documented
@@ -866,13 +917,20 @@ Existing Guest roles remain available to the permission/confirmation flow and ca
 Admin, or removed; they are never automatically converted. This is a menu-only
 restriction, not a change to relay semantics or the broker's supported commands.
 
-DMs and session channels have no administration actions. No ownership transfer,
-community-admin override, delegated agent-owner authority or new invitation
-restriction is introduced. Personal Leave remains a separate lifecycle operation;
-removing a member neither deletes their identity nor stops their agents.
+Current members may also remove their own verified non-owner agents, but cannot
+edit their roles or remove someone else's agent. The service verifies signed
+ownership once per removal attempt, independently of display hints.
 
-Role change and removal use separate deliberate confirmations, initially focused
-on Cancel. The service checks fresh actor/target state before signing and again
+DMs, archived channels and session channels have no administration actions.
+No ownership transfer, community-admin override or new invitation restriction is
+introduced. Personal Leave remains a separate lifecycle operation; removing a
+member neither deletes their identity nor stops their agents.
+
+Role change and removal use deliberate confirmation steps in the same dialog,
+initially focused on Cancel. Removal shows only the avatar/name and actions;
+Cancel returns to the list. Errors appear below Search, outside the scrolling
+list; pending and success banners are omitted.
+The service checks fresh actor/target state before signing and again
 before publication, rejects altered signer payloads, and confirms the requested
 role or roster absence with a fresh read. Relay acceptance alone is not success.
 Pending intent survives dialog close/reopen and suppresses duplicate actions.
@@ -884,12 +942,12 @@ unconfirmed intent for fresh readback only. They fence late completions, as does
 disposal, but cannot retract a request already sent. Unsent work is canceled;
 recovery is in-memory, not durable across session disposal or restart.
 
-The development broker advertises a separate `memberAdministration` capability
-and admits only exact `9000` Admin/Member/Guest changes or `9001` other-member
-removals through its purpose-bound routes. Generic invitation signing is unchanged;
-the relay still enforces the authoritative ACL. Hosts without this writer can
-read verified roles but expose no management controls. Native/direct-signer parity
-is deferred rather than silently falling back to an unrestricted writer.
+The development broker and native transport advertise a separate
+`memberAdministration` capability and admit only exact `9000` Admin/Member/Guest
+changes or `9001` other-member removals through purpose-bound routes. Generic
+invitation signing is unchanged; the relay still enforces the authoritative ACL.
+Hosts without this writer can read verified roles but expose no management controls.
+Native support requires a rebuilt binary; no unrestricted writer fallback is used.
 
 **Accepted protocol limitation:** role commands are existing relay upserts, not
 conditional updates. A departure after final preflight can be undone by the role
@@ -898,8 +956,8 @@ checks/readback reduce uncertainty but do not provide atomic conflict rejection.
 Preventing these races requires separately scoped relay support.
 
 Regression coverage lives in `administration.test.ts`,
-`MemberAdministration.test.tsx`, and `dev/relay-broker-api.test.mjs`; existing
-`ChannelMembersDialog.test.tsx` invitation coverage remains. Synthetic confirmed
+`MemberAdministration.test.tsx`, `native.test.ts`, and `browser-host/relay-broker-api.test.mjs`;
+existing `ChannelMembersDialog.test.tsx` invitation coverage remains. Synthetic confirmed
 writes/recovery and a real-app read/confirmation/cancel exercise do not establish
 native or deployed destructive-write acceptance. Those checks and human tryout
 remain separate delivery gates.
@@ -1084,7 +1142,7 @@ back to an offset without a same-message guarantee.
 Channels supports plain-text Markdown authoring with a shared durable outbox and bounded history.
 Channel and thread messages render CommonMark plus GFM headings, emphasis, lists, quotes,
 tables, task lists, strikethrough and code, while preserving chat-style single line breaks.
-Only credential-free HTTPS links are active; raw HTML is ignored and inline remote images
+Only credential-free HTTP(S) links are active; raw HTML is ignored and inline remote images
 are not loaded. Existing image Markdown is projected as an attachment instead. Custom emoji remain
 event-local and are not substituted inside links or code.
 Authenticated live traffic reconciles through the same session. Channel creation is not
@@ -1094,10 +1152,14 @@ Shift+Enter on an empty last line leaves the block. Only a fence that opens a bl
 fence typed inside an existing code block stays literal, and so does pasted or restored fenced
 text, including its closing fence line, so Enter after a pasted or edited fenced block sends or
 saves as usual and the text still renders as code once sent.
-Typing the space after a list or quote marker that starts a line (`- `, `* ` or `+ `, a number
+Typing the space after a list or quote marker that starts a line (`- `, `* `, `+ ` or `• `, a number
 with a dot or parenthesis such as `1. ` or `3) `, or `> `) turns that line into a bullet, a
 numbered item starting at that number, or a quoted paragraph at once, the same block the
-formatting toolbar creates, and one undo restores the typed marker and its space. Inside a
+formatting toolbar creates, and one undo restores the typed marker and its space. The typed
+`• ` alias sends as Markdown `- `. The channel placeholder appears only in an empty plain
+paragraph, not beside a list marker. Enter
+continues a list and exits an empty item; use the Send button to send while the caret is
+in a list (or Save changes when editing). Enter in ordinary prose still sends or saves. Inside a
 quote the markers nest: `- ` opens a list and `> ` a second quote. Inside a list item only a
 marker of the item's own list kind, typed as the only text of an item after the first,
 converts, nesting that item as Tab does. A marker typed after prose on the same line, inside
@@ -1158,11 +1220,18 @@ with local ephemeral signing keys; it does not contact the deployed relay.
 
 The smile button in channel and thread composers opens Emoji Mart with standard
 Unicode emoji, skin tones, and the selected community's custom category. Its data
-and search load only when opened. Search by name/shortcode, then choose an emoji
+and search load only when opened. Fuzzy search by name/shortcode, then choose an emoji
 to insert at the cursor; Enter selects a search result and Escape closes the picker
-and returns focus. You can also type `:shortcode:`. The picker follows the host
-Light/Dark choice, including while already open, without recreating its search or
-dictionary. It does not independently follow the operating system.
+and returns focus. You can also type `:shortcode:`: the closing colon after one
+exact Unicode or community shortcode, such as `:+1:` or `:-1:`, replaces it with
+that emoji, while partial names, namesakes, times, URLs and code keep the typed
+text, including raw Markdown code in pasted or restored drafts. Replacement requires
+both catalogs to load successfully; partial suggestions and retry remain available
+without automatically accepting the colon. One undo restores the full typed shortcode,
+including its closing colon, with the caret after it. The picker follows the host
+Light/Dark choice, including while already
+open, without recreating its search or dictionary. It does not independently
+follow the operating system.
 
 The session owns the catalog and its live updates. Reopening reuses the ready
 catalog, without hiding custom results behind a fresh read. Catalog failures expose
@@ -1222,6 +1291,11 @@ Inline video previews and their posters also fill their bounded frames with `cov
 Image and video thumbnails share smoothed corners and a 1px outer hairline, black at
 10% in light mode and white at 10% in dark mode. The expanded viewer shows the full
 media against a pure-black canvas; thumbnail cropping does not change the original.
+Any click on a thumbnail, modified or not, opens the original in-app from the
+same authenticated media source as the thumbnail: the media review where a
+surface hosts one, and otherwise a plain fullscreen viewer (Inbox, Sessions,
+drafts and previews). The thumbnail link's own destination is that media source,
+so a middle click, drag or copied link yields the same authenticated URL.
 
 For non-thumbnail attachment surfaces, the following reserved-layout contract applies.
 Image attachments reserve their preview geometry before loading and across virtualized

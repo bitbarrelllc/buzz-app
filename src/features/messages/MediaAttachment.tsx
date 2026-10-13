@@ -1,3 +1,4 @@
+import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import { prepareReviewEntrance } from "./use-review-entrance";
 import { useMediaCorners } from "./use-media-corners";
 import { VideoPlayer, VideoControls } from "./VideoPlayer";
@@ -7,7 +8,7 @@ import {
 } from "../../shared/design-system/ui/PanelHeader";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
-  useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -19,6 +20,7 @@ import { createPortal } from "react-dom";
 import type { Attachment } from "../relay/contracts";
 import styles from "./Messages.module.css";
 import { useModalBoundary } from "./useModalBoundary";
+import { useMediaElementSource } from "./use-media-element-source";
 
 export type MediaPlayback = Readonly<{
   attachmentUrl: string;
@@ -41,19 +43,30 @@ function useVideoPosition(
   video: RefObject<HTMLVideoElement | null>,
   seekTo: number | undefined,
   seekRequest: number | undefined,
+  active: boolean,
 ) {
-  useEffect(() => {
+  const wasActive = useRef(active);
+  useLayoutEffect(() => {
     // A monotonically increasing request lets the same timecode seek again.
     void seekRequest;
-    if (seekTo === undefined || !video.current) return;
+    const recovered = active && !wasActive.current;
+    wasActive.current = active;
+    const element = video.current;
+    if (!element) return;
+    if (!active) {
+      element.pause();
+      return;
+    }
+    // Recovery restores the same paused position, not an old seek intent.
+    if (recovered || seekTo === undefined) return;
     const seek = () => {
-      if (!video.current) return;
-      video.current.currentTime = Math.max(0, seekTo);
-      void video.current.play().catch(() => {});
+      element.currentTime = Math.max(0, seekTo);
+      void element.play().catch(() => {});
     };
-    if (video.current.readyState >= HTMLMediaElement.HAVE_METADATA) seek();
-    else video.current.addEventListener("loadedmetadata", seek, { once: true });
-  }, [seekTo, seekRequest, video]);
+    if (element.readyState >= HTMLMediaElement.HAVE_METADATA) seek();
+    else element.addEventListener("loadedmetadata", seek, { once: true });
+    return () => element.removeEventListener("loadedmetadata", seek);
+  }, [seekTo, seekRequest, video, active]);
 }
 
 export function MediaAttachment({
@@ -67,6 +80,7 @@ export function MediaAttachment({
   onPlayback,
   onOpenReview,
 }: MediaAttachmentProps) {
+  const active = useConversationPresentation();
   const corners = useMediaCorners();
   const source = media(attachment.url);
   const preview = attachment.previewUrl
@@ -75,6 +89,7 @@ export function MediaAttachment({
   const video = useRef<HTMLVideoElement>(null);
   const expandedVideo = useRef<HTMLVideoElement>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
+  if (!active && viewerOpen) setViewerOpen(false);
   const [currentTime, setCurrentTime] = useState(seekTo ?? 0);
   const [playing, setPlaying] = useState(false);
   const [started, setStarted] = useState(false);
@@ -92,7 +107,11 @@ export function MediaAttachment({
       } as CSSProperties)
     : undefined;
   const visiblePreview = preview ?? capturedPreview;
-  useVideoPosition(video, seekTo, seekRequest);
+  useVideoPosition(video, seekTo, seekRequest, active);
+  const element = useMediaElementSource(
+    attachment.kind === "video" ? source : undefined,
+  );
+  const videoSource = element.src;
 
   if (!source)
     return (
@@ -103,7 +122,7 @@ export function MediaAttachment({
       </span>
     );
 
-  if (failed)
+  if (failed || element.unavailable)
     return (
       <span className={styles.attachmentUnavailable} role="status">
         {attachment.kind === "video"
@@ -151,7 +170,8 @@ export function MediaAttachment({
             <path />
           </svg>
         </button>
-        {viewerOpen &&
+        {active &&
+          viewerOpen &&
           createPortal(
             <MediaViewer
               title="Image attachment"
@@ -180,17 +200,25 @@ export function MediaAttachment({
     <video
       ref={video}
       className={styles.mediaVideo}
-      src={source}
+      src={videoSource}
       poster={visiblePreview}
       preload={preload}
       playsInline
       style={previewStyle}
       onLoadedData={(event) => {
         const element = event.currentTarget;
-        setMeasuredDimensions({
-          width: element.videoWidth,
-          height: element.videoHeight,
-        });
+        // WebKit can emit loadeddata before nonzero dimensions are available.
+        // Invalid geometry must not replace the usable preview fallback.
+        if (
+          Number.isFinite(element.videoWidth) &&
+          element.videoWidth > 0 &&
+          Number.isFinite(element.videoHeight) &&
+          element.videoHeight > 0
+        )
+          setMeasuredDimensions({
+            width: element.videoWidth,
+            height: element.videoHeight,
+          });
         if (!preview && element.currentTime === 0) {
           // WebKit often paints no frame at exactly zero. Seeking after actual
           // frame data arrives forces a decodable opening frame.
@@ -257,12 +285,11 @@ export function MediaAttachment({
             />
           )}
           {videoElement}
-          <VideoControls videoRef={video} inline />
+          {active && <VideoControls videoRef={video} inline />}
           <span className={styles.mediaExpand}>
             <IconButton
               size="compact"
               variant="media"
-              shape="round"
               type="button"
               aria-label="Open video fullscreen"
               onClick={(event) => {
@@ -283,7 +310,8 @@ export function MediaAttachment({
           <path />
         </svg>
       </div>
-      {viewerOpen &&
+      {active &&
+        viewerOpen &&
         createPortal(
           <MediaViewer
             title="Video attachment"
@@ -308,7 +336,8 @@ export function MediaAttachment({
   );
 }
 
-function MediaViewer({
+/** The plain fullscreen fallback for surfaces that host no media review. */
+export function MediaViewer({
   title,
   close,
   children,

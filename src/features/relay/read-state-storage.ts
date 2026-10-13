@@ -1,6 +1,7 @@
 import { eventDto, type RelayEvent } from "./events";
 import {
   EMPTY_READ_STATE,
+  contextId,
   parseReadBlob,
   readCoordinate,
   record,
@@ -8,6 +9,12 @@ import {
   uint32,
   type ReadState,
 } from "./read-state-model";
+
+import {
+  markMessage,
+  READ_RESERVE_BYTES,
+  READ_RESERVE_KEYS,
+} from "./read-state-retention";
 
 export type ReadJournal = Readonly<{
   version: 1;
@@ -18,6 +25,13 @@ export type ReadJournal = Readonly<{
   localUnread: Readonly<Record<string, number>>;
   /** Local interaction order, bounded with retained frontier hints. */
   recent?: Readonly<Record<string, number>>;
+  /** Local-only evicted receipts, deleted with this partition even by old builds. */
+  reserve?: Readonly<Record<string, number>>;
+  /** Local-only: the channel of each message that a kept mark names (see
+   * `markMessage`), taken from a signed event. A mark does not carry its
+   * channel, so this lets a channel mark cover it while the message is not
+   * loaded. */
+  homes?: Readonly<Record<string, string>>;
   revision: number;
   acceptedRevision: number;
   lastCreatedAt: number;
@@ -107,6 +121,40 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
       ))
   )
     throw new Error("Invalid saved read interaction order");
+  if (
+    raw.reserve !== undefined &&
+    (!record(raw.reserve) ||
+      Object.keys(raw.reserve).length > READ_RESERVE_KEYS ||
+      new TextEncoder().encode(JSON.stringify(raw.reserve)).byteLength >
+        READ_RESERVE_BYTES ||
+      !Object.entries(raw.reserve).every(
+        ([key, value]) =>
+          contextId(key) &&
+          uint32(value) &&
+          !Object.hasOwn(parsed.state.frontiers, key),
+      ))
+  )
+    throw new Error("Invalid saved read reserve");
+  if (
+    raw.homes !== undefined &&
+    (!record(raw.homes) ||
+      !Object.entries(raw.homes).every(
+        ([id, channel]) => contextId(id) && contextId(channel),
+      ))
+  )
+    throw new Error("Invalid saved read mark channels");
+  // Keep only the channels of messages that a kept mark still names.
+  const named = new Set(
+    [
+      ...Object.keys(parsed.state.frontiers),
+      ...Object.keys((raw.reserve as Record<string, number>) ?? {}),
+    ].flatMap((key) => markMessage(key) ?? []),
+  );
+  const homes = Object.fromEntries(
+    Object.entries((raw.homes as Record<string, string>) ?? {}).filter(([id]) =>
+      named.has(id),
+    ),
+  );
   let pending: ReadJournal["pending"];
   if (raw.pending !== undefined) {
     if (
@@ -136,6 +184,10 @@ export function readJournal(raw: unknown, viewer: string): ReadJournal {
     recent: Object.freeze({
       ...(raw.recent as Record<string, number> | undefined),
     }),
+    reserve: Object.freeze({
+      ...(raw.reserve as Record<string, number> | undefined),
+    }),
+    homes: Object.freeze(homes),
     revision: raw.revision as number,
     acceptedRevision: raw.acceptedRevision as number,
     lastCreatedAt: raw.lastCreatedAt,

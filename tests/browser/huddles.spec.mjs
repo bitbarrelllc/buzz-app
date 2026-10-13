@@ -115,7 +115,7 @@ test("connected Huddles keep compact controls beside the default window", async 
     .getByRole("button", { name: "Search Buzz" })
     .evaluate((el) => el.getBoundingClientRect().height);
   expect(capsuleHeight).toBe(searchHeight);
-  expect(capsuleHeight).toBe(28);
+  expect(capsuleHeight).toBe(32);
   const material = (el) => {
     const style = getComputedStyle(el);
     return [style.backgroundColor, style.backdropFilter, style.boxShadow];
@@ -147,7 +147,7 @@ test("connected Huddles keep compact controls beside the default window", async 
   for (const control of await capsule.getByRole("button").all()) {
     expect(
       await control.evaluate((el) => el.getBoundingClientRect().height),
-    ).toBe(28);
+    ).toBe(32);
   }
   const geometry = await capsule.evaluate((el) => {
     const first = el.querySelector("button");
@@ -663,7 +663,7 @@ test("live participant avatars enter on top and reflow without growing the shell
   await expect(capsule.locator("[data-participant]")).toHaveCount(4);
   expect(
     await capsule.evaluate((el) => el.getBoundingClientRect().height),
-  ).toBe(28);
+  ).toBe(32);
   await page.getByRole("button", { name: "Simulate someone leaving" }).click();
   await expect(capsule.getByText("+1", { exact: true })).toBeVisible();
   await expect(
@@ -780,9 +780,12 @@ test("active chat has a split Huddle menu for members and a join-path link", asy
     page.getByRole("dialog", { name: "Huddle members" }),
   ).toBeVisible();
   await expect(
-    page.getByText(
-      "People added here can join this Huddle and its thread. The original chat stays private.",
-    ),
+    page
+      .getByRole("dialog", { name: "Huddle members" })
+      .getByRole("banner")
+      .getByText(
+        "People added here can join this Huddle and its thread. The original chat stays private.",
+      ),
   ).toBeVisible();
   await expect(
     page.getByText("DM membership cannot be changed here."),
@@ -1016,7 +1019,9 @@ test("detached regular composer keeps failed drafts, uploads real file bytes and
     .getByLabel("Choose attachments")
     .setInputFiles([file, file, { ...file, name: "renamed.txt" }]);
   await expect(
-    companion.getByRole("status").filter({ hasText: /· Ready$/ }),
+    companion
+      .getByRole("region", { name: "Attachments" })
+      .getByRole("listitem"),
   ).toHaveCount(3);
   await companion
     .getByRole("button", { name: "Remove notes.txt", exact: true })
@@ -1045,7 +1050,6 @@ test("detached regular composer keeps failed drafts, uploads real file bytes and
   expect(await page.evaluate(() => window.huddleFixture.stats.uploads)).toEqual(
     [
       { name: "notes.txt", text: "Huddle attachment bytes" },
-      { name: "notes.txt", text: "Huddle attachment bytes" },
       { name: "renamed.txt", text: "Huddle attachment bytes" },
     ],
   );
@@ -1058,7 +1062,9 @@ test("detached regular composer keeps failed drafts, uploads real file bytes and
     ),
   });
   await expect(
-    companion.getByRole("status").filter({ hasText: /· Ready$/ }),
+    companion
+      .getByRole("region", { name: "Attachments" })
+      .getByRole("listitem"),
   ).toHaveCount(1);
   await editor.press("Enter");
   const expectAttachments = async (surface) => {
@@ -1117,7 +1123,7 @@ test("detached regular composer keeps failed drafts, uploads real file bytes and
     )
     .toEqual(["cd".repeat(32)]);
   await companion
-    .getByRole("button", { name: "Insert emoji", exact: true })
+    .getByRole("button", { name: "Emoji and GIFS", exact: true })
     .click();
   await expect(
     page.getByRole("dialog", { name: "Emoji picker" }),

@@ -1,3 +1,5 @@
+import { SettingsGroup } from "../../../../src/shared/design-system/ui/SettingsGroup";
+import { EmptyState } from "../../../../src/shared/design-system/ui/EmptyState";
 import { ExamplePreview } from "./ExamplePreview";
 import { Calendar } from "../../../../src/shared/design-system/ui/Calendar";
 import { FieldButton } from "../../../../src/shared/design-system/ui/FieldButton";
@@ -47,15 +49,30 @@ import {
   HashIcon,
   ChatCircleIcon,
   PlusIcon,
+  SmileyIcon,
+  SquaresFourIcon,
 } from "../../../../src/shared/design-system/icons/index";
 import type { ReactNode } from "react";
 import { useId, useState } from "react";
+import {
+  ThemePicker,
+  type ThemeMode,
+} from "../../../../src/shared/design-system/ui/ThemePicker";
+import { KeyboardShortcut } from "../../../../src/shared/design-system/ui/KeyboardShortcut";
+
+function ThemePickerSpecimen() {
+  const [value, setValue] = useState<ThemeMode>("system");
+  return <ThemePicker value={value} onValueChange={setValue} />;
+}
 import { Switch } from "../../../../src/shared/design-system/ui/Switch";
 import { PreferenceRow } from "../../../../src/shared/design-system/ui/PreferenceRow";
 import { SwitchPreferenceRow } from "../../../../src/shared/design-system/ui/SwitchPreferenceRow";
 import { Accordion } from "../../../../src/shared/design-system/ui/Accordion";
 
 import { Avatar } from "../../../../src/shared/design-system/ui/Avatar";
+import { AvatarStack } from "../../../../src/shared/design-system/ui/AvatarStack";
+import { ShimmerText } from "../../../../src/shared/design-system/ui/ShimmerText";
+import { TypingDots } from "../../../../src/shared/design-system/ui/TypingDots";
 import { InlineChip } from "../../../../src/shared/design-system/ui/InlineChip";
 import { Button } from "../../../../src/shared/design-system/ui/Button";
 import { IconButton } from "../../../../src/shared/design-system/ui/IconButton";
@@ -193,6 +210,92 @@ function Specimen({
   );
 }
 
+function ShimmerTextSpecimen() {
+  return (
+    <div className="component-specimen-row">
+      <Specimen prop="active (default)">
+        <span className="text-body-sm">
+          <ShimmerText>Bash</ShimmerText>
+        </span>
+      </Specimen>
+      <Specimen prop="active={false}">
+        <span className="text-body-sm">
+          <ShimmerText active={false}>Finished</ShimmerText>
+        </span>
+      </Specimen>
+    </div>
+  );
+}
+
+function TypingDotsSpecimen() {
+  const [state, setState] = useState<"waiting" | "working">("waiting");
+  return (
+    <div className="component-specimen-stack">
+      <div className="component-specimen-row">
+        <Specimen prop='state="waiting"'>
+          <span className="flex items-center gap-2 text-body">
+            <TypingDots state="waiting" /> Received · waiting to start
+          </span>
+        </Specimen>
+        <Specimen prop='state="working" (default)'>
+          <span className="flex items-center gap-2 text-body">
+            <TypingDots /> Working
+          </span>
+        </Specimen>
+      </div>
+      <ExamplePreview
+        label="Activity transition"
+        code={'<TypingDots state="waiting" />\n<TypingDots state="working" />'}
+      >
+        <div className="component-specimen-stack">
+          <span
+            role="status"
+            aria-label="Example activity"
+            className="flex items-center gap-2 text-body"
+          >
+            <TypingDots state={state} />
+            {state === "waiting" ? "Received · waiting to start" : "Working"}
+          </span>
+          <Button
+            size="sm"
+            onClick={() =>
+              setState(state === "waiting" ? "working" : "waiting")
+            }
+          >
+            {state === "waiting" ? "Start work" : "Reset to waiting"}
+          </Button>
+        </div>
+      </ExamplePreview>
+    </div>
+  );
+}
+
+function AvatarStackSpecimen() {
+  const items = [
+    { id: "alex", name: "Alex", shape: "circle" as const },
+    { id: "brain", name: "Brain", shape: "squircle" as const },
+    { id: "casey", name: "Casey", shape: "circle" as const },
+    { id: "helper", name: "Helper", shape: "squircle" as const },
+  ];
+  return (
+    <div className="component-specimen-row">
+      <Button
+        size="xs"
+        variant="subtle"
+        aria-label="Alex, Brain, Casey, and Helper"
+      >
+        <AvatarStack items={items} />
+      </Button>
+      <Button
+        variant="ghost"
+        aria-label="Thread with Alex, Brain, Casey, and Helper"
+      >
+        <AvatarStack items={items} size="small" /> 4 replies
+      </Button>
+    </div>
+  );
+}
+
 function AvatarSpecimen() {
   return (
     <div className="component-specimen-stack">
@@ -265,7 +368,7 @@ function AvatarSpecimen() {
       <SpecimenGroup
         label="Status badge and rounded cutout"
         code={`<div className="flex flex-wrap items-center gap-4">
-  {(["small", "default", "large"] as const).map((size) => (
+  {(["compact", "small", "default", "large"] as const).map((size) => (
 
       <Avatar
         src={avatarUrl}
@@ -298,7 +401,7 @@ function AvatarSpecimen() {
 </div>`}
       >
         <div className="component-specimen-row">
-          {(["small", "default", "large"] as const).map((size) => (
+          {(["compact", "small", "default", "large"] as const).map((size) => (
             <Specimen key={size} prop={`${size} · online`}>
               <Avatar
                 src={avatarUrl}
@@ -333,7 +436,7 @@ function AvatarSpecimen() {
       <SpecimenGroup
         label="Agent shape (proposed)"
         code={`<div className="flex flex-wrap items-center gap-4">
-  {(["small", "default", "large"] as const).map((size) => (
+  {(["compact", "small", "default", "large"] as const).map((size) => (
 
       <Avatar
         src={avatarUrl}
@@ -371,7 +474,7 @@ function AvatarSpecimen() {
 </div>`}
       >
         <div className="component-specimen-row">
-          {(["small", "default", "large"] as const).map((size) => (
+          {(["compact", "small", "default", "large"] as const).map((size) => (
             <Specimen key={size} prop={`squircle · ${size} · online`}>
               <Avatar
                 src={avatarUrl}
@@ -1148,6 +1251,25 @@ function NavigationItemSpecimen() {
           ))}
         </div>
       </SpecimenGroup>
+      <SpecimenGroup
+        label="Chrome route navigation (not tabs)"
+        code={`<nav aria-label="Destinations" className="chrome-navigation">
+  <NavigationItem label="Me" variant="pill" selected />
+  <NavigationItem label="Messages" variant="pill" />
+</nav>`}
+      >
+        <nav aria-label="Destinations" className="chrome-navigation">
+          {["Me", "Messages"].map((label) => (
+            <NavigationItem
+              key={label}
+              label={label}
+              variant="pill"
+              selected={selectedPill === label}
+              onClick={() => setSelectedPill(label)}
+            />
+          ))}
+        </nav>
+      </SpecimenGroup>
     </div>
   );
 }
@@ -1782,6 +1904,9 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
   button: ButtonSpecimen,
   "icon-button": IconButtonSpecimen,
   avatar: AvatarSpecimen,
+  "avatar-stack": AvatarStackSpecimen,
+  "shimmer-text": ShimmerTextSpecimen,
+  "typing-dots": TypingDotsSpecimen,
   "preview-card": PreviewCardSpecimen,
   "inline-chip": InlineChipSpecimen,
   "full-page-surface": FullPageSurfaceSpecimen,
@@ -1793,6 +1918,43 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
   select: SelectExamples,
   combobox: ComboboxExamples,
   switch: SwitchSpecimen,
+  "settings-group": () => (
+    <div className="grid gap-8">
+      <div>
+        <InlineHeader title="Notifications" />
+        <SettingsGroup>
+          <SwitchPreferenceRow label="Desktop alerts" defaultChecked />
+          <SwitchPreferenceRow
+            label="Sound"
+            description="Choose a sound to preview it."
+            defaultChecked
+          />
+          <PreferenceRow
+            title="Direct messages"
+            trailing={<Button size="sm">Flutter</Button>}
+          />
+        </SettingsGroup>
+      </div>
+      <div>
+        <InlineHeader title="Profile" />
+        <SettingsGroup layout="form">
+          <Field label="Display name">
+            <Input defaultValue="Alex" />
+          </Field>
+          <div className="flex justify-end">
+            <Button>Save profile</Button>
+          </div>
+        </SettingsGroup>
+      </div>
+    </div>
+  ),
+  "theme-picker": ThemePickerSpecimen,
+  "keyboard-shortcut": () => (
+    <div className="flex flex-wrap gap-3">
+      <KeyboardShortcut text="⇧⌘K" label="Shift Command K" />
+      <KeyboardShortcut text="Ctrl+Shift+K" label="Control Shift K" />
+    </div>
+  ),
   "preference-row": SwitchSpecimen,
   accordion: () => (
     <SpecimenFrame
@@ -1898,6 +2060,38 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
         ]}
       />
     </SpecimenFrame>
+  ),
+  "empty-state": () => (
+    <div className="grid gap-8">
+      <SpecimenFrame
+        code={`<EmptyState
+  icon={<SmileyIcon />}
+  title="No emojis yet"
+  description="Add a custom emoji to use in messages and reactions."
+  action={<Button>Add emoji</Button>}
+/>`}
+      >
+        <EmptyState
+          icon={<SmileyIcon />}
+          title="No emojis yet"
+          description="Add a custom emoji to use in messages and reactions."
+          action={<Button>Add emoji</Button>}
+        />
+      </SpecimenFrame>
+      <SpecimenFrame
+        code={`<EmptyState
+  icon={<SquaresFourIcon />}
+  title="No templates yet"
+  description="Save a starting setup to reuse in new channels."
+/>`}
+      >
+        <EmptyState
+          icon={<SquaresFourIcon />}
+          title="No templates yet"
+          description="Save a starting setup to reuse in new channels."
+        />
+      </SpecimenFrame>
+    </div>
   ),
   header: () => (
     <SpecimenFrame

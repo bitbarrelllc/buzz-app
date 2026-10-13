@@ -5,8 +5,10 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { assert, afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ConversationPresentation } from "../conversation/ConversationPresentation";
 import { ComposerAttachments } from "./ComposerAttachments";
 import type { DraftAttachment } from "./attachment-draft";
 
@@ -20,6 +22,54 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+it("shows a queued image's preview without a busy spinner until upload work starts", () => {
+  vi.stubGlobal(
+    "URL",
+    Object.assign(URL, {
+      createObjectURL: vi.fn(() => "blob:photo"),
+      revokeObjectURL: vi.fn(),
+    }),
+  );
+  const item: DraftAttachment = {
+    id: "photo",
+    file: new File(["png"], "photo.png", { type: "image/png" }),
+    status: "queued",
+  };
+  const props = {
+    items: [item],
+    disabled: false,
+    remove: vi.fn(),
+    retry: vi.fn(),
+    media: () => undefined,
+  };
+  const root = render(<ComposerAttachments {...props} />);
+  const remove = screen.getByRole("button", { name: "Remove photo.png" });
+  expect(
+    screen
+      .getByRole("button", { name: "Preview photo.png" })
+      .querySelector("img")
+      ?.getAttribute("src"),
+  ).toBe("blob:photo");
+  // Queued files wait for Send; nothing is in flight to spin for.
+  expect(remove.hasAttribute("data-uploading")).toBe(false);
+  expect(remove.querySelectorAll("svg")).toHaveLength(1);
+
+  for (const status of ["preparing", "uploading"] as const) {
+    root.rerender(
+      <ComposerAttachments {...props} items={[{ ...item, status }]} />,
+    );
+    expect(remove.hasAttribute("data-uploading")).toBe(true);
+    expect(remove.querySelectorAll("svg")).toHaveLength(2);
+  }
+  for (const status of ["ready", "error"] as const) {
+    root.rerender(
+      <ComposerAttachments {...props} items={[{ ...item, status }]} />,
+    );
+    expect(remove.hasAttribute("data-uploading")).toBe(false);
+    expect(remove.querySelectorAll("svg")).toHaveLength(1);
+  }
+});
+
 it("replaces a failed original-video preview with authenticated converted media", async () => {
   const revoke = vi.fn();
   vi.stubGlobal(
@@ -276,4 +326,58 @@ it("keeps one puff after the final attachment is removed and cleans up its timer
     view.unmount();
     vi.useRealTimers();
   }
+});
+
+it("dismisses draft preview while retaining the original file and preview URL", async () => {
+  const revoke = vi.fn();
+  vi.stubGlobal(
+    "URL",
+    Object.assign(URL, {
+      createObjectURL: vi.fn(() => "blob:draft"),
+      revokeObjectURL: revoke,
+    }),
+  );
+  const items: DraftAttachment[] = [
+    {
+      id: "draft",
+      file: new File(["image"], "draft.png", { type: "image/png" }),
+      status: "uploading",
+    },
+  ];
+  const remove = vi.fn(),
+    retry = vi.fn();
+  const tree = (active: boolean) => (
+    <ConversationPresentation value={active}>
+      <div hidden={!active} inert={!active}>
+        <ComposerAttachments
+          items={items}
+          disabled={false}
+          remove={remove}
+          retry={retry}
+          media={(url) => url}
+        />
+      </div>
+    </ConversationPresentation>
+  );
+  const view = render(tree(true));
+  const thumbnail = view.container.querySelector("img");
+  const trigger = screen.getByRole("button", { name: "Preview draft.png" });
+  fireEvent.click(trigger);
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  await waitFor(() =>
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(
+      true,
+    ),
+  );
+  const focus = vi.spyOn(trigger, "focus");
+  view.rerender(tree(false));
+  expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  view.rerender(tree(true));
+  await act(() => Promise.resolve());
+  expect(focus).not.toHaveBeenCalled();
+  expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  expect(view.container.querySelector("img")).toBe(thumbnail);
+  expect(revoke).not.toHaveBeenCalled();
+  expect(remove).not.toHaveBeenCalled();
+  expect(retry).not.toHaveBeenCalled();
 });

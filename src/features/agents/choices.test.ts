@@ -1,20 +1,57 @@
 import { expect, it } from "vitest";
-import { createAgentControl } from "./control";
-import { controlFixture } from "./control-testing";
+import { localAgentsFixture } from "./local-testing";
 import { createAgentLibrary } from "./library";
 import { createAgentChoices, templateAgentChoices } from "./choices";
 import { sessionRecipients } from "../sessions/recipients";
+import type { IdentityArchiveSnapshot } from "../relay/identity-archives";
 
 const viewer = "aa".repeat(32);
 const scope = `https://relay.example.test:${viewer}`;
+const agent = {
+  pubkey: "ab".repeat(32),
+  name: "Fixture agent",
+  relayUrl: "wss://relay.example.test",
+  owner: viewer,
+};
 
-it("merges exact keys, preserves namesakes and includes stopped native-only agents in their community", async () => {
-  const fixture = controlFixture();
-  fixture.agent.name = "Calvin";
-  fixture.agent.status = "stopped";
-  fixture.agent.enabled = false;
-  const native = createAgentControl(fixture.host);
-  const duplicate = { pubkey: fixture.agent.pubkey, name: "Old Calvin" };
+/** Finite archive evidence with the real lazy-read lifecycle. */
+function archiveFixture(
+  archived: string[] = [],
+  initial: IdentityArchiveSnapshot["status"] = "ready",
+) {
+  const listeners = new Set<() => void>();
+  let snapshot: IdentityArchiveSnapshot = { status: initial, archived };
+  const reads: string[] = [];
+  const read = async () => {
+    reads.push(snapshot.status);
+    snapshot = { status: "ready", archived };
+    for (const listener of listeners) listener();
+  };
+  return {
+    reads,
+    snapshot: () => snapshot,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    state: (key: string) =>
+      snapshot.status !== "ready"
+        ? ("unknown" as const)
+        : snapshot.archived.includes(key)
+          ? ("archived" as const)
+          : ("not-archived" as const),
+    ensure: () => (snapshot.status === "idle" ? read() : Promise.resolve()),
+    refresh: read,
+  };
+}
+
+it("merges exact keys, preserves namesakes and keeps local agents to their community and owner", async () => {
+  const calvin = { ...agent, name: "Calvin" };
+  const native = localAgentsFixture([
+    calvin,
+    { ...agent, pubkey: "ef".repeat(32), owner: "ee".repeat(32) },
+  ]);
+  const duplicate = { pubkey: calvin.pubkey, name: "Old Calvin" };
   const namesake = { pubkey: "bc".repeat(32), name: "Calvin" };
   const library = createAgentLibrary(async () => ({
     definitions: [],
@@ -25,6 +62,7 @@ it("merges exact keys, preserves namesakes and includes stopped native-only agen
     scope,
     library: library.queries,
     native,
+    archives: archiveFixture(),
     signal: lifetime.signal,
   });
   await choices.refresh();
@@ -41,22 +79,19 @@ it("merges exact keys, preserves namesakes and includes stopped native-only agen
     scope: `https://elsewhere.test:${viewer}`,
     library: createAgentLibrary(undefined).queries,
     native,
+    archives: archiveFixture(),
     signal: lifetime.signal,
   });
   expect(elsewhere.snapshot().identities).toEqual([]);
-  expect(fixture.calls.every((call) => call.action === "snapshot")).toBe(true);
   lifetime.abort();
   expect(choices.snapshot().identities).toEqual([]);
   library.dispose();
-  native.dispose();
 });
 
 it.each(["loading", "failed", "partial"])(
-  "keeps explicit native selection usable but blocks ambiguous automatic recipients with legacy %s",
+  "keeps explicit local selection usable but blocks ambiguous automatic recipients with legacy %s",
   async (mode) => {
-    const fixture = controlFixture();
-    const native = createAgentControl(fixture.host);
-    await native.refresh();
+    const native = localAgentsFixture([agent]);
     let settle!: () => void;
     const library = createAgentLibrary(async () => {
       if (mode === "loading")
@@ -76,6 +111,7 @@ it.each(["loading", "failed", "partial"])(
       scope,
       library: library.queries,
       native,
+      archives: archiveFixture(),
       signal: lifetime.signal,
     });
     const pending = choices.refresh();
@@ -87,7 +123,7 @@ it.each(["loading", "failed", "partial"])(
       id: "session",
       name: "Work",
       channelType: "session" as const,
-      members: [viewer, fixture.agent.pubkey, unknownLegacy],
+      members: [viewer, agent.pubkey, unknownLegacy],
     };
     const profiles = new Map([[unknownLegacy, { name: "Legacy B" }]]);
     expect(state.status).toBe("ready");
@@ -102,15 +138,13 @@ it.each(["loading", "failed", "partial"])(
       sessionRecipients(channel, profiles, state, viewer, []),
     ).toThrow(/still loading/);
     expect(
-      sessionRecipients(channel, profiles, state, viewer, [
-        fixture.agent.pubkey,
-      ]),
-    ).toEqual([fixture.agent.pubkey]);
+      sessionRecipients(channel, profiles, state, viewer, [agent.pubkey]),
+    ).toEqual([agent.pubkey]);
     expect(
       templateAgentChoices(state, { status: "ready", channels: [] }).map(
         (a) => a.pubkey,
       ),
-    ).toEqual([fixture.agent.pubkey]);
+    ).toEqual([agent.pubkey]);
     if (mode === "loading") {
       settle();
       await pending;
@@ -120,20 +154,11 @@ it.each(["loading", "failed", "partial"])(
     );
     lifetime.abort();
     library.dispose();
-    native.dispose();
   },
 );
 
-it("revokes failed native evidence without dropping ready legacy candidates, then retries and unsubscribes on retirement", async () => {
-  const fixture = controlFixture();
-  let failed = false;
-  const native = createAgentControl({
-    ...fixture.host,
-    snapshot: async () => {
-      if (failed) throw new Error("private native error");
-      return fixture.host.snapshot();
-    },
-  });
+it("revokes failed local evidence without dropping ready legacy candidates, then recovers and unsubscribes on retirement", async () => {
+  const native = localAgentsFixture([agent]);
   const legacy = { pubkey: "cd".repeat(32), name: "Legacy" };
   const library = createAgentLibrary(async () => ({
     definitions: [],
@@ -144,6 +169,7 @@ it("revokes failed native evidence without dropping ready legacy candidates, the
     scope,
     library: library.queries,
     native,
+    archives: archiveFixture(),
     signal: lifetime.signal,
   });
   let notifications = 0;
@@ -151,8 +177,7 @@ it("revokes failed native evidence without dropping ready legacy candidates, the
     notifications++;
   });
   await choices.refresh();
-  failed = true;
-  await choices.refresh();
+  native.set({ status: "error", error: "Could not list agents" });
   expect(choices.snapshot().identities).toEqual([
     { ...legacy, managed: false },
   ]);
@@ -167,31 +192,28 @@ it("revokes failed native evidence without dropping ready legacy candidates, the
     complete: false,
     pending: false,
     identities: [],
-    error: expect.stringContaining("Could not refresh local agents"),
+    error: "Could not list agents",
   });
-  expect(choices.snapshot().error).toContain("Could not refresh local agents");
-  expect(choices.snapshot().error).not.toContain("private native");
-  failed = false;
-  await choices.refresh();
+  expect(choices.snapshot().error).toContain("Could not list agents");
+  native.set({ status: "ready", agents: [agent] });
   expect(choices.snapshot().identities).toHaveLength(2);
   lifetime.abort();
   const retired = notifications;
-  await native.refresh();
+  native.set({ agents: [] });
   expect(notifications).toBe(retired);
+  expect(native.listeners()).toBe(0);
   expect(choices.snapshot().identities).toEqual([]);
   stop();
   library.dispose();
-  native.dispose();
 });
 
-it("uses legacy roster choices only on hosts without native controls", async () => {
+it("uses legacy roster choices only on hosts without local agents", async () => {
   const legacy = { pubkey: "bc".repeat(32), name: "Carl" };
   const library = createAgentLibrary(async () => ({
     definitions: [],
     identities: [legacy],
   }));
-  const fixture = controlFixture();
-  const native = createAgentControl(fixture.host);
+  const native = localAgentsFixture([], "loading");
   const lifetime = new AbortController();
   const channels = {
     status: "ready" as const,
@@ -201,27 +223,29 @@ it("uses legacy roster choices only on hosts without native controls", async () 
     scope,
     library: library.queries,
     native,
+    archives: archiveFixture(),
     signal: lifetime.signal,
   });
   try {
     await library.queries.refresh();
-    // Native idle is not evidence that the old library is the active inventory.
+    // A loading local list is not evidence that the old library is the active inventory.
     expect(choices.snapshot().templates).toMatchObject({
-      status: "idle",
+      status: "loading",
       pending: true,
       complete: false,
     });
     expect(templateAgentChoices(choices.snapshot(), channels)).toEqual([]);
-    await native.refresh();
+    native.set({ status: "ready", agents: [agent] });
     expect(
       templateAgentChoices(choices.snapshot(), channels).map((a) => a.pubkey),
-    ).toEqual([fixture.agent.pubkey]);
-    fixture.data.agents.length = 0;
-    await native.refresh();
+    ).toEqual([agent.pubkey]);
+    native.set({ agents: [] });
     expect(templateAgentChoices(choices.snapshot(), channels)).toEqual([]);
     const fallback = createAgentChoices({
       scope,
       library: library.queries,
+      native: localAgentsFixture([], "unavailable"),
+      archives: archiveFixture(),
       signal: lifetime.signal,
     });
     expect(templateAgentChoices(fallback.snapshot(), channels)).toEqual([
@@ -236,13 +260,11 @@ it("uses legacy roster choices only on hosts without native controls", async () 
   } finally {
     lifetime.abort();
     library.dispose();
-    native.dispose();
   }
 });
 
 it("refreshes the selected template source without loading the unused legacy inventory", async () => {
-  const fixture = controlFixture();
-  const native = createAgentControl(fixture.host);
+  const native = localAgentsFixture([agent]);
   let reads = 0;
   const library = createAgentLibrary(async () => {
     reads++;
@@ -253,6 +275,7 @@ it("refreshes the selected template source without loading the unused legacy inv
     scope,
     library: library.queries,
     native,
+    archives: archiveFixture(),
     signal: lifetime.signal,
   });
   try {
@@ -267,6 +290,7 @@ it("refreshes the selected template source without loading the unused legacy inv
     const legacy = createAgentChoices({
       scope,
       library: library.queries,
+      archives: archiveFixture(),
       signal: lifetime.signal,
     });
     await legacy.refresh("templates");
@@ -279,6 +303,54 @@ it("refreshes the selected template source without loading the unused legacy inv
   } finally {
     lifetime.abort();
     library.dispose();
-    native.dispose();
+  }
+});
+
+it("hides known-archived agents from selection but keeps them as known agents", async () => {
+  const archived = { pubkey: "bc".repeat(32), name: "Retired" };
+  const active = { pubkey: "cd".repeat(32), name: "Active", definitionId: "p" };
+  const library = createAgentLibrary(async () => ({
+    definitions: [{ id: "p", name: "Profile", avatar: "https://a.test/p.png" }],
+    identities: [archived, active],
+  }));
+  const archives = archiveFixture([archived.pubkey, viewer], "idle");
+  const lifetime = new AbortController();
+  const choices = createAgentChoices({
+    scope,
+    library: library.queries,
+    archives,
+    signal: lifetime.signal,
+  });
+  const channels = {
+    status: "ready" as const,
+    channels: [
+      { id: "c", name: "C", members: [archived.pubkey, active.pubkey] },
+    ],
+  };
+  try {
+    await library.queries.refresh();
+    // Unknown archive state fails open for selection; templates need evidence.
+    expect(choices.snapshot().selectable).toHaveLength(2);
+    expect(templateAgentChoices(choices.snapshot(), channels)).toEqual([]);
+    // Archive reads stay lazy until a selector demands them.
+    choices.ensure();
+    expect(archives.reads).toEqual([]);
+    choices.ensure(true, true);
+    await Promise.resolve();
+    expect(archives.reads).toEqual(["idle"]);
+    const state = choices.snapshot();
+    expect(state.identities.map((a) => a.pubkey)).toEqual([
+      archived.pubkey,
+      active.pubkey,
+    ]);
+    expect(state.selectable).toEqual([
+      { ...active, avatar: "https://a.test/p.png", managed: false },
+    ]);
+    expect(
+      templateAgentChoices(state, channels).map((agent) => agent.pubkey),
+    ).toEqual([active.pubkey]);
+  } finally {
+    lifetime.abort();
+    library.dispose();
   }
 });

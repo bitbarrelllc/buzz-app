@@ -383,7 +383,8 @@ test("shared thread UI auto-loads, follows live replies, retries and isolates re
         (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
       );
     await expect(history.locator("[data-message-id]")).toHaveCount(62);
-    await expect(panel.getByRole("status")).toHaveCount(0);
+    // Loading belongs to history; the composer retains its live region idle.
+    await expect(history.getByRole("status")).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Load more replies", exact: true }),
     ).toHaveCount(0);
@@ -750,16 +751,15 @@ test("exact reply media keeps its selected attachment and canonical thread", asy
       () => window.messagesFixture.report.exactReplyId,
     );
     const reply = comments.locator(`[data-message-id="${exactReplyId}"]`);
-    const commentDate = await reply.locator("time").evaluate((time) =>
-      new Date(time.dateTime).toLocaleDateString(undefined, {
-        year: "numeric",
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      }),
-    );
+    // The day divider names the reply's local day ("Today").
+    const commentDay = await reply.locator("time").evaluate((time) => {
+      const date = new Date(time.dateTime);
+      return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+        .map((part) => String(part).padStart(2, "0"))
+        .join("-");
+    });
     await expect(
-      comments.getByText(commentDate, { exact: true }).first(),
+      comments.locator(`[data-day="${commentDay}"]`).first(),
     ).toBeVisible();
     await reply.hover();
     const addReaction = reply.getByTestId("reaction-row").getByRole("button", {

@@ -170,18 +170,13 @@ test("zoom keys scale text, icons and spacing together and persist/reset", async
     for (let i = 0; i < 10; i++)
       await button(page, "Increase interface size").click();
     await scale(page, 2);
+    const colorMode = page.getByRole("radio", { name: "Light", exact: true });
     await expect(
-      page
-        .locator("label")
-        .filter({
-          has: page.getByRole("radio", { name: "Light", exact: true }),
-        })
-        .locator("svg"),
-    ).toHaveCSS("width", "40px");
+      page.locator('.buzz-theme-thumbnail[data-mode="light"]'),
+    ).toHaveCSS("width", "160px");
     await expect(button(page, "Increase interface size")).toBeDisabled();
-    const light = page.getByRole("radio", { name: "Light", exact: true });
     await (reset === "external-unfocused"
-      ? light
+      ? colorMode
       : button(page, "Reset interface size")
     ).focus();
     if (reset === "keyboard") await page.keyboard.press("Enter");
@@ -200,7 +195,7 @@ test("zoom keys scale text, icons and spacing together and persist/reset", async
     await expect(button(page, "Reset interface size")).toHaveCount(0);
     await expect(
       reset === "external-unfocused"
-        ? light
+        ? colorMode
         : button(page, "Increase interface size"),
     ).toBeFocused();
   }
@@ -220,7 +215,7 @@ test("interface zoom preserves an open emoji search and scales its controls", as
     exact: true,
   });
   await composer.fill("Keep this draft ");
-  await button(page, "Insert emoji").click();
+  await button(page, "Emoji and GIFS").click();
   const search = page.getByRole("searchbox", { name: "Search emoji" });
   await expect(search).toBeFocused();
   await search.fill("grinning");
@@ -265,7 +260,7 @@ test("interface zoom preserves an open emoji search and scales its controls", as
   await search.press("Enter");
   await expect(composer).toHaveJSProperty("value", `Keep this draft ${chosen}`);
   await expect(composer).toBeFocused();
-  await button(page, "Insert emoji").click();
+  await button(page, "Emoji and GIFS").click();
   await search.fill("grinning");
   // Establish a selected query range; Mart owns arrow keys for result navigation.
   await search.evaluate((input) => {

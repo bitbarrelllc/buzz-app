@@ -26,18 +26,24 @@ semantic tokens, UI authoring rules and the local component reference.
   styles live in Tailwind's base layer, so utilities can override them normally.
   Existing feature CSS variables remain available for incremental adoption.
 - `src/app/shell/presentation.ts` owns page labels, icons and navigation ordering.
-  Messages comes first, then Inbox, Bestie and Projects; other contributed pages
+  Me comes first, then Messages, Inbox, Reminders, Bestie and Projects; other contributed pages
   follow by displayed label with a full contribution-key tie-breaker. Sidebar
   navigation and page search share this ordering, independent of plugin
-  activation/re-enable order. Sidebar navigation lists only pages registered with
-  `primary: true` (Inbox, Bestie, Projects, Agents and Workflows among the bundled
-  plugins); page search lists every active page. Inbox and Bestie are placeholder
-  pages of their own plugins, so disabling Bestie removes its row along with its
-  launcher. Channels and Sessions are vended without rows: Messages opens by default,
-  from any channel row and from search; Sessions opens from Messages and search.
+  activation/re-enable order. Primary pages choose `sidebar` (default), `topbar`
+  (centered text) or `toolbar` (top-right icon) placement. Me and Messages start
+  in the topbar; other primary bundled pages retain their sidebar rows. Me is an
+  optional, default-enabled personal-conversation workspace in the current
+  community. Its dedicated SidebarFrame reuses saved channel-sidebar width and
+  shows New conversation plus personal history, replacing Messages navigation.
+  Scoped Me page routes own sidebar/content selection. The initial implementation
+  reuses the existing session transcript and composer; see [Sessions](sessions/README.md)
+  for placement rules, remaining ingress differences and the relay privacy boundary.
+  Messages opens by default, from any channel row, its topbar button and search.
+  Page search lists every active page, including non-primary pages.
+  Disabling an optional plugin removes its navigation entry.
   Channels is presented as Messages. Legacy tone props are retained for
   compatibility; all pages share the supplied gradient and repeating CSS dots.
-  Add recognized page presentation here without changing plugin contracts.
+  Presentation is keyed by full contribution identity, not plugin-local IDs.
 - `AppShell.tsx` owns the 48px header, vertical page navigation, contributed panel
   launchers, Settings access, community rail, and page frames. Page navigation sits
   above the channel list outside Settings, using its saved sidebar width
@@ -54,10 +60,23 @@ semantic tokens, UI authoring rules and the local component reference.
   220px disclosure overlays content, supports Escape, and keeps sidebar state
   mounted. A navigation selection closes the phone drawer and hands focus to the
   main content; this includes conversation and Settings-section selections.
-  Messages, Agents, and desktop Settings share an animated header toggle; hiding
+  Me, Messages, Agents, and desktop Settings share an animated header toggle; hiding
   the sidebar preserves its mounted state and saved width. Reduced motion disables
   the transition. Other desktop pages retain the visible sidebar.
-  The header keeps history and account/search actions, with no second navigation row.
+  The same header keeps history and account/search actions, plus a centered
+  navigation strip and full-page toolbar icons. Real control widths, native insets
+  and text scale determine whether header pages fit without overlap. Otherwise
+  those entries move into a labelled More pages popover (always at <=650px).
+  Wide topbar pages use design-system chrome tabs with manual activation: arrow
+  keys move focus, and Enter or Space selects the page while focus stays on its
+  tab. Each opening carries focus intent: topbar activation suppresses destination
+  autofocus, while explicit New conversation, sidebar and deep-link openings keep
+  their content focus. This intent is not saved in addresses or history; retry
+  preserves it for the same opening. The selected page is a separately focusable,
+  labelled tabpanel. Toolbar
+  and overflow destinations remain native buttons using `aria-current` and
+  focus main content on selection. Header pages never become companion launchers,
+  and only the exact current page is selected.
   The shell owns one joined Panel around navigation and page content, with a
   16px outer gutter (8px on narrow screens). Nested Panels keep their opaque
   fill and clipping but drop individual borders, radii, and shadows. Layout
@@ -89,21 +108,75 @@ motion with Tailwind's `motion-reduce` variant.
 
 Tauri uses `titleBarStyle: Overlay` and `hiddenTitle` on macOS. Native traffic
 lights have a reserved 104px left area before the community switcher only in the
-macOS desktop runtime. Web gets no
-inset or imitation window controls. Other
-platforms retain their native decorations. Drag regions are limited to the
-header background; controls remain clickable. On macOS, double-clicking that
+macOS desktop runtime. Web gets no inset or imitation window controls. Linux
+and Windows desktop use undecorated windows with app-owned minimize,
+maximize/restore and close buttons in the header, including during identity
+setup. While the parser-loaded launch overlay keeps app content inert, a
+window-control header is portalled to the document body above the overlay; the
+launch owner removes it when the normal identity or shell header becomes usable.
+Drag regions are limited to the header background; controls remain clickable.
+On macOS, double-clicking that
 background follows the current system title-bar preference (Fill/Zoom, Minimize,
 or no action); changing the preference does not require restarting Buzz. Other
 platforms retain Tauri's native drag-region behavior. The main-window capability
-grants only titlebar dragging and the internal maximize action used by that
-handler, plus scoped HTTP(S) opening for
+grants titlebar dragging and the internal maximize action used by that
+handler. A Linux and Windows main-webview capability also grants minimize,
+maximize/restore and close for the integrated controls. These actions do not
+change the app’s existing close lifecycle. A native document-start policy hides
+Minimize in Hyprland sessions and also hides Maximize on Omarchy (identified by
+a nonempty `OMARCHY_PATH` within a Hyprland session), whose default window rules
+suppress application maximize requests. Close remains available throughout launch,
+identity setup and the shell. Other desktops retain their controls; non-Omarchy
+Hyprland retains Maximize because its user-owned rules may permit it (Hyprland's
+example configuration suppresses it too). This is a session-default policy, not
+live compositor capability detection: customized Omarchy rules that re-enable
+maximize are not inspected.
+`XDG_CURRENT_DESKTOP` identifies the session (colon-separated names supported),
+with `XDG_SESSION_DESKTOP` as a fallback when absent/empty. Tauri's Linux
+`isMinimizable`/`isMaximizable` methods do not report compositor support.
+No compositor configuration or window-action semantics are changed.
+On Windows, the custom maximize
+button does not expose native maximize-hover Snap Layouts, and right-clicking
+the custom header does not open the native system menu. Keyboard and edge-snap
+behavior remain native and require per-platform acceptance testing.
+The main capability includes scoped
+HTTP(S) opening for
 [external links](channels.md#run-the-integration). See
 [Tauri window customization](https://v2.tauri.app/learn/window-customization/).
 
-The top-right group contains enabled plugin launchers (Bestie supplies the snake),
-a page finder, and the local avatar. Search and plugin launchers use the shared
-glass icon-button style; sidebar and history controls remain ghost buttons.
+The main desktop window uses Tauri's window-state plugin to save its size,
+position, maximized and fullscreen state on normal app exit and restore them on
+launch on macOS, Windows and Linux. State is local to the app's OS configuration
+directory (`.window-state.json`); missing or unreadable state falls back to the
+configured 1200×800 window. Visibility and decorations are not restored, so a
+macOS window hidden by Close reopens visibly after Quit/relaunch and platform
+chrome stays configuration-owned. Close/reopen without quitting on macOS still
+uses the existing window. Before requesting placement or restoring maximized/fullscreen
+mode, Buzz reads the plugin's saved geometry and checks that both ends of the 48px
+client header are inside connected monitor work areas,
+allowing a header to span adjacent displays and ignoring invisible frame borders. An
+unreachable header falls back to the top of the primary work area (or the first
+available monitor), shrinking an oversized client to fit. This covers partial
+overlap after removing a monitor and fully off-screen saves; both use the same
+fallback instead of leaving placement to the OS. Saved zero-sized geometry is
+ignored. Validation uses requested geometry, not immediate getter results: native
+setters may apply asynchronously (Linux/macOS), so getters can still report the
+startup frame. The plugin remains the only state-file writer and owns mode
+restoration. Linux placement remains subject to the window manager/compositor
+(notably Wayland).
+The plugin stores physical pixels, so changing display scaling can change the
+window's apparent size. On macOS, quitting in fullscreen can preserve the
+fullscreen-sized frame instead of the earlier normal size; leaving fullscreen
+after relaunch may therefore produce a screen-sized window.
+
+The top-right group contains full-page toolbar icons, enabled companion plugin
+launchers, a page finder, and the local
+avatar. Search, sidebar and history controls use unfilled ghost icon buttons with
+32px containers, 16px icons and 10px corners, matching content-toolbar actions.
+Their hover fills remain translucent over the colored backdrop.
+Pressed fills are slightly stronger; icons keep full opacity. Plugin launchers
+use the shared glass style.
+Bestie is available from its sidebar page, without a top-bar shortcut.
 `ProfileButton.tsx` subscribes to the community
 service's local default profile and opens an anchored account dropdown containing
 local presence controls and Settings; there is no separate top-bar Settings button.
@@ -148,8 +221,8 @@ Membership settings card scoped to that community. The rail reads
 that roster through the selected community's existing session and verifies it
 against the relay authority that session already holds, so the read adds no
 session request to the connection and opens no other session. That card applies
-the same role gate: in native builds it stays registered with its member list
-and Invite members button, but hides direct additions and per-member actions.
+the same role gate in native builds, with its member list, Invite members
+button, direct additions and per-member actions.
 A Settings section, history entry or `buzz://open` locator naming it still opens
 instead of reporting unavailable. Community settings is
 on every community and opens Settings scoped to that community's origin, which
@@ -228,21 +301,34 @@ Opening a linked detail from inside a thread adds a closable tab to the same
 secondary pane. Profile activity, managed-instance, and owner-profile links use
 `PanelContext.push` to select an existing target or add a tab; `open` retains its
 replacement semantics. A shared 2.5rem header uses 12rem tabs composed from the sidebar's NavigationItem,
-with profile avatars or detail icons and a trailing close button.
+with 10px corners matching adjacent icon actions, profile avatars or detail icons,
+and a trailing close button.
 Switching retains mounted content, scroll position, and drafts. Each tab has a
 close control; Delete on a tab and Escape in its content close that tab. Closing
 the selected tab selects a neighbor, and closing the last tab dismisses the pane.
+On desktop, Cmd+W on macOS or Ctrl+W on Windows/Linux closes the visible selected
+tab, including a selected detail tab, even while typing in the main conversation.
+The macOS native Close menu uses the same action, including when an embedded
+browser owns focus (embedded browsing is currently macOS-only). A terminal tab
+closes its presentation, not its shell; Ctrl+W while typing in a terminal remains
+shell word deletion on Windows/Linux. With no visible tab pane, Close retains
+the normal window-close behavior: hide until reopened on macOS, close the
+application on Windows/Linux. Hidden tabs remain intact until that window close.
+Closing the last tab leaves the window open until the next press. While a modal
+is open, the shortcut does nothing rather than closing content behind it.
+Windows/Linux consume held-key repeats without closing further tabs or the window.
+Window buttons and Alt+F4 always retain their window-only behavior. The bottom
+terminal drawer keeps its existing Cmd/Ctrl+J/Hide behavior. Browser-build
+shortcuts are unchanged.
 Feature-local details such as harness logs remain tied to their owning profile;
 closing that profile or losing authorization also removes its log tab.
-The main-header split control toggles the tab pane without closing its tabs or
-resetting their contents. Opening an empty pane creates one new tab.
-The plus control appears on header hover or keyboard focus (always on touch) and
-opens a picker with Channels, Direct messages, and Channel tools categories,
-each with searchable choices. Enabled Todos and native-desktop Terminal reuse
-their registered components and channel context. Opening a tool in a tab replaces
-its drawer; its launcher then toggles that tab's pane without a second mount.
-Terminal sessions remain plugin-owned when their tabs close, and Escape in the
-terminal input remains a shell key.
+The main-header split control toggles existing pane content without closing its
+tabs or resetting their contents. With no content it is disabled but remains
+focusable, so closing the last tab has a stable focus-return target. There is no
+blank-tab creation action or channel/DM/tool picker. Tabs open from content such
+as threads, profiles, channel settings and linked sessions. Todos and native
+desktop Terminal remain available through their existing channel launchers;
+closing a terminal presentation does not stop its plugin-owned shell.
 Conversation tabs reuse the timeline, composer, draft and message-management owners;
 selecting an already-open conversation selects its existing tab. Each main channel
 keeps its own tab descriptors, selected tab, and pane visibility in memory for the
@@ -274,7 +360,6 @@ and focus restoration with the existing owners. It adds no timer or resize obser
 Channels opts into the reusable companion prop and owns both cards, including a
 companion-only view without a selected channel or relay. Settings and legacy
 pages use the host fallback frame; opening from those pages does not navigate away.
-Disabling Bestie removes its snake and open card without evicting a local link card.
 The shell supplies the outer page gutter. Channel previews, roster labels, and routine refresh
 and freshness indicators are omitted. Channel Settings → Diagnostics keeps
 manual refresh, outbox inspection, and timing capture available on demand.

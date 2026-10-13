@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { schnorr } from "@noble/curves/secp256k1.js";
+import { bytesToHex } from "nostr-tools/utils";
 import { afterEach, assert, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { composerDOMFixture } from "./composer-testing";
@@ -22,6 +24,7 @@ import {
   MessageManagement,
   MessageManagementItems,
   MessageManagementStatus,
+  MessageReadStateItem,
 } from "./MessageManagement";
 import { createRelaySession } from "../relay/session";
 import { readJournal, type ReadJournal } from "../relay/read-state-storage";
@@ -36,8 +39,11 @@ import {
   signed,
 } from "../relay/testing";
 import type { ReadStateSigning } from "../relay/read-state-host";
-// @ts-expect-error Exercise the production codec with disposable identities.
-import { decodeReadState, signReadState } from "../../../dev/read-state.mjs";
+import {
+  decodeReadState,
+  signReadState,
+  // @ts-expect-error Exercise the production codec with disposable identities.
+} from "../../../browser-host/read-state.mjs";
 import type { RelayEvent } from "../relay/events";
 
 composerDOMFixture();
@@ -61,6 +67,7 @@ async function fixture(
   withAttachments = false,
   originalAttachment = false,
   originalMention = false,
+  agentOwner: "viewer" | "other" | undefined = undefined,
 ) {
   vi.stubGlobal(
     "ResizeObserver",
@@ -72,9 +79,16 @@ async function fixture(
   HTMLElement.prototype.scrollIntoView = vi.fn();
   const viewer = keypair(),
     relay = keypair(),
-    peer = keypair();
+    peer = keypair(),
+    agent = agentOwner ? keypair() : undefined,
+    agentOwnerKey =
+      agentOwner === "viewer"
+        ? viewer
+        : agentOwner === "other"
+          ? keypair()
+          : undefined;
   const original = message(
-    own ? viewer : peer,
+    own ? viewer : (agent ?? peer),
     "room",
     originalAttachment
       ? "Original message\n\n[original.pdf](https://fixture.test/media/original.pdf)"
@@ -82,18 +96,46 @@ async function fixture(
         ? "@Honey Original message"
         : "Original message",
     1700000000,
-    originalAttachment
-      ? [
-          [
-            "imeta",
-            "url https://fixture.test/media/original.pdf",
-            "m application/pdf",
-          ],
-        ]
-      : originalMention
-        ? [["p", peer.pubkey]]
-        : [],
+    [
+      ...(originalAttachment
+        ? [
+            [
+              "imeta",
+              "url https://fixture.test/media/original.pdf",
+              "m application/pdf",
+            ],
+          ]
+        : []),
+      ...(originalMention ? [["p", peer.pubkey]] : []),
+    ],
   );
+  const agentProfile =
+    agent && agentOwnerKey
+      ? signed(agent, {
+          kind: 0,
+          content: JSON.stringify({ name: "Test agent" }),
+          tags: [
+            [
+              "auth",
+              agentOwnerKey.pubkey,
+              "kind=0&created_at<1700000001",
+              bytesToHex(
+                schnorr.sign(
+                  new Uint8Array(
+                    await crypto.subtle.digest(
+                      "SHA-256",
+                      new TextEncoder().encode(
+                        `nostr:agent-auth:${agent.pubkey}:kind=0&created_at<1700000001`,
+                      ),
+                    ),
+                  ),
+                  agentOwnerKey.secret,
+                ),
+              ),
+            ],
+          ],
+        })
+      : undefined;
   const publications: {
     event: RelayEvent;
     result: ReturnType<typeof deferred<void>>;
@@ -135,7 +177,14 @@ async function fixture(
             roster(relay, "room", [viewer.pubkey, peer.pubkey]),
           ];
         if (filter.kinds?.includes(0))
-          return originalMention ? [profile(peer, { name: "Honey" })] : [];
+          return [
+            ...(originalMention && filter.authors?.includes(peer.pubkey)
+              ? [profile(peer, { name: "Honey" })]
+              : []),
+            ...(agent && agentProfile && filter.authors?.includes(agent.pubkey)
+              ? [agentProfile]
+              : []),
+          ];
         if (filter.kinds?.includes(9))
           return [
             original,
@@ -201,6 +250,7 @@ async function fixture(
             <MenuRoot>
               <MenuTrigger>Message actions</MenuTrigger>
               <MenuPopup>
+                <MessageReadStateItem row={row} session={owner.session} />
                 <MessageManagementItems row={row} session={owner.session} />
               </MenuPopup>
             </MenuRoot>
@@ -277,6 +327,33 @@ it("edits in the composer, retains a rejected change and retries the same operat
   expect(h.owner.session.channels.window("room").rows[0]?.content).toBe(
     "Corrected message",
   );
+});
+
+it("offers a confirmed NIP-09 deletion for an agent owned by the viewer", async () => {
+  const h = await fixture(false, false, false, false, false, "viewer");
+  const item = await screen.findByRole("menuitem", { name: "Delete message" });
+  expect(item).toBeVisible();
+  fireEvent.click(item);
+  const confirmation = await screen.findByRole("alertdialog", {
+    name: "Delete message?",
+  });
+  expect(confirmation).toHaveTextContent(
+    "This requests removal of this message from Buzz’s relay.",
+  );
+  expect(confirmation).toHaveTextContent("People may still have copies.");
+  expect(h.publications).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  await waitFor(() => expect(h.publications).toHaveLength(1));
+  expect(h.publication(0).event.kind).toBe(5);
+  expect(h.publication(0).event.pubkey).toBe(h.owner.session.viewer);
+  expect(h.publication(0).event.tags).toContainEqual(["e", h.original.id]);
+  await act(async () => h.publication(0).result.resolve());
+});
+
+it("does not offer agent-message deletion to a non-owner", async () => {
+  await fixture(false, false, false, false, false, "other");
+  await screen.findByRole("menuitem", { name: /Mark (unread|read)/ });
+  expect(screen.queryByRole("menuitem", { name: "Delete message" })).toBeNull();
 });
 
 it("does not expose edit or delete for another person's message", async () => {
@@ -497,6 +574,138 @@ it("toggles actual unread state immediately without a dialog", async () => {
   expect(h.publications).toHaveLength(0);
 });
 
+const savedFollows = () =>
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith("buzz.thread-follows.v1:"))
+    .map((key) => localStorage.getItem(key));
+
+it("follows a thread without replying and keeps the saved choice", async () => {
+  localStorage.clear();
+  const h = await fixture(false, true);
+  expect(h.owner.session.unread.following("room", h.original.id)).toBe(false);
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Follow thread" }),
+  );
+  await waitFor(() =>
+    expect(h.owner.session.unread.following("room", h.original.id)).toBe(true),
+  );
+  expect(savedFollows()).toEqual([
+    JSON.stringify([[`room:${h.original.id}`, true]]),
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Unfollow thread" }),
+  );
+  await waitFor(() =>
+    expect(h.owner.session.unread.following("room", h.original.id)).toBe(false),
+  );
+  expect(savedFollows()).toEqual([
+    JSON.stringify([[`room:${h.original.id}`, false]]),
+  ]);
+  expect(h.publications).toHaveLength(0);
+});
+
+it("unfollows a thread the viewer started", async () => {
+  localStorage.clear();
+  const h = await fixture();
+  expect(h.owner.session.unread.following("room", h.original.id)).toBe(true);
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Unfollow thread" }),
+  );
+  await waitFor(() =>
+    expect(h.owner.session.unread.following("room", h.original.id)).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+  expect(
+    await screen.findByRole("menuitem", { name: "Follow thread" }),
+  ).toBeVisible();
+});
+
+it("keeps showing Follow thread when the choice cannot be saved", async () => {
+  localStorage.clear();
+  const h = await fixture(false);
+  const setItem = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+  try {
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Follow thread" }),
+    );
+    expect(setItem).toHaveBeenCalled();
+  } finally {
+    setItem.mockRestore();
+  }
+  expect(h.owner.session.unread.following("room", h.original.id)).toBe(false);
+  expect(savedFollows()).toEqual([]);
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Could not save thread follow. Try again.",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Message actions" }));
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Follow thread" }),
+  );
+  await waitFor(() =>
+    expect(h.owner.session.unread.following("room", h.original.id)).toBe(true),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(savedFollows()).toEqual([
+    JSON.stringify([[`room:${h.original.id}`, true]]),
+  ]);
+});
+
+it("offers the follow choice only once a restored roster is confirmed", async () => {
+  localStorage.clear();
+  const h = await fixture(false);
+  h.owner.session.unread.follow("room", h.original.id, true);
+  cleanup();
+  const live = h.owner.session.channels.list();
+  // Discovery marks a restored roster both cached and read-only.
+  let snapshot: typeof live = {
+    ...live,
+    channels: live.channels.map((channel) => ({
+      ...channel,
+      cached: true,
+      readOnly: true,
+    })),
+  };
+  const listeners = new Set<() => void>();
+  const session = {
+    ...h.owner.session,
+    channels: {
+      ...h.owner.session.channels,
+      list: () => snapshot,
+      subscribeList(listener: () => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    },
+  };
+  const row = session.channels.window("room").rows[0];
+  assert.exists(row);
+  render(
+    <MessageManagement session={session} channelId="room">
+      <MenuRoot>
+        <MenuTrigger>Thread actions</MenuTrigger>
+        <MenuPopup>
+          <MessageManagementItems row={row} session={session} />
+        </MenuPopup>
+      </MenuRoot>
+    </MessageManagement>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Thread actions" }));
+  await act(async () => {});
+  expect(screen.queryByRole("menuitem", { name: /follow thread/i })).toBeNull();
+  await act(async () => {
+    snapshot = live;
+    for (const listener of listeners) listener();
+  });
+  expect(
+    await screen.findByRole("menuitem", { name: "Unfollow thread" }),
+  ).toBeVisible();
+});
+
 it("keeps deletion recovery outside the optimistically removed row", async () => {
   const h = await fixture();
   fireEvent.click(
@@ -624,7 +833,7 @@ async function heldUnreadAction(action: "read" | "unread") {
       <MenuRoot>
         <MenuTrigger>Read actions</MenuTrigger>
         <MenuPopup>
-          <MessageManagementItems row={row} session={current} />
+          <MessageReadStateItem row={row} session={current} />
         </MenuPopup>
       </MenuRoot>
     </MessageManagement>

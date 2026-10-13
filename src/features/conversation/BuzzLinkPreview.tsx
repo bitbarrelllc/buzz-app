@@ -1,3 +1,4 @@
+import { workflowLabel } from "../relay/workflow-attribution";
 import {
   useChannelIdentityNames,
   useIdentityNames,
@@ -5,7 +6,11 @@ import {
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { RelaySession } from "../relay/session";
 import type { ThreadView } from "../relay/threads";
-import { LockIcon } from "../../shared/design-system/icons/index";
+import type { ChannelReference } from "../relay/contracts";
+import {
+  LightningIcon,
+  LockIcon,
+} from "../../shared/design-system/icons/index";
 import { channelIcon } from "../channels/channel-icon";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { relativeTimestamp } from "../../shared/relative-timestamp";
@@ -73,7 +78,7 @@ function PreviewContent({
     session.channels.list,
     session.channels.list,
   );
-  const authorId = message?.authorId;
+  const authorId = message?.workflowOwnerId ?? message?.authorId;
   useEffect(() => {
     if (authorId)
       void session.profiles.ensure([authorId], "background").catch(() => {});
@@ -97,11 +102,13 @@ function PreviewContent({
         {stopped ? "Message preview unavailable." : "Loading message…"}
       </span>
     );
-  const profile = profiles.get(message.authorId);
-  const name = resolveName(
-    message.authorId,
-    profile?.name ?? message.authorId.slice(0, 10),
+  const displayId = message.workflowOwnerId ?? message.authorId;
+  const profile = profiles.get(displayId);
+  const resolved = resolveName(
+    displayId,
+    profile?.name ?? displayId.slice(0, 10),
   );
+  const name = message.workflowOwnerId ? workflowLabel(resolved) : resolved;
   const date = new Date(message.createdAt * 1000);
   if (!Number.isFinite(date.getTime()))
     return <span role="status">Message preview unavailable.</span>;
@@ -130,8 +137,14 @@ function PreviewContent({
         <Avatar
           alt={name}
           fallback={name}
+          fallbackContent={
+            message.workflowOwnerId ? <LightningIcon size={20} /> : undefined
+          }
+          shape={message.workflowOwnerId ? "squircle" : "circle"}
           src={
-            profile?.picture ? (session.media(profile.picture) ?? null) : null
+            !message.workflowOwnerId && profile?.picture
+              ? (session.media(profile.picture) ?? null)
+              : null
           }
         />
         <span className={styles.metadata}>
@@ -157,6 +170,43 @@ function PreviewContent({
         {messagePreviewText(message.content) ||
           (message.attachments.length ? "Attachment" : "Empty message")}
       </span>
+    </>
+  );
+}
+
+/** Hover card for a channel-only link. The store supplies what the reader
+ * may see; a nonmember sees an open channel's public metadata, never its
+ * roster. */
+export function ChannelLinkPreview({
+  channel,
+}: {
+  channel: Extract<ChannelReference, { state: "found" }>;
+}) {
+  const Icon = channelIcon(channel.private ? { private: true } : undefined);
+  const details = [
+    channel.private ? "Private channel" : "Public channel",
+    channel.archived ? "Archived" : "",
+    channel.joined ? "Joined" : "Not joined",
+    channel.members
+      ? `${channel.members} ${channel.members === 1 ? "member" : "members"}`
+      : "",
+  ].filter(Boolean);
+  return (
+    <>
+      <span className={styles.byline}>
+        <Icon aria-hidden="true" size={20} />
+        <span className={styles.metadata}>
+          <span className={styles.author}>
+            <strong>{channel.name}</strong>
+          </span>
+          <span className={styles.channel}>
+            <span>{details.join(" · ")}</span>
+          </span>
+        </span>
+      </span>
+      {channel.description && (
+        <span className={styles.message}>{channel.description}</span>
+      )}
     </>
   );
 }

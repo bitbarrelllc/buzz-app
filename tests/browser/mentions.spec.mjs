@@ -32,7 +32,7 @@ test("settings-enabled mentions fixture renders the composer and preference", as
   }
 });
 
-test("actual composer selects namesakes by exact key, publishes channel/reply tags, and blocks removed members", async ({
+test("actual composer selects namesakes by exact key, publishes channel/reply tags, and asks before mentioning removed members", async ({
   page,
 }) => {
   // This journey exercises one-message recipients; prefill-on has separate coverage.
@@ -71,7 +71,7 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
       expect(
         await popup.evaluate((element) => element.closest("form") === null),
       ).toBe(true);
-      await expect(popup).toHaveCSS("border-radius", "24px");
+      await expect(popup).toHaveCSS("border-radius", "16px");
       await expect
         .poll(() =>
           popup.evaluate((element) => {
@@ -110,26 +110,26 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
           ...node.parentElement.querySelectorAll("[data-mention-choice]"),
         ].indexOf(node),
       );
-      await search.press("ArrowDown");
-      for (let step = 0; step < index; step++)
-        await page.keyboard.press("ArrowDown");
-      await expect(choice).toBeFocused();
+      // Focus stays in search; the first row starts highlighted.
+      for (let step = 0; step < index; step++) await search.press("ArrowDown");
+      await expect(choice).toHaveAttribute("data-selected", "true");
+      await expect(search).toBeFocused();
       await expect(choice).toHaveCSS("padding", "8px");
       await expect(choice.locator(".buzz-avatar")).toHaveCSS("width", "40px");
-      await choice.press("ArrowUp");
-      await page.keyboard.press("ArrowDown");
-      await expect(choice).toBeFocused();
-      await choice.press("Enter");
+      await search.press("ArrowUp");
+      await search.press("ArrowDown");
+      await expect(choice).toHaveAttribute("data-selected", "true");
+      await search.press("Enter");
       await expect(picker).toHaveCount(0);
       await expect(page.getByRole("textbox")).toBeFocused();
     };
     const order = () =>
       page
-        .getByRole("button", { name: /^(Mention a member|Insert emoji)$/ })
+        .getByRole("button", { name: /^(Mention a member|Emoji and GIFS)$/ })
         .evaluateAll((buttons) =>
           buttons.map((button) => button.getAttribute("aria-label")),
         );
-    await expect.poll(order).toEqual(["Mention a member", "Insert emoji"]);
+    await expect.poll(order).toEqual(["Mention a member", "Emoji and GIFS"]);
     // Browser-only contract: native shadow search and React search share their
     // shape, typography, clear target and alignment in both appearance modes.
     const searchAppearance = async (field) => {
@@ -180,17 +180,24 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
         exact: true,
       });
       await expect(row).toHaveCSS("padding", "8px");
-      await row.hover();
-      await expect(row).toHaveCSS(
+      // The first row opens highlighted, so Enter picks it.
+      const highlighted = mention.locator(
+        "[data-mention-choice][data-selected]",
+      );
+      await expect(highlighted).toHaveCount(1);
+      await expect(
+        mention.locator("[data-mention-choice]").first(),
+      ).toHaveAttribute("data-selected", "true");
+      await expect(highlighted).toHaveCSS(
         "background-color",
-        mode === "light" ? "rgb(245, 245, 246)" : "rgb(51, 51, 51)",
+        mode === "light" ? "rgb(218, 218, 218)" : "rgb(64, 64, 64)",
       );
       await mention.getByRole("searchbox").fill("");
       const empty = await searchAppearance(mention.locator(".search-field"));
       await mention.getByRole("searchbox").fill("Honey");
       const filled = await searchAppearance(mention.locator(".search-field"));
       await page
-        .getByRole("button", { name: "Insert emoji", exact: true })
+        .getByRole("button", { name: "Emoji and GIFS", exact: true })
         .click();
       const emojiField = page.locator("em-emoji-picker .search");
       await expect(emojiField.getByRole("searchbox")).toBeFocused();
@@ -219,7 +226,8 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
     await expect(input.locator(".inline-chip")).toHaveText(labels);
     // The complete choice set already qualifies the agent before selection.
     await expect(input.locator("[data-reveal]")).toHaveCount(0);
-    // Copy serializes authored source, not the visible namesake qualifiers.
+    // Copy serializes authored source, not the visible namesake qualifiers;
+    // the HTML flavor carries each identity.
     await input.focus();
     await input.press("ControlOrMeta+a");
     await expect(input.locator("[data-editor-selected]")).toHaveCount(2);
@@ -232,9 +240,15 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
           clipboardData,
         }),
       );
-      return clipboardData.getData("text/plain");
+      return {
+        text: clipboardData.getData("text/plain"),
+        html: clipboardData.getData("text/html"),
+      };
     });
-    expect(copied).toBe("@Honey @Honey ");
+    expect(copied).toEqual({
+      text: "@Honey @Honey ",
+      html: `<div data-buzz-copy="composer"><p><a href="nostr:${npubEncode(keys.first)}">@Honey</a> <a href="nostr:${npubEncode(keys.second)}">@Honey</a> </p></div>`,
+    });
     await input.press("ArrowRight");
     // Typing can rebuild editor portals; it must not replay the reveal.
     await input.press("x");
@@ -262,7 +276,7 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
       document.documentElement.dataset.colorMode = "dark";
     });
     await page
-      .getByRole("button", { name: "Insert emoji", exact: true })
+      .getByRole("button", { name: "Emoji and GIFS", exact: true })
       .click();
     const search = page.getByRole("searchbox", { name: "Search" });
     await expect(page.locator("em-emoji-picker #root")).toHaveAttribute(
@@ -305,7 +319,7 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
       exact: true,
     });
     const emojiTool = page.getByRole("button", {
-      name: "Insert emoji",
+      name: "Emoji and GIFS",
       exact: true,
     });
     await mentionTool.focus();
@@ -420,7 +434,7 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
     await page.evaluate(() =>
       window.mentionFixture.change("enable", "buzz.mentions"),
     );
-    await expect.poll(order).toEqual(["Mention a member", "Insert emoji"]);
+    await expect.poll(order).toEqual(["Mention a member", "Emoji and GIFS"]);
     await choose(keys.first);
     await page
       .getByRole("button", { name: "Remove first Honey", exact: true })
@@ -428,9 +442,14 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
     await page
       .getByRole("button", { name: "Send message", exact: true })
       .click();
-    await expect(page.getByRole("alert")).toContainText(
-      "no longer a channel member",
-    );
+    // An untyped channel is an ordinary channel: the removed member is now
+    // outside it, so the sender chooses. Closing keeps the draft unsent.
+    const outside = page.getByRole("dialog", {
+      name: "Mention people outside this channel?",
+    });
+    await expect(outside).toContainText("Honey is not in this channel.");
+    await outside.getByRole("button", { name: "Close" }).click();
+    await expect(outside).toHaveCount(0);
     await expect(
       page.getByRole("textbox", { name: "Reply to thread" }),
     ).toHaveJSProperty("value", "@Honey ");
@@ -439,6 +458,10 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
     ).toBe(2);
     // A child layout effect sees disabled DOM before parent command props refresh.
     // Both commands must fail, even with the previous render's enabled closures.
+    // The outside-person prompt above also disabled the composer once.
+    const before = await page.evaluate(
+      () => window.mentionFixture.disabledCalls.length,
+    );
     await page
       .getByRole("button", { name: "Toggle disabled", exact: true })
       .click();
@@ -448,7 +471,13 @@ test("actual composer selects namesakes by exact key, publishes channel/reply ta
     await expect(recipients.getByRole("button")).toBeDisabled();
     expect(
       await page.evaluate(() => window.mentionFixture.disabledCalls),
-    ).toEqual([{ inputDisabled: true, text: false, mention: false }]);
+    ).toEqual(
+      Array(before + 1).fill({
+        inputDisabled: true,
+        text: false,
+        mention: false,
+      }),
+    );
     await expect(
       page.getByRole("textbox", { name: "Reply to thread" }),
     ).toHaveJSProperty("value", "@Honey ");
@@ -707,7 +736,9 @@ test("namesake recipient qualifiers remain visible on touch after live name chan
     await page.screenshot({
       path: test.info().outputPath("recipient-qualifiers-touch.png"),
     });
-    await input.evaluate((el) => el.setSelectionRange(7, 13));
+    await input.evaluate((el) =>
+      el.setSelectionRange(el.value.indexOf("@", 1), el.value.trimEnd().length),
+    );
     await input.press("Backspace");
     await expect(chips).toHaveText([labels[0]]);
     await choose(keys[1]);

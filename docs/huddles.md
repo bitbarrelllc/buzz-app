@@ -36,7 +36,7 @@ access revocation ends the call even during an incomplete roster refresh. Admiss
 retains its original authority: a parent-admitted call still requires current parent
 membership after automatic room admission; a room-only invite retains room authority.
 
-The mini player matches the neighboring 28px shell controls, with matching internal
+The mini player matches the neighboring 32px shell controls, with matching internal
 buttons, 16px regular-weight icons and 20px avatars. Its end buttons sit flush
 against the outer edges, with 4px before the microphone and no gap on either side of the Audio settings/Leave divider. Waveform and avatar content has
 4px padding, with an extra 4px on the waveform’s left side. It uses the shared

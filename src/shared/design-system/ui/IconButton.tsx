@@ -7,7 +7,8 @@ type IconButtonVariant =
   | "tint"
   | "chrome"
   | "avatar"
-  | "media";
+  | "media"
+  | "bare";
 type IconButtonSize =
   | NonNullable<ButtonProps["size"]>
   | "xs"
@@ -17,7 +18,7 @@ type IconButtonShape = "control" | "round" | "row-end";
 
 export type IconButtonProps = Omit<
   ComponentProps<typeof Button>,
-  "children" | "size" | "variant"
+  "children" | "size" | "variant" | "shape"
 > & {
   "aria-label": string;
   icon: ReactElement;
@@ -29,8 +30,8 @@ export type IconButtonProps = Omit<
 export function IconButton({
   icon,
   variant = "ghost",
-  size = "md",
-  shape = "round",
+  size = "sm",
+  shape = variant === "avatar" ? "round" : "control",
   ...props
 }: IconButtonProps) {
   return (
@@ -42,7 +43,8 @@ export function IconButton({
           : variant === "tint" ||
               variant === "chrome" ||
               variant === "avatar" ||
-              variant === "media"
+              variant === "media" ||
+              variant === "bare"
             ? "ghost"
             : variant
       }

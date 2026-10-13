@@ -1,17 +1,26 @@
+import type { LocalAgentSource } from "../agents/local-activity";
 import { readView } from "../../shared/view-state";
-import type { AgentControl } from "../agents/control";
+import type { LocalAgents } from "../agents/local";
 import type { IdentityNames } from "../identity-names/service";
 import type { PresenceActivity } from "../presence/activity";
 import type { Context } from "@deepseek-ai/cordis";
 import { createRelaySession, type RelaySession } from "./session";
 import { createHeadPersistence } from "./persistence";
+import {
+  relayPartition,
+  transportOrigin,
+  transportPartition,
+} from "./partition";
 import { ReadError, readErrorKind } from "./errors";
 import type { ReadTransport } from "./transport";
 
 export type RelaySnapshot = Readonly<{
   status: "disconnected" | "connecting" | "ready" | "error";
   generation: number;
+  /** The persistence partition, `origin:viewer`. */
   scope?: string;
+  /** The community's normalized origin, as `scope` was built from. */
+  origin?: string;
   session: RelaySession;
   viewer?: string;
   error?: string;
@@ -40,8 +49,9 @@ export function provideRelay(
   connect?: (signal: AbortSignal) => Promise<ReadTransport>,
   presenceActivity?: PresenceActivity,
   identityNames?: IdentityNames,
-  agentChoices?: Pick<AgentControl, "snapshot" | "subscribe" | "refresh">,
+  agentChoices?: LocalAgents,
   resume?: { viewer: string; scope: string },
+  localAgents?: LocalAgentSource,
 ) {
   let disposed = false;
   let generation = 0;
@@ -103,7 +113,7 @@ export function provideRelay(
           cachedOnly: true,
           persistence,
           initialChannelId: readView<string | undefined>(
-            `${resume.scope}:${resume.viewer}`,
+            relayPartition(resume.scope, resume.viewer),
             "selected-channel",
             undefined,
           ),
@@ -126,7 +136,8 @@ export function provideRelay(
         cached: true,
         generation,
         viewer: resume.viewer,
-        scope: `${resume.scope}:${resume.viewer}`,
+        origin: resume.scope,
+        scope: relayPartition(resume.scope, resume.viewer),
         session: store.session,
       });
     } catch {
@@ -202,18 +213,19 @@ export function provideRelay(
           const successor = createRelaySession(transport, {
             identityNames,
             agentChoices,
+            localAgents,
             ...(presenceActivity ? { presenceActivity } : {}),
             prepared: true,
             // Keep intent preparation, but do not fetch every unopened channel.
             warm: false,
             initialChannelId: readView<string | undefined>(
-              `${transport.scope ?? transport.relayAuthor}:${transport.viewer}`,
+              transportPartition(transport),
               "selected-channel",
               undefined,
             ),
             persistence: createHeadPersistence(
               transport.viewer,
-              transport.scope ?? transport.relayAuthor,
+              transportOrigin(transport),
             ),
           });
           await successor.restore();
@@ -236,7 +248,8 @@ export function provideRelay(
             status: "ready",
             generation,
             viewer: transport.viewer,
-            scope: `${transport.scope ?? transport.relayAuthor}:${transport.viewer}`,
+            origin: transportOrigin(transport),
+            scope: transportPartition(transport),
             session: store.session,
           });
           store.session.channels.ensureList();

@@ -1,3 +1,4 @@
+import { validateRecording, type VoiceRecording } from "../relay/voice-media";
 import { useState, useSyncExternalStore } from "react";
 import type { ComposerSession } from "./composer-session";
 import {
@@ -10,30 +11,31 @@ import { prepareAttachment } from "./prepare-attachment";
 export type DraftAttachment = Readonly<{
   id: string;
   file: File;
+  voice?: UploadedAttachment["voice"];
   status: "queued" | "preparing" | "uploading" | "ready" | "error";
   uploaded?: UploadedAttachment;
   error?: string | undefined;
+  /** Host-reported bytes for the current prepared transfer. */
+  transfer?: Readonly<{ sent: number; total: number }> | undefined;
 }>;
-type AttachmentDraft = {
+export type AttachmentDraft = {
   snapshot(): readonly DraftAttachment[];
   subscribe(listener: () => void): () => void;
-  add(files: readonly File[]): void;
+  add(files: readonly File[], recording?: VoiceRecording): void;
+  addUploaded(attachment: UploadedAttachment): void;
+  adopt(files: readonly DraftAttachment[]): boolean;
+  prepareForSend(signal: AbortSignal): Promise<readonly UploadedAttachment[]>;
   remove(id: string): void;
   retry(id: string): void;
   cancel(): void;
   clear(): void;
 };
 const drafts = new WeakMap<ComposerSession, Map<string, AttachmentDraft>>();
-/** Release a closed ephemeral composer's files without changing its text draft. */
-export function clearAttachmentDraft(session: ComposerSession, key: string) {
-  drafts.get(session)?.get(key)?.clear();
-}
-
-const MAX_FILES = 10;
+export const MAX_ATTACHMENT_FILES = 10;
 const MAX_RETAINED_BYTES = 2 * UPLOAD_MAX_BYTES;
 
 /** Tab-local files survive navigation, not reload. Delivery remains outbox-owned. */
-function attachmentDraft(
+export function attachmentDraft(
   session: ComposerSession,
   key: string,
   channelId: string,
@@ -54,7 +56,15 @@ function attachmentDraft(
   };
   const replace = (id: string, change: Partial<DraftAttachment>) => {
     items = items.map((item) =>
-      item.id === id ? { ...item, ...change } : item,
+      item.id === id
+        ? {
+            ...item,
+            ...change,
+            ...("error" in change && change.error === undefined
+              ? { error: undefined }
+              : {}),
+          }
+        : item,
     );
     emit();
   };
@@ -62,56 +72,101 @@ function attachmentDraft(
     for (const controller of active.values()) controller.abort();
     active.clear();
     items = items.map((item) =>
-      ["queued", "preparing", "uploading"].includes(item.status)
+      item.status === "preparing" || item.status === "uploading"
         ? {
             ...item,
             status: "error",
             error: "Upload paused. Retry to continue.",
+            transfer: undefined,
           }
         : item,
     );
     emit();
   }
-  function pump() {
+  function abortReason(signal: AbortSignal) {
+    return signal.reason instanceof Error
+      ? signal.reason
+      : new DOMException("Upload cancelled.", "AbortError");
+  }
+  function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+    if (signal.aborted) return Promise.reject(abortReason(signal));
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => reject(abortReason(signal));
+      signal.addEventListener("abort", abort, { once: true });
+      work.then(
+        (value) => {
+          signal.removeEventListener("abort", abort);
+          if (signal.aborted) reject(abortReason(signal));
+          else resolve(value);
+        },
+        (error: unknown) => {
+          signal.removeEventListener("abort", abort);
+          reject(error);
+        },
+      );
+    });
+  }
+  async function prepareOne(
+    item: DraftAttachment,
+    signal: AbortSignal,
+  ): Promise<UploadedAttachment> {
+    if (item.uploaded) return item.uploaded;
     const attachments = session.attachments;
-    if (!listeners.size || !attachments) return;
-    for (const item of items) {
-      if (active.size >= 2) break;
-      if (item.status !== "queued") continue;
-      const controller = new AbortController();
-      active.set(item.id, controller);
-      replace(item.id, { status: "preparing", error: undefined });
-      void (async () => {
-        try {
-          const prepared = await (attachments.prepare ?? prepareAttachment)(
-            item.file,
-            controller.signal,
-          );
-          controller.signal.throwIfAborted();
-          replace(item.id, { status: "uploading" });
-          const uploaded = await attachments.upload(
-            prepared,
-            channelId,
-            controller.signal,
-          );
-          controller.signal.throwIfAborted();
-          replace(item.id, { status: "ready", uploaded });
-        } catch (error) {
-          if (!controller.signal.aborted)
-            replace(item.id, {
-              status: "error",
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Upload failed. Retry or remove this file.",
-            });
-        } finally {
-          if (active.get(item.id) === controller) {
-            active.delete(item.id);
-            pump();
-          }
-        }
-      })();
+    if (!attachments) throw new UploadError("unavailable");
+    const controller = new AbortController();
+    const combined = AbortSignal.any([signal, controller.signal]);
+    active.set(item.id, controller);
+    replace(item.id, {
+      status: "preparing",
+      error: undefined,
+      transfer: undefined,
+    });
+    try {
+      const prepared = await (attachments.prepare ?? prepareAttachment)(
+        item.file,
+        combined,
+      );
+      combined.throwIfAborted();
+      replace(item.id, { status: "uploading" });
+      const result = await abortable(
+        attachments.upload(prepared, channelId, combined, (sent, total) => {
+          if (
+            !combined.aborted &&
+            active.get(item.id) === controller &&
+            Number.isSafeInteger(sent) &&
+            Number.isSafeInteger(total) &&
+            total > 0 &&
+            sent >= 0 &&
+            sent <= total
+          )
+            replace(item.id, { transfer: { sent, total } });
+        }),
+        combined,
+      );
+      combined.throwIfAborted();
+      const uploaded = item.voice ? { ...result, voice: item.voice } : result;
+      replace(item.id, { status: "ready", uploaded });
+      return uploaded;
+    } catch (error) {
+      if (combined.aborted) {
+        if (signal.aborted && !controller.signal.aborted)
+          replace(item.id, {
+            status: "queued",
+            error: undefined,
+            transfer: undefined,
+          });
+      } else
+        replace(item.id, {
+          status: "error",
+          transfer: undefined,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Upload failed. Retry or remove this file.",
+        });
+      throw error;
+    } finally {
+      if (active.get(item.id) === controller) active.delete(item.id);
     }
   }
   const store = {
@@ -127,10 +182,17 @@ function attachmentDraft(
         }
       };
     },
-    add(files: readonly File[]) {
+    add(files: readonly File[], recording?: VoiceRecording) {
+      if (recording) {
+        validateRecording(recording);
+        if (files.length !== 1 || files[0] !== recording.file)
+          throw new Error("Invalid voice note attachment");
+      }
       if (!session.attachments) throw new UploadError("unavailable");
-      if (items.length + files.length > MAX_FILES)
-        throw new Error(`Attach at most ${MAX_FILES} files per message.`);
+      if (items.length + files.length > MAX_ATTACHMENT_FILES)
+        throw new Error(
+          `Attach at most ${MAX_ATTACHMENT_FILES} files per message.`,
+        );
       for (const file of files)
         if (!file.size || file.size > UPLOAD_MAX_BYTES)
           throw new UploadError("size");
@@ -151,12 +213,59 @@ function attachmentDraft(
             id: crypto.randomUUID(),
             file,
             status: "queued",
+            ...(recording
+              ? {
+                  voice: {
+                    duration: recording.duration,
+                    waveform: recording.waveform.map((n) =>
+                      Math.round(n * 100),
+                    ),
+                  },
+                }
+              : {}),
           }),
         ),
       ];
       owners.set(key, store);
       emit();
-      pump();
+    },
+    addUploaded(attachment: UploadedAttachment) {
+      if (!session.attachments) throw new UploadError("unavailable");
+      if (items.some((item) => item.uploaded?.url === attachment.url)) return;
+      if (items.length >= MAX_ATTACHMENT_FILES)
+        throw new Error(
+          `Attach at most ${MAX_ATTACHMENT_FILES} files per message.`,
+        );
+      // No local bytes are retained. Send reuses the already uploaded descriptor.
+      items = [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          file: new File([], attachment.name, { type: attachment.type }),
+          status: "ready",
+          uploaded: attachment,
+        },
+      ];
+      owners.set(key, store);
+      emit();
+    },
+    /** Moves already admitted files, with their results and errors, into an empty draft. */
+    adopt(files: readonly DraftAttachment[]) {
+      if (items.length || !files.length) return false;
+      items = files;
+      owners.set(key, store);
+      emit();
+      return true;
+    },
+    async prepareForSend(signal: AbortSignal) {
+      if (!items.length) return [];
+      const uploaded: UploadedAttachment[] = [];
+      for (const item of items) {
+        const current = items.find((candidate) => candidate.id === item.id);
+        if (!current) throw new UploadError("cancelled");
+        uploaded.push(await prepareOne(current, signal));
+      }
+      return uploaded;
     },
     remove(id: string) {
       const uploaded = items.find((item) => item.id === id)?.uploaded;
@@ -165,13 +274,11 @@ function attachmentDraft(
       active.delete(id);
       items = items.filter((item) => item.id !== id);
       emit();
-      pump();
     },
     retry(id: string) {
       if (!items.some((item) => item.id === id && item.status === "error"))
         return;
-      replace(id, { status: "queued", error: undefined });
-      pump();
+      replace(id, { status: "queued", error: undefined, transfer: undefined });
     },
     cancel: cancelActive,
     clear() {
@@ -183,6 +290,16 @@ function attachmentDraft(
     },
   };
   return store;
+}
+
+/** A confirmed deletion discards only this session's exact scoped composer files.
+ * A missing store is a no-op; do not allocate a draft merely to clear it. */
+export function clearAttachmentDraft(session: ComposerSession, key: string) {
+  const owners = drafts.get(session);
+  const store = owners?.get(key);
+  if (!store) return;
+  store.clear(); // abort uploads before disposing the scoped entry
+  if (owners?.get(key) === store) owners.delete(key);
 }
 
 export function useAttachmentDraft(
@@ -200,6 +317,8 @@ export function useAttachmentDraft(
   return {
     store,
     items,
-    blocked: items.some((item) => item.status !== "ready"),
+    blocked: items.some((item) =>
+      ["preparing", "uploading", "error"].includes(item.status),
+    ),
   };
 }

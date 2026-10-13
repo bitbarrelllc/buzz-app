@@ -66,18 +66,41 @@ function OwnedTool({
     useState<
       Pick<
         ComposerToolProps,
-        "insertText" | "insertMention" | "insertResource" | "focus"
+        | "insertText"
+        | "insertMention"
+        | "insertMentions"
+        | "insertResource"
+        | "focus"
+        | "capture"
       >
     >();
   useLayoutEffect(() => {
     let live = true;
+    let release: (() => void) | undefined;
     const active = () =>
       live && registry.snapshot().includes(tool) && !current.current.disabled;
     setCommands({
+      capture: (Capture) => {
+        if (!active() || !current.current.capture) return false;
+        const cancel = current.current.capture((props) => (
+          <Capture
+            {...props}
+            accept={(recording) => active() && props.accept(recording)}
+          />
+        ));
+        if (!cancel) return false;
+        release = cancel;
+        return () => {
+          cancel();
+          if (release === cancel) release = undefined;
+        };
+      },
       insertText: (text) =>
         active() ? current.current.insertText(text) : false,
       insertMention: (recipient) =>
         active() ? current.current.insertMention(recipient) : false,
+      insertMentions: (recipients) =>
+        active() ? current.current.insertMentions(recipients) : false,
       insertResource: (resource) =>
         active()
           ? current.current.insertResource(resource)
@@ -88,6 +111,7 @@ function OwnedTool({
     });
     return () => {
       live = false;
+      release?.();
     };
   }, [tool, registry]);
   const Tool = tool.component;

@@ -1,6 +1,6 @@
 # Mention rules
 
-`version 1` · `client contract` · `uses existing tags`
+`version 2` · `client contract` · `uses existing tags`
 
 ## Abstract
 
@@ -9,7 +9,9 @@ orders the choices, when Space completes a mention, and what a client sends when
 the user mentions someone outside the channel. Clients that follow it give the
 same search the same list and send the same tags.
 
-The `buzz.mentions` plugin implements the chooser. The relay message writer and
+The `buzz.mentions` plugin implements the chooser: the choice set, matching,
+order, and Space. The composer decides which keys a draft may address and asks
+before sending to people outside the channel. The relay message writer and
 message fold implement the tags. This directory owns the spec and the
 [portable fixtures](mention-rules.fixtures.json).
 
@@ -50,15 +52,17 @@ not authorization.
 
 ## 1. Choice set
 
-For a stream or forum channel that is not archived and not read-only, the choice
-set is:
+For any known channel (stream, untyped channel, forum or DM) that is not
+archived and not read-only, the choice set is:
 
 1. the channel's members;
 2. the agents that the client offers for mention in this channel; and
 3. people and agents found by a community directory search for the current query.
 
-DMs and sessions MUST NOT add directory people. A session that invites agents
-uses its own agent list instead of item 3. Archived or read-only channels have
+Sessions MUST NOT add directory people. This follows the channel type, so it
+also holds in session composers that do not invite agents, such as media
+comments and edits. A session that invites agents uses its own agent list
+instead of item 3. Archived or read-only channels have
 no choices. Clients MUST exclude invalid keys and identities known to be
 archived, except the viewer's own key: a user always sees themself. Unknown
 archive state does not exclude a key.
@@ -75,11 +79,12 @@ NOT contain `@`, a line break, or a tab. It MAY contain spaces. A client MAY loo
 back only 160 characters from the caret. A caret outside the text gives no query.
 
 A query with a space is **admitted** only while it is still the start of a
-known name (case-insensitive). A query that is a complete known name plus a
-trailing space is not admitted, so the user can keep typing prose. The known
-names are the aliases and labels of the current choice set, including people
-that the directory search for this query found. This check is the `admission`
-fixture section.
+known name. Compare with the section 3 normalization of the names, but do not
+trim the query: its trailing space matters here. A query that is a complete
+known name plus a trailing space is not admitted, so the user can keep typing
+prose. The known names are the aliases and labels of the current choice set,
+including people that the directory search for this query found. This check is
+the `admission` fixture section.
 
 Admission does not decide whether the client searches. A multi-word query can
 name someone the client does not know yet, for example `@Mary J` for a Mary
@@ -97,9 +102,28 @@ that the user already selected does not open a query.
 
 ## 3. Matching (normative)
 
-Normalize the query and each name by trimming at both ends and lowercasing
-(ECMAScript `trim` and `toLowerCase`). An empty query matches every choice at
-tier 0. Otherwise, a name matches the query at the first tier that applies:
+Normalize the query and each name the same way. For each code point, apply
+Unicode NFKD, remove the combining accents in the Unicode "Combining
+Diacritical Marks" blocks (U+0300–U+036F, U+1AB0–U+1AFF, U+1DC0–U+1DFF,
+U+20D0–U+20FF, U+FE20–U+FE2F), lowercase (ECMAScript `toLowerCase`), and
+replace final sigma `ς` with `σ`. Then trim both ends (ECMAScript `trim`). So
+`jose` matches `José`, and `παρος` matches `ΠΑΡΟΣ`. Other marks stay: in many
+scripts they make a different letter, so `राम` does not match `रम` and `ジョン`
+does not match `ション`. Letters without a decomposition do not fold: `ø`, `ł`,
+`æ`, `ß` and `ı` stay themselves. Use Unicode 15.0 or later data; Unicode
+normalization does not change for assigned characters, so later versions give
+the same fixture results. The `matching` fixtures pin cases that differ between
+common folding APIs. A client MUST
+NOT substitute a broader case or diacritic folding (for example, Swift
+`.diacriticInsensitive` or full Unicode case folding).
+
+Space selection (section 5), query admission (section 2, without trimming the
+query), and ordering by normalized labels (section 4) use this same
+normalization. Shared code:
+[person-match.ts](../../features/search/person-match.ts).
+
+An empty query matches every choice at tier 0. Otherwise, a name matches the
+query at the first tier that applies:
 
 | Tier | Rule |
 | --- | --- |
@@ -108,8 +132,13 @@ tier 0. Otherwise, a name matches the query at the first tier that applies:
 | 2 | A word of the name equals the query |
 | 3 | A word of the name starts with the query |
 
-Words are split on runs of Unicode whitespace. Nothing else matches. Text inside
-a word does not match: `oney` does not find `Honey`.
+A **word** is a run of letters, marks, and digits (Unicode general categories
+L, M, and N). Every other code point separates words, so `jane` finds
+`Mary-Jane` at tier 2 and `brien` finds `O'Brien`. For tiers 2 and 3, the match
+starts where a word starts; it equals the word (tier 2) when the next code point
+is not a letter, mark, or digit. A query that contains whitespace matches only
+at tiers 0 and 1. Nothing else matches. Text inside a word does not match:
+`oney` does not find `Honey`. This check is the `matching` fixture section.
 
 A choice's **match** is the tier of its label. If the label does not match, the
 match is 4 plus the best tier among its aliases. A choice with no aliases never
@@ -151,11 +180,18 @@ of these are true:
 
 - the normalized query is not empty;
 - exactly one choice with aliases has an alias or label equal to the query;
-- no choice has an alias or label that starts with the query plus a space; and
+- no choice has an alias or label that **continues** the query: the normalized
+  name is longer, starts with the normalized query, and the next code point is
+  not a letter, mark, or digit (`Jose Luis` and `Jose-Luis` continue `jose`;
+  `Josefa` does not);
+- the full choice set is known: no directory search for this query is waiting,
+  running, or failed, and the search reported no more pages; and
 - that choice is shown and can still be chosen.
 
-Check this against the full choice set, not only the shown rows. Otherwise Space
-is a normal space. Tab, Enter, and a click select the highlighted row.
+Check this against the full choice set, not only the shown rows. A namesake that
+a pending search would find makes the name ambiguous, so Space MUST NOT select
+before the search finishes. Otherwise Space is a normal space. Tab, Enter, and a
+click select the highlighted row.
 
 ## 6. List stability (desktop behavior; not in the fixtures)
 
@@ -182,9 +218,9 @@ These rules keep a row from moving under the user's pointer or keyboard.
 
 ## 7. Sending to people outside the channel
 
-When a draft addresses an outside key in a stream or forum, the client MUST ask
-before it sends. The prompt names the outside people. It offers these actions,
-like block/buzz desktop:
+When a draft addresses an outside key in a stream, untyped channel or forum,
+the client MUST ask before it sends. The prompt names the outside people. It
+offers these actions, like block/buzz desktop:
 
 | Action | Shown | Result |
 | --- | --- | --- |
@@ -192,6 +228,13 @@ like block/buzz desktop:
 | Do nothing | With add-member permission | Send. Outside keys become references. Nobody is added or notified. |
 | Send anyway | Without add-member permission | The same as Do nothing. |
 | Close or Escape | Always | Do not send. Keep the draft. |
+
+A DM has fixed participants, so there is no choice to make. The client MUST NOT
+ask. It sends outside keys in a DM as references, which do not notify them. The
+chooser row says so before the user picks the person.
+
+A session MUST NOT ask either, in any session composer. Its recipients follow
+the session choice policy.
 
 Adding a member from this prompt MUST NOT start an agent. The sent message is
 what notifies it. If the draft or its attachments change while adding runs, the
@@ -228,6 +271,7 @@ each choice supplies its own label.
 
 | Section | Tests |
 | --- | --- |
+| `matching` | Section 3. `expected` is the tier of `label` for `query` (0 to 3), or `null` when it does not match. |
 | `ranking` | Sections 3 and 4. `expected` is the full ordered key list. |
 | `space` | Section 5. `expected` is a key or `null`. |
 | `query` | Section 2 syntax. `expected` is `{start, end, query}` or `null`. |
@@ -254,12 +298,14 @@ bin/pnpm exec vitest run src/bundled/mentions/mention-ranking.test.ts \
 
 ## Desktop adapter (informative)
 
-- Choice set: [mention-candidates.ts](../../features/messages/mention-candidates.ts)
+- Choice set: [mention-candidates.ts](mention-candidates.ts)
   and [use-mention-choices.ts](use-mention-choices.ts). Directory pages come from
   [useMentionDirectory.ts](useMentionDirectory.ts).
 - Matching, order, and Space: [mention-ranking.ts](mention-ranking.ts).
 - Query syntax: [mention-query.ts](mention-query.ts).
-- Outside-channel prompt: [useNonmemberMentions.tsx](../../features/messages/useNonmemberMentions.tsx).
+- Recipient admission (host): [mention-admission.ts](../../features/messages/mention-admission.ts).
+  Explicit-choice recency (host): [mention-history.ts](../../features/messages/mention-history.ts).
+- Outside-channel prompt (host): [useNonmemberMentions.tsx](../../features/messages/useNonmemberMentions.tsx).
 - Tags: [messages.ts](../../features/relay/messages.ts) writes them, and
   [fold.ts](../../features/relay/fold.ts) reads them.
 

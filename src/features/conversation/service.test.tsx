@@ -10,6 +10,12 @@ import type { Contribution } from "../../plugins/contributions";
 import * as emoji from "../../bundled/emoji";
 import * as mentions from "../../bundled/mentions";
 import * as links from "../../bundled/links";
+import {
+  formatDayGroupLabel,
+  formatFullTimestamp,
+  formatItemTimestamp,
+} from "../../shared/datetime";
+import { relativeTimestamp } from "../../shared/relative-timestamp";
 
 const Component = () => null;
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -43,6 +49,13 @@ it("registers both surfaces under the injecting plugin scope, removes and replac
       expect(conversation.ui.Composer).toBe(conversation.ui.Composer);
       expect(conversation.ui.Message).toBe(conversation.ui.Message);
       expect(conversation.ui.Thread).toBe(conversation.ui.Thread);
+      // Plugins get the host's own labels; their output is tested at the owner.
+      expect(conversation.format).toEqual({
+        itemTimestamp: formatItemTimestamp,
+        dayGroupLabel: formatDayGroupLabel,
+        fullTimestamp: formatFullTimestamp,
+        relativeTimestamp,
+      });
       ctx.conversation.registerTool({
         id: "tool",
         title: "Tool",
@@ -187,6 +200,32 @@ it("bundled Links registers, withdraws, and restores a fresh renderer", async ()
   expect(h.service.links.snapshot()[0]?.revision).toBe("two");
 });
 
+it("rejects a link renderer order that is neither a number nor a function", async () => {
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      const base = { id: "link", title: "Link", matches: () => true };
+      for (const order of [null, "100", {}, true]) {
+        expect(() =>
+          ctx.conversation.registerLink({
+            ...base,
+            order,
+            component: Component,
+          } as never),
+        ).toThrow("order");
+      }
+      ctx.conversation.registerLink({
+        ...base,
+        order: (url) => (url.startsWith("https://") ? 100 : 0),
+        component: Component,
+      });
+    },
+  });
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() => expect(h.service.links.snapshot()).toHaveLength(1));
+  expect(h.runtime.snapshot()[h.plugin.manifest.id]?.status).toBe("active");
+});
+
 it("withdraws link presentation when plugin activation fails", async () => {
   const h = harness({
     inject: ["conversation"],
@@ -274,6 +313,7 @@ it("owns accessories through disable, replacement and failed activation", async 
       ctx.conversation.registerAccessory({
         id: "status",
         title: "Status",
+        placement: "message",
         component: Component,
       });
     },
@@ -298,6 +338,7 @@ it("owns accessories through disable, replacement and failed activation", async 
       ctx.conversation.registerAccessory({
         id: "status",
         title: "Status",
+        placement: "message",
         component: Component,
       });
       throw new Error("failed after registration");

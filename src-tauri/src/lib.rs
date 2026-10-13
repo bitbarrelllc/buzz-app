@@ -1,12 +1,20 @@
+mod archive;
+use archive::relay_archive;
 mod browser;
+#[cfg(target_os = "macos")]
+mod close_menu;
+mod oauth_callback;
+use oauth_callback::{
+    oauth_callback_begin, oauth_callback_cancel, oauth_callback_wait, OAuthCallbackHost,
+};
 #[cfg(test)]
 mod browser_permissions_tests;
+mod pairing;
 use browser::{
     browser_action, browser_attach, browser_detach, browser_navigate, browser_set_bounds,
     browser_status,
 };
-mod agent_models;
-mod agents;
+mod app_agents;
 mod deep_links;
 mod dock;
 mod huddle_window;
@@ -14,46 +22,56 @@ use huddle_window::{
     huddle_window_action, huddle_window_open, huddle_window_reset_incoming, huddle_window_update,
     huddle_window_watch, HuddleWindow,
 };
+#[cfg(test)]
+#[path = "enterprise_adapter_url.rs"]
+mod enterprise_adapter_url;
+#[cfg(test)]
+#[path = "enterprise_auth_build.rs"]
+mod enterprise_auth_build;
+mod enterprise_login_gate;
+mod enterprise_relay_url;
 mod host_command;
+mod host_process;
 mod host_request;
 mod identity;
+mod image_clipboard;
+
 mod notifications;
 mod os_idle;
+mod window_controls;
+mod window_state;
 use os_idle::get_os_idle_seconds;
 mod relay;
-use identity::{identity_create, identity_export, identity_import, identity_restore, IdentityHost};
+mod sign_out;
+use identity::{
+    identity_create, identity_export, identity_import, identity_prepare_remote_agent_authorization,
+    identity_restore, identity_sign_builderlab_binding, IdentityHost,
+};
 use relay::{huddle_close, huddle_open, huddle_pcm, huddle_touch, Huddles};
 use relay::{
-    media_download, relay_agent_library, relay_agent_log_proof, relay_agent_memories_read,
-    relay_agent_observer, relay_agent_resolve, relay_channel_publish, relay_channel_sign,
-    relay_decode_read_state, relay_decode_sidebar, relay_direct_message, relay_http,
-    relay_kit_decode, relay_kit_prepare, relay_kit_sign, relay_publish_read_state, relay_sign,
-    relay_sign_read_state, relay_sign_sidebar, relay_upload, relay_upload_cancel,
-    relay_workflow_runs,
+    media_copy_image, media_download, media_stream_base, relay_agent_library,
+    relay_agent_log_proof, relay_agent_memories_read, relay_agent_observer, relay_agent_resolve,
+    relay_channel_publish, relay_channel_sign, relay_decode_read_state, relay_decode_reminders,
+    relay_decode_sidebar, relay_direct_message, relay_git_authorization, relay_http,
+    relay_kit_decode, relay_kit_prepare, relay_kit_sign, relay_project_git,
+    relay_project_git_cancel, relay_publish_read_state, relay_sign, relay_sign_read_state,
+    relay_sign_reminder, relay_sign_sidebar, relay_upload, relay_upload_begin, relay_upload_cancel,
+    relay_upload_chunk, relay_workflow_runs,
 };
 mod terminal;
-use agent_models::{agent_models_begin, agent_models_cancel, agent_models_run, ModelHost};
-mod goose_models;
-mod harness_setup;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod managed_pi;
-mod pi_models;
-use agents::{
-    agent_control_action, agent_control_attach_mention, agent_control_clone_settings,
-    agent_control_create_authorize, agent_control_create_commit, agent_control_create_prepare,
-    agent_control_creation_profile, agent_control_delete, agent_control_import_commit,
-    agent_control_import_preview, agent_control_local_clone_settings, agent_control_log_challenge,
-    agent_control_read_log, agent_control_save, agent_control_save_defaults,
-    agent_control_snapshot, agent_control_start_on_app_launch, agent_control_use_here, AgentHost,
-};
+#[cfg(test)]
+mod test_executable;
 use buzzodz_plugins::{
     imports::{prepare_folder, prepare_git, PreparedImport, Preview},
     Catalog, InstallationResult, Manager,
 };
 use deep_links::{deep_link_take, deep_link_watch, DeepLinks};
 use dock::{dock_permission, unread_indicator_set};
-use harness_setup::{pi_install, HarnessSetup};
+use enterprise_login_gate::enterprise_login_gate;
 use host_command::plugin_host_run_command;
+use host_process::{
+    plugin_host_process_kill, plugin_host_process_spawn, plugin_host_process_write, HostProcesses,
+};
 use host_request::plugin_host_request;
 use notifications::{notification_show, Notifications};
 #[cfg(target_os = "macos")]
@@ -233,6 +251,27 @@ async fn prepare_import(
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+async fn workspace_pick_folder<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Choose a source repository")
+            .blocking_pick_folder()
+            .map(|folder| {
+                folder
+                    .into_path()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn plugin_import_folder<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     imports: tauri::State<'_, Imports>,
@@ -252,9 +291,10 @@ async fn plugin_import_git(
     imports: tauri::State<'_, Imports>,
     repository: String,
     reference: String,
+    authorization: Option<String>,
 ) -> Result<Option<Preview>, String> {
     prepare_import(imports.inner().clone(), move || {
-        prepare_git(&repository, &reference).map(Some)
+        prepare_git(&repository, &reference, authorization.as_deref()).map(Some)
     })
     .await
 }
@@ -362,20 +402,8 @@ async fn plugin_recover(
 ) -> Result<InstallationResult, String> {
     with_manager(manager, |m| m.recover().map(|catalog| ready(&m, catalog))).await
 }
-/// Tauri's restart ignores `prevent_exit`, so confirm the same agent teardown
-/// that gates Quit before requesting it; a failure keeps the app running.
 #[tauri::command]
 async fn update_restart<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), String> {
-    let handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        handle.state::<ModelHost>().shutdown();
-        handle.state::<AgentHost>().shutdown()
-    })
-    .await
-    .map_err(|_| "Agent shutdown could not be confirmed".to_owned())?
-    .map_err(|error| {
-        format!("Agent shutdown incomplete; restart Buzz to finish the update: {error}")
-    })?;
     app.request_restart();
     Ok(())
 }
@@ -390,16 +418,28 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         huddle_close,
         huddle_pcm,
         huddle_touch,
+        pairing::pairing_account,
+        pairing::pairing_start,
+        pairing::pairing_status,
+        pairing::pairing_confirm,
+        pairing::pairing_deny,
+        pairing::pairing_cancel,
         identity_restore,
         identity_import,
         identity_create,
         identity_export,
+        identity_prepare_remote_agent_authorization,
+        identity_sign_builderlab_binding,
+        enterprise_login_gate,
         relay_sign,
         relay_decode_read_state,
         relay_sign_read_state,
         relay_publish_read_state,
         relay_http,
         relay_workflow_runs,
+        relay_project_git,
+        relay_project_git_cancel,
+        relay_git_authorization,
         relay_channel_sign,
         relay_channel_publish,
         relay_kit_sign,
@@ -408,15 +448,23 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         relay_direct_message,
         relay_decode_sidebar,
         relay_sign_sidebar,
+        relay_decode_reminders,
+        relay_sign_reminder,
         relay_agent_resolve,
         relay_agent_log_proof,
+        relay_archive,
         relay_agent_observer,
         relay_agent_memories_read,
         relay_agent_library,
+        relay_upload_begin,
+        relay_upload_chunk,
         relay_upload,
         relay_upload_cancel,
         media_download,
+        media_copy_image,
+        media_stream_base,
         get_os_idle_seconds,
+        workspace_pick_folder,
         plugin_import_folder,
         plugin_import_git,
         plugin_import_install,
@@ -428,31 +476,34 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         plugin_recover,
         plugin_host_run_command,
         plugin_host_request,
-        agent_control_create_prepare,
-        agent_control_create_authorize,
-        agent_control_create_commit,
-        agent_control_creation_profile,
-        agent_control_snapshot,
-        agent_control_log_challenge,
-        agent_control_read_log,
-        pi_install,
-        agent_control_use_here,
-        agent_control_local_clone_settings,
-        agents::agent_security,
-        agent_control_save,
-        agent_control_save_defaults,
-        agent_control_delete,
-        agent_control_action,
-        agent_control_attach_mention,
-        agent_control_start_on_app_launch,
-        agent_control_clone_settings,
-        agent_control_import_preview,
-        agent_control_import_commit,
-        agent_models_begin,
-        agent_models_cancel,
-        agent_models_run,
+        plugin_host_process_spawn,
+        plugin_host_process_write,
+        plugin_host_process_kill,
+        oauth_callback_begin,
+        oauth_callback_wait,
+        oauth_callback_cancel,
+        app_agents::app_agent_list,
+        app_agents::app_agent_create,
+        app_agents::app_agent_portable,
+        app_agents::app_agent_port,
+        app_agents::app_agent_rename,
+        app_agents::app_agent_set_picture,
+        app_agents::app_agent_delete,
+        app_agents::app_agent_forget,
+        app_agents::app_agent_publish,
+        app_agents::app_agent_publish_profile,
+        app_agents::app_agent_query,
+        app_agents::app_agent_upload,
+        app_agents::app_agent_media,
+        app_agents::app_agent_remember,
+        app_agents::app_agent_claim,
+        app_agents::app_agent_release,
         title_bar_double_click,
         notification_show,
+        #[cfg(target_os = "macos")]
+        notifications::macos::notification_permission_state,
+        #[cfg(target_os = "macos")]
+        notifications::macos::request_notification_access,
         deep_link_take,
         deep_link_watch,
         dock_permission,
@@ -464,11 +515,42 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         terminal_resize,
         terminal_close,
         terminal_close_owner,
-        update_restart
+        update_restart,
+        sign_out::sign_out,
+        sign_out::sign_out_wipe_refusal
     ]
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = app_context();
+    // A pending Sign out finishes before any window, webview storage, service or
+    // identity read; if it can't, Buzz explains and exits without opening.
+    let instance = sign_out::Paths::resolve(&context.config().identifier).map(|paths| {
+        sign_out::boot(
+            &paths,
+            |app_data| {
+                let credentials = buzz_agent_controller::PlatformCredentials::default();
+                let old = app_data.join(sign_out::OLD_AGENTS);
+                if old
+                    .try_exists()
+                    .map_err(|error| format!("check agent registry: {error}"))?
+                {
+                    buzz_agent_controller::delete_local_agent_keys(old, &credentials)?;
+                }
+                // The pending erase runs before the temporary startup migration.
+                for folder in [sign_out::AGENTS, sign_out::migrate_agents::LEGACY] {
+                    buzz_agent_controller::AppAgents::open(
+                        app_data.join(folder).join("identities.json"),
+                    )
+                    .delete_keys(&credentials)?;
+                }
+                Ok(())
+            },
+            identity::remove_saved_key,
+        )
+        .unwrap_or_else(|message| sign_out::exit_with(&message))
+    });
+    let identity = IdentityHost::default();
     let builder = tauri::Builder::default();
     let builder = if !tauri::is_dev() {
         // Single instance comes first, as its documentation requires. Its deep-link
@@ -483,11 +565,44 @@ pub fn run() {
         builder
     };
     let builder = builder
+        .plugin(window_controls::init())
+        .plugin(window_state::builder().build())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
+            if let Some(window) = app.get_window("main") {
+                if let Err(error) = window_state::restore(&window) {
+                    eprintln!("Could not restore Buzz window: {error}");
+                }
+            }
+            #[cfg(target_os = "macos")]
+            notifications::macos::init();
             deep_links::setup(app.handle());
+            app.manage(relay::Spools::new(
+                app.path()
+                    .app_cache_dir()
+                    .map(|path| path.join("upload-spools"))
+                    .map_err(|_| "Media preparation could not access temporary storage".to_owned()),
+            ));
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+                loop {
+                    interval.tick().await;
+                    handle
+                        .state::<relay::Spools>()
+                        .reap(&handle.state::<relay::Uploads>());
+                }
+            });
+            // Relay `<video>` and `<audio>` load from this listener; without it
+            // they show as unavailable.
+            match relay::MediaStream::start(app.state::<IdentityHost>().inner().clone()) {
+                Ok(stream) => {
+                    app.manage(stream);
+                }
+                Err(error) => eprintln!("Could not start the media listener: {error}"),
+            }
             // Only app-owned storage is created. Preview uses the OS-resolved legacy
             // parent, never a browser-supplied path or a different environment source.
             let paths = (|| {
@@ -500,29 +615,33 @@ pub fn run() {
                     .path()
                     .data_dir()
                     .map_err(|_| "Could not resolve legacy library directory")?;
-                let workspace = app
-                    .path()
-                    .home_dir()
-                    .map_err(|_| "Could not resolve agent workspace")?
-                    .join(".buzz");
-                Ok((root, legacy, workspace))
+                Ok((root, legacy))
             })();
-            app.manage(ModelHost::new(
+            app.manage(app_agents::AppAgentHost::new(
                 paths
                     .as_ref()
-                    .map(|(root, _, _)| root.clone())
+                    .map(|(root, _)| {
+                        root.with_file_name(sign_out::AGENTS)
+                            .join("identities.json")
+                    })
                     .map_err(Clone::clone),
+                paths
+                    .as_ref()
+                    .map(|(root, legacy)| buzz_agent_controller::OldStores {
+                        harness: root.join("agents.json"),
+                        data_dir: legacy.clone(),
+                    })
+                    .map_err(Clone::clone),
+                // `just desktop` builds step aside for a packaged app.
+                !tauri::is_dev(),
             ));
-            let resources = app
-                .path()
-                .resource_dir()
-                .map(|root| root.join("agent-runtime"))
-                .map_err(|_| "Could not resolve app runtime resources".to_owned());
-            app.manage(AgentHost::initialize(paths, resources));
             Ok(())
         });
     #[cfg(target_os = "macos")]
-    let builder = builder.manage(TitleBarFillFrames::default());
+    let builder = builder
+        .manage(TitleBarFillFrames::default())
+        .menu(close_menu::menu)
+        .on_menu_event(close_menu::handle);
     // Register the updater only in configured release builds; omit it locally.
     #[cfg(buzz_updater_enabled)]
     let builder = if tauri::is_dev() {
@@ -530,15 +649,23 @@ pub fn run() {
     } else {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
     };
+    let builder = match instance {
+        Some(instance) => builder.manage(instance),
+        None => builder,
+    };
     builder
-        .manage(IdentityHost::default())
+        .manage(image_clipboard::ImageClipboard::default())
+        .manage(identity)
+        .manage(archive::ArchiveHost::default())
+        .manage(pairing::Pairing::default())
         .manage(Huddles::default())
         .manage(HuddleWindow::default())
         .manage(relay::Uploads::default())
         .register_asynchronous_uri_scheme_protocol("buzz-media", relay::media_protocol)
         .manage(Imports::default())
-        .manage(HarnessSetup::default())
         .manage(Terminals::default())
+        .manage(HostProcesses::default())
+        .manage(OAuthCallbackHost::default())
         .manage(Notifications::default())
         .manage(DeepLinks::default())
         .manage(PluginManager(Manager::from_env()))
@@ -561,8 +688,24 @@ pub fn run() {
                 }
             }
         })
-        .on_page_load(browser::page_load)
+        .on_page_load(|webview, payload| {
+            if let Err(error) = webview
+                .state::<OAuthCallbackHost>()
+                .document_load(webview.label(), payload.event())
+            {
+                eprintln!("OAuth callback cleanup failed: {error}");
+            }
+            if webview.label() == "main" && matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                webview.state::<pairing::Pairing>().cancel_all();
+                webview.state::<relay::Spools>().cancel_all(&webview.state::<relay::Uploads>());
+                // Processes belong to the page that started them.
+                webview.state::<HostProcesses>().stop_all();
+            }
+            browser::page_load(webview, payload);
+        })
         .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed | tauri::WindowEvent::CloseRequested { .. }) { window.state::<pairing::Pairing>().cancel_all(); }
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) { window.state::<relay::Spools>().cancel_all(&window.state::<relay::Uploads>()); }
             #[cfg(target_os = "macos")]
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -576,32 +719,29 @@ pub fn run() {
             }
             browser::window_event(window, event);
         })
-        .build(app_context())
+        .build(context)
         .expect("failed to build Buzz Foundation")
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if matches!(event, tauri::RunEvent::Reopen { .. }) {
                 deep_links::focus_main(app);
             }
-            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                app.state::<ModelHost>().shutdown();
-                if app.state::<AgentHost>().shutdown().is_err() {
-                    api.prevent_exit();
-                    eprintln!("Agent shutdown incomplete; app exit was refused");
-                }
-            }
             if matches!(event, tauri::RunEvent::Exit) {
-                app.state::<HarnessSetup>().shutdown();
-                browser::shutdown();
-                if let Err(error) = app.state::<Terminals>().shutdown() {
-                    eprintln!("Terminal shutdown failed: {error}");
-                }
-                app.state::<ModelHost>().shutdown();
-                if app.state::<AgentHost>().shutdown().is_err() {
-                    eprintln!("Native agent shutdown could not be confirmed");
-                }
+                shut_down(app);
             }
         });
+}
+
+/// Best-effort native teardown when Buzz exits, from Quit or a fenced sign-out.
+pub(crate) fn shut_down<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.state::<relay::Spools>()
+        .cancel_all(&app.state::<relay::Uploads>());
+    app.state::<image_clipboard::ImageClipboard>().release();
+    app.state::<HostProcesses>().shutdown();
+    browser::shutdown();
+    if let Err(error) = app.state::<Terminals>().shutdown() {
+        eprintln!("Terminal shutdown failed: {error}");
+    }
 }
 
 fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {

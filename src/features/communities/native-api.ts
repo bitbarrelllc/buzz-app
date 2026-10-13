@@ -8,6 +8,7 @@ import {
   nativeRelaySigner,
 } from "../relay/native";
 import { leaveRefusal, leaveRequestTemplate } from "./leave-protocol";
+import { adminReason, memberCommand } from "./admin-protocol";
 import { readRelayLibrary } from "../agents/relay-library";
 import { eventDto } from "../relay/events";
 import { readApiFailure } from "../relay/http-admission";
@@ -223,17 +224,18 @@ export async function nativeCommunityRequest(
       throw new Error("Profile publication was not confirmed");
     return result;
   }
-  if (route === "authorize-agent") {
-    // Native signs only the key it generated for the pending create request.
-    const input = body as { pubkey?: unknown; owner?: unknown } | undefined;
-    if (typeof input?.pubkey !== "string" || typeof input.owner !== "string")
-      throw new Error("Invalid agent owner authorization");
-    const auth = await invoke<string[]>("agent_control_create_authorize", {
-      destination: community,
-      owner: input.owner,
-      pubkey: input.pubkey,
-    });
-    return { auth };
+  if (route === "member") {
+    // The relay decides each change; only its allowed refusals come back verbatim.
+    const event = await nativeRelaySigner(community).signEvent(
+      memberCommand(body),
+    );
+    const result = await readResponse(
+      await nativeRelayRequest(community, "/events", event, signal),
+      adminReason,
+    );
+    if (result.event_id !== event.id || typeof result.accepted !== "boolean")
+      throw new Error("Member change could not be confirmed");
+    return result;
   }
   if (route === "leave") {
     // The membership refusals come back verbatim so the caller can tell an
@@ -295,12 +297,14 @@ async function readResponse(
   response: Response,
   refusal: (result: unknown) => string | undefined = admissionRefusal,
 ): Promise<Record<string, unknown>> {
-  const result = await response.json();
+  // A body that is not JSON (proxy HTML, plain text) is never shown: it maps to
+  // the status-based failure or, on success, an invalid response.
+  const result: unknown = await response.json().catch(() => undefined);
   if (!response.ok)
     throw new Error(
       refusal(result) ?? `Community request failed (${response.status})`,
     );
   if (!result || typeof result !== "object" || Array.isArray(result))
     throw new Error("Invalid community response");
-  return result;
+  return result as Record<string, unknown>;
 }

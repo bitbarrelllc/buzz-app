@@ -9,6 +9,75 @@ test.use({
   historyCounts: { alpha: 3, beta: 1 },
 });
 
+// Native Tab must discover deferred controls before the browser chooses focus;
+// continuation rows have no avatar that could activate them on the way in.
+for (const direction of ["forward", "backward"]) {
+  test(`Tab enters untouched continuation actions ${direction} without an extra stop`, async ({
+    page,
+    app,
+  }) => {
+    await open(page, app);
+    await page
+      .getByRole("textbox", { name: "Message #Alpha", exact: true })
+      .click();
+    await page.mouse.move(0, 0);
+    const before = app.append(
+      "primary",
+      "alpha",
+      "[Before](https://example.com/before)",
+    );
+    const target = app.append("primary", "alpha", "Untouched continuation");
+    const after = app.append(
+      "primary",
+      "alpha",
+      "Following author",
+      true,
+      false,
+    );
+    const row = (event) =>
+      page.locator(`[data-channel-timeline] [data-message-id="${event.id}"]`);
+    await expect(
+      row(target).locator('[data-layout="continuation"]'),
+    ).toBeVisible();
+    await expect(row(after)).toBeVisible();
+    await settle(page);
+    const actions = row(target).getByRole("group", {
+      name: "Message actions",
+      includeHidden: true,
+    });
+    await expect(
+      actions.getByRole("button", { includeHidden: true }),
+    ).toHaveCount(0);
+    if (direction === "forward")
+      await row(before)
+        .getByRole("link", { name: "Before", exact: true })
+        .focus();
+    else
+      await row(after)
+        .getByRole("button", { name: /^View .* profile$/ })
+        .first()
+        .focus();
+    await expect(
+      actions.getByRole("button", { includeHidden: true }),
+    ).toHaveCount(0);
+    await page.keyboard.press(direction === "forward" ? "Tab" : "Shift+Tab");
+    await expect(
+      actions.getByRole("button", {
+        name:
+          direction === "forward" ? "React with 👍" : "More message actions",
+        exact: true,
+      }),
+    ).toBeFocused();
+    await page.keyboard.press(direction === "forward" ? "Tab" : "Shift+Tab");
+    await expect(
+      actions.getByRole("button", {
+        name: direction === "forward" ? "React with ❤️" : "Copy link",
+        exact: true,
+      }),
+    ).toBeFocused();
+  });
+}
+
 // Browser-only contracts: actual hover/coarse-pointer layout, portal focus return,
 // and opening a real thread then focusing its real editor. Clipboard failures and
 // mention matrices live in colocated unit tests, not a browser scenario matrix.
@@ -114,8 +183,9 @@ test("message actions reveal, copy, restore focus and reply across responsive la
   await expect(actions).toHaveCSS("opacity", "1");
   await page.keyboard.press("Enter");
   await expect(menu).toBeVisible();
+  // Keyboard opening focuses the first item; Mark unread leads a managed row.
   await expect(
-    page.getByRole("menuitem", { name: "Copy message", exact: true }),
+    page.getByRole("menuitem", { name: "Mark unread", exact: true }),
   ).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
@@ -184,7 +254,9 @@ test("message actions reveal, copy, restore focus and reply across responsive la
     panel.getByRole("textbox", { name: "Reply to thread", exact: true }),
   ).toBeFocused();
   await page
-    .getByRole("button", { name: /^Close (?:thread|Thread tab)$/, exact: true })
+    .locator(
+      '.buzz-tabs-item:has([data-tab-value^="thread:"][aria-selected="true"]) > button:not([role="tab"]), button[aria-label="Close thread"]',
+    )
     .click();
   await expect(
     row.getByRole("button", { name: "Reply", exact: true }),
@@ -208,14 +280,18 @@ test("message actions reveal, copy, restore focus and reply across responsive la
     .click();
   await expect(replyBox).toBeFocused();
   await page
-    .getByRole("button", { name: /^Close (?:thread|Thread tab)$/, exact: true })
+    .locator(
+      '.buzz-tabs-item:has([data-tab-value^="thread:"][aria-selected="true"]) > button:not([role="tab"]), button[aria-label="Close thread"]',
+    )
     .click();
   await broadcastRow.getByRole("button", { name: /^View thread:/ }).click();
   await expect(
     panel.locator(`[data-message-id="${broadcast.id}"]`),
   ).toBeFocused();
   await page
-    .getByRole("button", { name: /^Close (?:thread|Thread tab)$/, exact: true })
+    .locator(
+      '.buzz-tabs-item:has([data-tab-value^="thread:"][aria-selected="true"]) > button:not([role="tab"]), button[aria-label="Close thread"]',
+    )
     .click();
   for (const width of [900, 603, 390]) {
     await page.setViewportSize({ width, height: 850 });
@@ -398,6 +474,24 @@ test("narrow timeline continuation actions never cover prose or move adjacent ro
   await page.mouse.move(0, 0);
   await expect(actions).toHaveCSS("opacity", "0");
   await settle(page);
+  const expectClockAligned = async () => {
+    // The caption-sized clock is centered beside the first prose line, including
+    // when interface scaling changes their independently owned type roles.
+    await expect
+      .poll(() =>
+        row.evaluate((element) => {
+          const clock = element
+            .querySelector('time > span[aria-hidden="true"]')
+            .getBoundingClientRect();
+          const prose = element.querySelector("p");
+          const firstLineCenter =
+            prose.getBoundingClientRect().top +
+            Number.parseFloat(getComputedStyle(prose).lineHeight) / 2;
+          return Math.abs(clock.top + clock.height / 2 - firstLineCenter);
+        }),
+      )
+      .toBeLessThan(0.5);
+  };
   const baseline = await following.boundingBox();
   for (const mode of ["hover", "focus"]) {
     if (mode === "hover") await row.hover();
@@ -411,6 +505,7 @@ test("narrow timeline continuation actions never cover prose or move adjacent ro
     expect(toolbar.y + toolbar.height).toBeLessThanOrEqual(prose.y);
     await expect(actions).toHaveCSS("position", "fixed");
     expect((await following.boundingBox()).y).toBe(baseline.y);
+    await expectClockAligned();
     await expect
       .poll(() =>
         link.evaluate((node) => {
@@ -425,6 +520,12 @@ test("narrow timeline continuation actions never cover prose or move adjacent ro
       )
       .toBe(true);
   }
+  await page.evaluate(() =>
+    document.documentElement.style.setProperty("--buzz-text-scale", "2"),
+  );
+  await row.scrollIntoViewIfNeeded();
+  await settle(page);
+  await expectClockAligned();
 });
 
 test("historical single-day DMs and their threads expose dates without hover", async ({
@@ -441,27 +542,25 @@ test("historical single-day DMs and their threads expose dates without hover", a
   const event = app.append("primary", channel, "Historical message");
   const row = timeline.locator(`[data-message-id="${event.id}"]`);
   await expect(row).toBeVisible();
-  const date = await page.evaluate(
-    (seconds) =>
-      new Date(seconds * 1000).toLocaleDateString(undefined, {
-        year: "numeric",
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-      }),
-    event.created_at,
-  );
+  const day = await page.evaluate((seconds) => {
+    const date = new Date(seconds * 1000);
+    return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+      .map((part) => String(part).padStart(2, "0"))
+      .join("-");
+  }, event.created_at);
   await page.mouse.move(0, 0);
-  await expect(timeline.getByText(date, { exact: true })).toBeVisible();
+  await expect(timeline.locator(`[data-day="${day}"]`)).toBeVisible();
   await expect(
     timeline.getByRole("button", { name: "Load older messages" }),
   ).toHaveCount(0);
   const reply = row.getByRole("button", { name: "Reply", exact: true });
+  // Start real keyboard navigation so the untouched row prepares its controls.
+  await page.keyboard.press("Tab");
   await reply.focus();
   await reply.press("Enter");
   const thread = page.getByRole("complementary", {
     name: "Thread",
     exact: true,
   });
-  await expect(thread.getByText(date, { exact: true })).toBeVisible();
+  await expect(thread.locator(`[data-day="${day}"]`)).toBeVisible();
 });

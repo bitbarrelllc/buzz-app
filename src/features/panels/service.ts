@@ -1,9 +1,13 @@
 // FOUNDATION: Target-based panel contributions, independent of page layout.
 import { Service, type Context } from "@deepseek-ai/cordis";
 import type { ComponentType } from "react";
+import type { ChannelSummary } from "../relay/contracts";
+import type { RelaySession } from "../relay/session";
 import {
   createContributions,
+  resolveMatch,
   type Contribution,
+  type MatchOrder,
 } from "../../plugins/contributions";
 
 export type PanelContext = Readonly<{
@@ -45,12 +49,19 @@ export type Panel = Readonly<{
   id: string;
   title: string;
   matches: (url: string) => boolean;
+  /** Claim strength when several panels match a target; see `MatchOrder`. */
+  order?: MatchOrder | undefined;
   // Optional host launcher; placement stays with the current page or host fallback.
   launcher?: Readonly<{ icon: string; target: string }>;
   /** Optional live controls beside shell search; lifetime remains plugin-owned. */
   toolbar?: ComponentType;
   // Optional channel-header launcher. The page supplies context and owns placement.
   channelLauncher?: ComponentType<ChannelLauncherProps>;
+  /** Optional Channels menu placement; eligibility is presentation-only, not access. */
+  channelMenu?: Readonly<{
+    label: string;
+    eligible(channel: ChannelSummary, session: RelaySession): boolean;
+  }>;
   /** Channel launchers default to the bottom drawer; side reuses the companion column. */
   channelPlacement?: "bottom" | "side";
   component: ComponentType<PanelProps>;
@@ -75,14 +86,7 @@ export class PanelsService extends Service implements Panels {
   }
   snapshot = () => this.panels.snapshot();
   subscribe = (listener: () => void) => this.panels.subscribe(listener);
-  resolve = (target: string) =>
-    this.panels.snapshot().find((panel) => {
-      try {
-        return panel.matches(target);
-      } catch {
-        return false;
-      }
-    });
+  resolve = (target: string) => resolveMatch(this.panels.snapshot(), target);
   register(panel: Panel) {
     if (
       !panel ||
@@ -95,6 +99,12 @@ export class PanelsService extends Service implements Panels {
     ) {
       throw new Error("A panel needs an id, title, matcher, and component");
     }
+    if (
+      panel.order !== undefined &&
+      typeof panel.order !== "number" &&
+      typeof panel.order !== "function"
+    )
+      throw new Error("A panel order must be a number or function");
     if (
       panel.launcher !== undefined &&
       (!panel.launcher ||
@@ -112,6 +122,16 @@ export class PanelsService extends Service implements Panels {
     )
       throw new Error("A channel launcher needs a component");
     if (
+      panel.channelMenu !== undefined &&
+      (!panel.channelMenu ||
+        typeof panel.channelMenu.label !== "string" ||
+        !panel.channelMenu.label.trim() ||
+        typeof panel.channelMenu.eligible !== "function")
+    )
+      throw new Error(
+        "A channel menu launcher needs a label and eligibility predicate",
+      );
+    if (
       panel.channelPlacement !== undefined &&
       panel.channelPlacement !== "bottom" &&
       panel.channelPlacement !== "side"
@@ -120,6 +140,9 @@ export class PanelsService extends Service implements Panels {
     this.panels.register(this.ctx, {
       ...panel,
       ...(panel.launcher && { launcher: Object.freeze({ ...panel.launcher }) }),
+      ...(panel.channelMenu && {
+        channelMenu: Object.freeze({ ...panel.channelMenu }),
+      }),
     });
   }
 }

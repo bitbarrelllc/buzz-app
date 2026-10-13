@@ -27,6 +27,7 @@ it("releases unsent files on close while retaining the saved panel text draft", 
   const scope = "panel-attachment-cleanup";
   const store = createRelaySession(null);
   const release = vi.fn();
+  const upload = vi.fn(async () => uploaded);
   const uploaded = {
     name: "notes.txt",
     url: `https://relay.test/media/${"a".repeat(64)}.txt`,
@@ -61,7 +62,7 @@ it("releases unsent files on close while retaining the saved panel text draft", 
     },
     attachments: {
       prepare: async (file: globalThis.File) => file,
-      upload: async () => uploaded,
+      upload,
       release,
     },
     channels: {
@@ -114,7 +115,8 @@ it("releases unsent files on close while retaining the saved panel text draft", 
     ).not.toBeDisabled(),
   );
   view.unmount();
-  expect(release).toHaveBeenCalledWith(uploaded);
+  expect(upload).not.toHaveBeenCalled();
+  expect(release).not.toHaveBeenCalled();
   render(panel());
   await waitFor(() =>
     expect(screen.getByRole("textbox").textContent).toContain(

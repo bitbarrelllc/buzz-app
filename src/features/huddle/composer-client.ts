@@ -244,6 +244,7 @@ export function createHuddleComposerClient(token: string) {
         edit: unavailable,
       },
       projects: {
+        peekHome: () => undefined,
         home: (_room, signal) => request("projectsHome", undefined, signal),
         load: (route, signal) => request("projectsLoad", route, signal),
       },

@@ -1,6 +1,8 @@
+import { workflowOwner } from "./workflow-attribution";
 import type { CustomEmoji } from "./emoji";
 import { validatedBlurhash } from "./blurhash";
 import { threadReference } from "./thread-reference";
+import { agentAudience } from "./audience";
 import { emojiTags } from "./emoji";
 import { objectBody } from "./body";
 import { huddleRoom } from "../huddle/lifecycle";
@@ -138,6 +140,18 @@ export function parseAttachments(
         : {}),
       ...(name ? { name } : {}),
       ...(duration !== undefined ? { duration } : {}),
+      ...(kind === "audio" &&
+      detectionName?.toLowerCase().startsWith("voice-note-")
+        ? { voiceNote: true as const }
+        : {}),
+      ...(() => {
+        const waveform = fields.waveform?.trim().split(/\s+/).map(Number);
+        return waveform?.length &&
+          waveform.length <= 100 &&
+          waveform.every((n) => Number.isInteger(n) && n >= 0 && n <= 100)
+          ? { waveform }
+          : {};
+      })(),
       ...(blurhash ? { blurhash } : {}),
       ...(previewUrl ? { previewUrl } : {}),
       ...(width > 0 && height > 0 ? { dimensions: { width, height } } : {}),
@@ -184,6 +198,52 @@ function parseSummary(
   }
 }
 
+/** Base Buzz's displayed author: output signed by the relay's explicit NIP-11
+ * `self` names its author in `actor`, else a leading `p` on channel events.
+ * Any other signer, including a contact-key fallback, is the author. */
+export function messageAuthor(
+  event: EventData,
+  signingAuthority: string | undefined,
+) {
+  if (!signingAuthority || event.pubkey !== signingAuthority)
+    return event.pubkey;
+  const actor = event.tags.find(
+    ([name, value]) => name === "actor" && HEX64.test(value ?? ""),
+  )?.[1];
+  if (actor) return actor;
+  const [name, value] = event.tags[0] ?? [];
+  return name === "p" &&
+    value &&
+    HEX64.test(value) &&
+    event.tags.some(([tag]) => tag === "h")
+    ? value
+    : event.pubkey;
+}
+
+/** A relay-verified NIP-09 that passed the relay's author/agent-owner check
+ * removes its target. Keep this predicate shared by timeline and unread evidence.
+ * Attributed owner deletion applies only to message kinds; reactions retain
+ * ordinary raw-author deletion semantics. */
+export function deletionApplies(
+  deletion: EventData,
+  event: EventData,
+  signingAuthority: string | undefined,
+) {
+  const messageKind = [9, 40002].includes(event.kind);
+  const nip09 = deletion.kind === 5 || deletion.kind === 9005;
+  return (
+    (nip09 && deletion.pubkey === event.pubkey) ||
+    (nip09 &&
+      messageKind &&
+      deletion.pubkey === messageAuthor(event, signingAuthority)) ||
+    (deletion.kind === 5 &&
+      messageKind &&
+      deletion.tags.some(
+        ([name, value]) => name === "k" && value === String(event.kind),
+      ))
+  );
+}
+
 /** Folds one window's top-level messages with their aux overlays: author deletes (5/9005),
  * author edits (40003, latest wins), reactions (7) and relay-signed thread summaries (39005).
  * Replies stay out of the top level. Output is ascending by time; ties break on id so windows merge deterministically. */
@@ -191,7 +251,10 @@ export function foldMessages(
   channelId: string,
   relayAuthor: string,
   events: readonly EventData[],
-  { includeReplies = false }: { includeReplies?: boolean } = {},
+  {
+    includeReplies = false,
+    signingAuthority,
+  }: { includeReplies?: boolean; signingAuthority?: string | undefined } = {},
 ): ChannelMessage[] {
   const overlays = new Map<string, EventData[]>();
   const summaries = new Map<string, EventData>();
@@ -210,12 +273,16 @@ export function foldMessages(
       overlays.set(entry[1], list);
     }
   }
+  // Relay-signed author attribution and NIP-09 owner deletion are both
+  // independently verified before these events enter the fold. Only the
+  // message target kinds gain the owner path; reactions remain author-only.
+  const byAuthor = (item: EventData, event: EventData) =>
+    item.pubkey === event.pubkey ||
+    item.pubkey === messageAuthor(event, signingAuthority);
   const deleted = (event: EventData) =>
     overlays
       .get(event.id)
-      ?.some(
-        (item) => [5, 9005].includes(item.kind) && item.pubkey === event.pubkey,
-      ) ?? false;
+      ?.some((item) => deletionApplies(item, event, signingAuthority)) ?? false;
   const rows: ChannelMessage[] = [];
   for (const event of events) {
     if (!channelRowKind(event.kind)) continue;
@@ -279,7 +346,7 @@ export function foldMessages(
     const edits = aux
       .filter(
         (item) =>
-          item.kind === 40003 && item.pubkey === event.pubkey && !deleted(item),
+          item.kind === 40003 && byAuthor(item, event) && !deleted(item),
       )
       .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id));
     let content = edits[0]?.content ?? event.content;
@@ -298,12 +365,14 @@ export function foldMessages(
         ? projectMarkdownAttachments(content, imetaUrls)
         : {
             content,
+            seams: Object.freeze([] as number[]),
             urls: Object.freeze([] as string[]),
             names: Object.freeze([]),
           };
     const attachmentNames = new Map<string, string>();
     for (const { url, name } of projected.names)
       if (!attachmentNames.has(url)) attachmentNames.set(url, name);
+    const authorId = messageAuthor(event, signingAuthority);
     rows.push(
       Object.freeze({
         id: event.id,
@@ -324,12 +393,15 @@ export function foldMessages(
               }
             : undefined;
         })(),
-        authorId: event.pubkey,
+        authorId,
+        ...(authorId !== event.pubkey ? { signerId: event.pubkey } : {}),
+        workflowOwnerId: workflowOwner(event, signingAuthority),
         createdAt: event.created_at,
         createdAtMs: eventMs(event),
         content: projected.content,
         ...(projected.content !== content ? { sourceContent: content } : {}),
         ...(event.kind === 40002 ? { agentEnvelope: true as const } : {}),
+        ...(agentAudience(event) ? { audience: "agents" as const } : {}),
         ...(event.kind === 40008
           ? {
               diff: Object.freeze({
@@ -346,10 +418,7 @@ export function foldMessages(
             }
           : {}),
         ...(edits.length ? { edited: true as const } : {}),
-        ...(projected.content !== content &&
-        projected.content !== content.trimEnd()
-          ? { attachmentContentRemoved: true as const }
-          : {}),
+        ...(projected.seams.length ? { attachmentSeams: projected.seams } : {}),
         mentionReferences: Object.freeze([
           ...new Set(
             event.tags.flatMap((tag) =>

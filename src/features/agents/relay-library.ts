@@ -1,7 +1,7 @@
 import { avatarSource } from "../../shared/avatar-source.ts";
 import { newer, type ReadFilter, type RelayEvent } from "../relay/events.ts";
 import type { RelayReader } from "../relay/reader.ts";
-import type { AgentLibrary } from "./library.ts";
+import { type AgentLibrary, inheritDefinitionAvatars } from "./library.ts";
 
 /** Owner-authored agent definitions (30175) and identities (30177). */
 export const INVENTORY_KINDS: readonly number[] = [30175, 30177];
@@ -109,6 +109,8 @@ export async function readRelayLibrary(
     if (!name) continue;
     if (event.kind === 30175) {
       if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) continue;
+      // Catalog shares are addressed by agent pubkey; the identity row is the agent.
+      if (/^[0-9a-f]{64}$/.test(id)) continue;
       const avatar = avatarSource(body.avatar_url);
       definitions.push({ id, name, ...(avatar ? { avatar } : {}) });
     } else {
@@ -123,12 +125,5 @@ export async function readRelayLibrary(
       });
     }
   }
-  const byId = new Map(definitions.map((row) => [row.id, row]));
-  return {
-    definitions,
-    identities: identities.map((row) => {
-      const avatar = byId.get(row.definitionId ?? "")?.avatar;
-      return { ...row, ...(avatar ? { avatar } : {}) };
-    }),
-  };
+  return inheritDefinitionAvatars({ definitions, identities });
 }

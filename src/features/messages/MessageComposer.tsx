@@ -1,3 +1,6 @@
+import { pendingSessionDraft } from "../sessions/pending-start";
+import { useConversationPresentation } from "../conversation/ConversationPresentation";
+import { TypingPresentation } from "../conversation/typing-presentation";
 import { useEffectEvent } from "react";
 import { useMessageEditScope } from "./MessageEditScope";
 import { useMessageDeletion } from "./MessageManagement";
@@ -6,26 +9,28 @@ import { ToastNotice } from "../../shared/design-system/ui/Toast";
 import { SelectedMentionContext } from "./selected-mention-context";
 import { DraftMentionRoster } from "./draft-mention-roster";
 import {
+  allowsOutsideMentions,
   archivedMention,
-  mentionCandidates,
-  rememberMention,
-} from "./mention-candidates";
+  mentionAdmission,
+  pastedMentionRecipient,
+} from "./mention-admission";
+import { rememberMention } from "./mention-history";
 import {
   readComposerSnapshot,
   composerMarkdownContext,
+  markdownRanges,
 } from "./composer-document";
 import { useMessageEdit, lastEditableMessage } from "./useMessageEdit";
-import { npubEncode } from "nostr-tools/nip19";
+import { editMentionText } from "./message-edit";
 import type { ChannelMessage } from "../relay/contracts";
 import { useFileDrop } from "./use-file-drop";
 import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { useNonmemberMentions } from "./useNonmemberMentions";
-import { knownAgentPubkeys } from "../agents/known";
+import { sentMentionFollowup } from "./mention-followup";
 import { useKnownAgentPubkeys } from "../agents/use-known";
-import { rememberAgentsPreference } from "./mention-preferences";
-import { SessionAgentControl } from "../sessions/SessionAgentControl";
+import { useAgentChoices } from "../agents/use-choices";
 import { sessionRecipients } from "../sessions/recipients";
 import { TypingIndicator } from "./TypingIndicator";
 import {
@@ -34,8 +39,15 @@ import {
   PencilSimpleIcon,
   XIcon,
 } from "../../shared/design-system/icons/index";
+import { useVoiceCapture } from "./useVoiceCapture";
 import { ComposerAttachments } from "./ComposerAttachments";
-import { useAttachmentDraft } from "./attachment-draft";
+import { attachmentDraft, useAttachmentDraft } from "./attachment-draft";
+import {
+  sendInBackground,
+  useBackgroundSendPending,
+} from "./background-upload";
+import { BackgroundUploadStatus } from "./BackgroundUploadStatus";
+import type { UploadedAttachment } from "../relay/attachments";
 import {
   useContext,
   useEffect,
@@ -49,13 +61,18 @@ import {
 } from "react";
 import { fullSession, type ComposerSession } from "./composer-session";
 import type { RelaySession } from "../relay/session";
-import { readView, writeView } from "../../shared/view-state";
+import {
+  readView,
+  writeView,
+  viewRevision,
+  replaceView,
+  subscribeView,
+} from "../../shared/view-state";
 import styles from "./Messages.module.css";
 import { messageViewKey } from "./view-key";
 import { isEmojiOnly, usesLargeEmojiPresentation } from "./emoji-size";
 import {
   mentionDraft,
-  followupDraft,
   type MentionDraft,
   type MentionRecipient,
 } from "./mention-draft";
@@ -63,6 +80,8 @@ import { ComposerAccessories } from "../conversation/ComposerAccessories";
 import { ComposerTools } from "../conversation/ComposerTools";
 import { ComposerLinkDialog } from "./ComposerLinkDialog";
 import { ComposerFormattingTools } from "./ComposerFormattingTools";
+import { ComposerModels } from "./ComposerModels";
+import type { MentionPicks } from "../relay/messages";
 import type {
   ConversationExtensions,
   CompletionEdit,
@@ -88,6 +107,86 @@ const noChannels: ReturnType<ComposerSession["channels"]["list"]> = {
 const noChannelSnapshot = () => noChannels;
 const noChannelSubscription = () => () => {};
 
+type AcceptedDraft = {
+  next: MentionDraft;
+  revision: string | null | undefined;
+};
+// Failed post-acceptance cleanup survives composer remounts within this session.
+// This is recovery evidence only, not another persistent draft inventory.
+const acceptedDrafts = new WeakMap<
+  ComposerSession,
+  Map<string, AcceptedDraft>
+>();
+type RecoveredSend = { draft: MentionDraft; preparationError?: unknown };
+const recoveryListeners = new WeakMap<
+  ComposerSession,
+  Map<string, Set<(recovered: RecoveredSend) => void>>
+>();
+// Only undelivered preparation failures need replay. The saved draft and
+// attachment store remain the owners of the actual recovered content.
+const missedPreparation = new WeakMap<
+  ComposerSession,
+  Map<string, RecoveredSend>
+>();
+function takeMissedPreparation(session: ComposerSession, key: string) {
+  const byKey = missedPreparation.get(session);
+  const recovered = byKey?.get(key);
+  byKey?.delete(key);
+  return recovered;
+}
+function notifyRecovered(
+  session: ComposerSession,
+  key: string,
+  recovered: RecoveredSend,
+) {
+  const listeners = recoveryListeners.get(session)?.get(key);
+  if (recovered.preparationError !== undefined) {
+    let byKey = missedPreparation.get(session);
+    if (!byKey) {
+      byKey = new Map();
+      missedPreparation.set(session, byKey);
+    }
+    byKey.set(key, recovered);
+  }
+  for (const listener of listeners ?? []) listener(recovered);
+}
+function errorForRecovery(reason: unknown) {
+  return reason instanceof Error
+    ? reason.message
+    : reason !== undefined
+      ? String(reason)
+      : undefined;
+}
+function subscribeRecovery(
+  session: ComposerSession,
+  key: string,
+  listener: (recovered: RecoveredSend) => void,
+) {
+  let byKey = recoveryListeners.get(session);
+  if (!byKey) {
+    byKey = new Map();
+    recoveryListeners.set(session, byKey);
+  }
+  let listeners = byKey.get(key);
+  if (!listeners) {
+    listeners = new Set();
+    byKey.set(key, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (!listeners.size) byKey.delete(key);
+  };
+}
+function recoveryFor(session: ComposerSession) {
+  let recovery = acceptedDrafts.get(session);
+  if (!recovery) {
+    recovery = new Map();
+    acceptedDrafts.set(session, recovery);
+  }
+  return recovery;
+}
+
 export type MessageComposerProps = {
   extensions?: ConversationExtensions | undefined;
   scope: string;
@@ -97,9 +196,13 @@ export type MessageComposerProps = {
   label?: string | undefined;
   placeholder?: string | undefined;
   sessionConversation?: boolean | undefined;
+  personalConversation?: boolean | undefined;
+  activityClickOpensPanel?: boolean | undefined;
   trailingTool?: ReactNode;
   inviteAgents?: boolean | undefined;
   onSend?: (id: string) => void;
+  /** Inbox may retire only after saving the replacement or confirming no draft remains. */
+  onDraftSaved?: (() => void) | undefined;
   /** Threads supply their own retained rows; channels use the shared window. */
   editMessages?: readonly ChannelMessage[] | undefined;
   onOpenLink?: ((target: string) => boolean) | undefined;
@@ -120,6 +223,8 @@ export type MessageComposerProps = {
     initialDraft?: MentionDraft | string | undefined;
     /** A durable operation overrides disposable view state during recovery. */
     recoveredDraft?: MentionDraft | undefined;
+    /** Confirm/retry an already submitted operation without fresh admission. */
+    receiptOnly?: boolean;
     locked: boolean;
     disabled: boolean;
     submit: (draft: MentionDraft) => void;
@@ -128,18 +233,50 @@ export type MessageComposerProps = {
 
 /** Safe to retarget through ordinary props; callers do not own internal remount keys. */
 export function MessageComposer(props: MessageComposerProps) {
+  const key = `${props.submission?.draftKey ?? ""}:${messageViewKey(
+    props.session,
+    props.scope,
+    props.channelId,
+    props.threadRootId,
+  )}`;
   return (
-    <Composer
-      key={`${props.submission?.draftKey ?? ""}:${messageViewKey(
-        props.session,
-        props.scope,
-        props.channelId,
-        props.threadRootId,
-      )}`}
-      {...props}
-    />
+    <TypingPresentation active key={key}>
+      {props.personalConversation ? (
+        <PersonalComposer {...props} />
+      ) : (
+        <Composer {...props} />
+      )}
+    </TypingPresentation>
   );
 }
+
+function PersonalComposer(props: MessageComposerProps) {
+  const choices = useAgentChoices(props.session, true, true);
+  return (
+    <DraftMentionRoster.Provider value={choices.selectable}>
+      <Composer {...props} />
+      {choices.error && (
+        <p role="alert">
+          {choices.error}{" "}
+          <Button onClick={() => void props.session.agentChoices.refresh()}>
+            Retry agents
+          </Button>
+        </p>
+      )}
+    </DraftMentionRoster.Provider>
+  );
+}
+
+function sameAttachmentSelection(
+  left: readonly { id: string }[],
+  right: readonly { id: string }[],
+) {
+  return (
+    left.length === right.length &&
+    left.every((item, index) => item.id === right[index]?.id)
+  );
+}
+
 function Composer({
   session,
   extensions,
@@ -149,6 +286,7 @@ function Composer({
   label: customLabel,
   placeholder,
   onSend,
+  onDraftSaved,
   editMessages,
   onOpenLink,
   canOpenLink,
@@ -163,9 +301,12 @@ function Composer({
   disabled: requestedDisabled = false,
   submission,
   sessionConversation,
+  personalConversation = false,
+  activityClickOpensPanel = false,
   inviteAgents = false,
   trailingTool,
 }: MessageComposerProps) {
+  const active = useConversationPresentation();
   const list = useSyncExternalStore(
     session.channels?.get || sessionConversation
       ? session.channels.subscribeList
@@ -191,8 +332,8 @@ function Composer({
   const sendAttempt = useRef<AbortController | null>(null);
   useLayoutEffect(() => () => sendAttempt.current?.abort(), []);
   useLayoutEffect(() => {
-    if (disabled) sendAttempt.current?.abort();
-  }, [disabled]);
+    if (disabled || !active) sendAttempt.current?.abort();
+  }, [disabled, active]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Retargeting invalidates an in-flight send, not the root-keyed draft.
   useLayoutEffect(() => () => sendAttempt.current?.abort(), [replyParentId]);
   const inputId = useId();
@@ -201,12 +342,11 @@ function Composer({
     (threadRootId
       ? `draft:${channelId}:thread:${threadRootId}`
       : `draft:${channelId}`);
-  const [selectedAgent, setSelectedAgent] = useState("");
   const [admitting, setAdmitting] = useState(false);
   const admission = useRef(false);
   const live = useRef(true);
   const permitted = useRef(!disabled);
-  permitted.current = !disabled;
+  permitted.current = !disabled && active;
   useEffect(() => {
     live.current = true;
     return () => {
@@ -217,15 +357,37 @@ function Composer({
     (item) => item.id === channelId,
   )?.parentChannelId;
   const mentionRoster = useContext(DraftMentionRoster);
-  const agentChoices = inviteAgents || !!sessionConversation;
+  const agentChoices =
+    inviteAgents || !!sessionConversation || personalConversation;
+  const recoveryKey = `${scope}:${draftKey}`;
+  const sendPending = useBackgroundSendPending(session, recoveryKey);
+  const [accepted, setAccepted] = useState(() => {
+    if (submission) return;
+    const recovery = recoveryFor(session);
+    const pending = recovery.get(recoveryKey);
+    const current = viewRevision(scope, draftKey);
+    if (pending && current !== undefined && current !== pending.revision) {
+      recovery.delete(recoveryKey); // Deleted or replaced while unmounted.
+      return;
+    }
+    return pending;
+  });
+  const revision = useRef(viewRevision(scope, draftKey));
+  const dirty = useRef(false);
+  const writing = useRef(false);
+  const [conflict, setConflict] = useState(false);
+  const [storageFailed, setStorageFailed] = useState(false);
   const [value, updateDraft] = useState(() =>
     mentionDraft(
-      submission?.recoveredDraft ??
+      accepted?.next ??
+        submission?.recoveredDraft ??
         readView<unknown>(scope, draftKey, submission?.initialDraft ?? ""),
     ),
   );
   const draft = value.text;
   const valueRef = useRef(value);
+  // Model and effort picked for mentioned agents' next run; cleared by each send.
+  const [picks, setPicks] = useState<MentionPicks>({});
   const caret = useRef<number | undefined>(undefined);
   const input = useRef<ComposerInputElement>(null);
   const focusOnMount = useRef(
@@ -247,12 +409,13 @@ function Composer({
         return;
       const editor = input.current;
       if (!editor || editor.closest("[inert]")) return;
-      // A conversation can finish loading behind an already-focused dialog.
-      // Its default focus must not interrupt that modal's explicit owner.
-      const modal = document.activeElement?.closest(
-        'dialog[open], [aria-modal="true"]',
+      // A conversation can finish loading behind an already-focused dialog,
+      // menu, or open popup trigger. Its default focus must not interrupt that
+      // explicit owner: moving focus away also dismisses non-modal menus.
+      const owner = document.activeElement?.closest(
+        'dialog[open], [aria-modal="true"], [role="menu"], [data-popup-open]',
       );
-      if (modal && !modal.contains(editor)) return;
+      if (owner && !owner.contains(editor)) return;
       const end = editor.value.length;
       editor.focus();
       if (document.activeElement !== editor) return;
@@ -276,9 +439,9 @@ function Composer({
     }
     focus();
   }, []);
-  const nonmembers = useNonmemberMentions(session, channelId, () =>
-    input.current?.focus(),
-  );
+  const nonmembers = useNonmemberMentions(session, channelId, () => {
+    if (permitted.current) input.current?.focus();
+  });
   useEffect(() => {
     if (focusRequest) input.current?.focus();
   }, [focusRequest]);
@@ -286,6 +449,7 @@ function Composer({
     undefined,
   );
   const [linkEdit, setLinkEdit] = useState<ComposerLinkEdit | null>(null);
+  if (!active && linkEdit) setLinkEdit(null);
   const [activeFormats, setActiveFormats] = useState<readonly ComposerFormat[]>(
     [],
   );
@@ -293,9 +457,24 @@ function Composer({
     if (JSON.stringify(next) === JSON.stringify(valueRef.current)) return false;
     valueRef.current = next;
     updateDraft(next);
-    if (!editing.target) writeView(scope, draftKey, next);
+    if (!editing.target) {
+      if (submission) writeView(scope, draftKey, next);
+      else {
+        dirty.current = true;
+        if (!conflict && !accepted) persist(next);
+      }
+    }
     return true;
   };
+  function persist(next: MentionDraft, expected = revision.current) {
+    writing.current = true;
+    const result = replaceView(scope, draftKey, expected, next);
+    writing.current = false;
+    if (result === "saved") revision.current = JSON.stringify(next);
+    setConflict(result === "changed");
+    setStorageFailed(result === "failed");
+    return result;
+  }
   const [error, setError] = useState<string>();
   const [attachmentError, setAttachmentError] = useState<string>();
   const focusRestoredDraft = useRef(false);
@@ -331,6 +510,7 @@ function Composer({
     disabled ||
     admitting ||
     sending ||
+    !!accepted ||
     !!submission?.locked ||
     (editing.target && (editing.locked || editDisabled)) ||
     false;
@@ -346,16 +526,27 @@ function Composer({
   const picker = useRef<HTMLInputElement>(null);
   const form = useRef<HTMLFormElement>(null);
   const canAttach = !submission && !!session.attachments;
+  const voice = useVoiceCapture(
+    attachments.store,
+    !active || editingDisabled || !!editing.target || !canAttach,
+    setAttachmentError,
+  );
   useEffect(() => {
     if (disabled) attachments.store.cancel();
   }, [disabled, attachments.store]);
   const dragging = useFileDrop(
     form,
-    canAttach && !editingDisabled && !editing.target,
+    canAttach && !editingDisabled && !editing.target && !voice.capturing,
     attachFiles,
   );
   function attachFiles(files: readonly File[]) {
-    if (editingDisabled || !files.length) return;
+    if (
+      !permitted.current ||
+      editingDisabled ||
+      voice.isCapturing() ||
+      !files.length
+    )
+      return;
     if (editing.target) {
       setAttachmentError("Finish editing before attaching new files.");
       return;
@@ -389,8 +580,130 @@ function Composer({
   );
   const completion = useCompletionEditor(
     input,
-    !editingDisabled && !!outbox?.supports(9),
+    active && !editingDisabled && !!outbox?.supports(9),
   );
+  function loadSaved(raw: string | null) {
+    let next: MentionDraft;
+    try {
+      next = mentionDraft(JSON.parse(raw ?? "null"));
+    } catch {
+      next = mentionDraft("");
+    }
+    revision.current = raw;
+    dirty.current = false;
+    valueRef.current = next;
+    updateDraft(next);
+    input.current?.reset(next);
+    completion.invalidate();
+    setLinkEdit(null);
+    restoreSelection.current = undefined;
+    caret.current = undefined;
+    setConflict(false);
+    setStorageFailed(false);
+  }
+  const reconcileDraft = useEffectEvent((restored?: MentionDraft) => {
+    if (submission || editing.target || writing.current) return;
+    if (accepted) {
+      // The recovered revision can precede attachment adoption. The explicit
+      // recovery notification below reconciles the mounted owner afterward.
+      if (recoveryFor(session).get(recoveryKey) === accepted) return;
+      const current = viewRevision(scope, draftKey);
+      if (current !== undefined) {
+        setAccepted(undefined);
+        loadSaved(current);
+      }
+      return;
+    }
+    const current = viewRevision(scope, draftKey);
+    if (current === undefined || current === revision.current) return;
+    // An explicit successful recovery may replace only the cleared follow-up,
+    // never a meaningful unsaved edit. Ordinary external revisions keep their
+    // conflict behavior.
+    if (
+      restored &&
+      current === JSON.stringify(restored) &&
+      !valueRef.current.text.trim() &&
+      !valueRef.current.recipients.length &&
+      !composerMarkdown(valueRef.current).trim() &&
+      !sendAttempt.current
+    )
+      loadSaved(current);
+    else if (dirty.current || sendAttempt.current) setConflict(true);
+    else loadSaved(current);
+  });
+  const editingDraft = !!editing.target;
+  const deferredRecovery = useRef<RecoveredSend | undefined>(undefined);
+  useEffect(() => {
+    if (submission) return;
+    const stop = subscribeView(scope, () => reconcileDraft());
+    // Reconcile changes while message-edit mode or mounting paused this listener.
+    reconcileDraft(deferredRecovery.current?.draft);
+    if (!editingDraft && deferredRecovery.current) {
+      takeMissedPreparation(session, recoveryKey);
+      setError(errorForRecovery(deferredRecovery.current.preparationError));
+      deferredRecovery.current = undefined;
+    }
+    return stop;
+  }, [scope, submission, editingDraft, session, recoveryKey]);
+  const receiveRecovery = useEffectEvent((recovered: RecoveredSend) => {
+    if (editing.target) deferredRecovery.current = recovered;
+    reconcileDraft(recovered.draft);
+    if (!editing.target) {
+      takeMissedPreparation(session, recoveryKey);
+      setError(errorForRecovery(recovered.preparationError));
+    }
+  });
+  useEffect(() => {
+    const stop = subscribeRecovery(session, recoveryKey, (recovered) =>
+      receiveRecovery(recovered),
+    );
+    // Recovery may have completed between unmount and this subscription. Replay
+    // only if its saved caption still owns the draft; never attach an old error
+    // to a replacement written while the composer was away.
+    const missed = missedPreparation.get(session)?.get(recoveryKey);
+    if (missed) {
+      if (viewRevision(scope, draftKey) === JSON.stringify(missed.draft))
+        receiveRecovery(missed);
+      else takeMissedPreparation(session, recoveryKey);
+    }
+    return stop;
+  }, [session, recoveryKey, scope, draftKey]);
+  function resolveDraft(keep: boolean) {
+    const current = viewRevision(scope, draftKey);
+    if (current === undefined) {
+      setStorageFailed(true);
+      return;
+    }
+    if (keep) {
+      dirty.current = true;
+      persist(valueRef.current, current);
+    } else loadSaved(current);
+  }
+  function finishDraft(pending: AcceptedDraft) {
+    if (recoveryFor(session).get(recoveryKey) !== pending) {
+      reconcileDraft();
+      return;
+    }
+    const result = persist(pending.next, pending.revision);
+    // No stale sent text needs cleanup if nothing was saved and absence is
+    // still readable. Keep the normal save attempt for remembered-agent drafts.
+    if (
+      result === "failed" &&
+      (pending.revision !== null || viewRevision(scope, draftKey) !== null)
+    )
+      return;
+    recoveryFor(session).delete(recoveryKey);
+    setAccepted(undefined);
+    if (result === "changed") {
+      // Another editor owns this revision. Acceptance cannot erase its work.
+      const current = viewRevision(scope, draftKey);
+      if (current !== undefined) loadSaved(current);
+      return;
+    }
+    dirty.current = result === "failed" && !!pending.next.text.trim();
+    // An unsaved prefill stays editable here with the ordinary save warning.
+    if (!dirty.current) onDraftSaved?.();
+  }
   useEffect(() => {
     if (outbox?.supports(9)) void session.emoji.ensure();
   }, [session, outbox]);
@@ -415,7 +728,14 @@ function Composer({
   });
   const requestDeletion = useMessageDeletion();
   const startEdit = useEffectEvent((row: ChannelMessage) => {
-    if (editingDisabled || editDisabled || submission || !input.current) return;
+    if (
+      !permitted.current ||
+      editingDisabled ||
+      editDisabled ||
+      submission ||
+      !input.current
+    )
+      return;
     const current = editableRows().find((item) => item.id === row.id);
     if (!current || !lastEditableMessage(session, [current])) {
       setError("This message is no longer available to edit.");
@@ -455,8 +775,10 @@ function Composer({
     text: string,
     recipient?: MentionRecipient,
     range?: CompletionQuery,
+    terminator?: ":",
   ) {
     if (
+      !permitted.current ||
       editingDisabled ||
       !outbox?.supports(9) ||
       !input.current?.isConnected ||
@@ -469,14 +791,17 @@ function Composer({
       return false;
     // Edits replace prose; they do not change the original notification recipients.
     if (editing.target && recipient) {
-      text = `nostr:${npubEncode(recipient.pubkey)} `;
+      text = editMentionText(recipient);
       recipient = undefined;
     }
     if (
       recipient &&
-      !mentionCandidates(session, channelId, agentChoices, mentionRoster, [
-        recipient,
-      ]).some((c) => c.recipient.pubkey === recipient.pubkey)
+      !mentionAdmission(
+        session,
+        channelId,
+        agentChoices,
+        mentionRoster,
+      )(recipient.pubkey)
     ) {
       setError(
         "This recipient is no longer available. Remove it or refresh choices.",
@@ -488,7 +813,7 @@ function Composer({
       return false;
     }
     completion.invalidate();
-    if (!input.current.insertText(text, recipient, range)) {
+    if (!input.current.insertText(text, recipient, range, terminator)) {
       setError("Message is too long to insert text");
       return false;
     }
@@ -507,8 +832,74 @@ function Composer({
       return false;
     return insert(`@${recipient.name} `, recipient);
   }
+  function insertMentions(
+    recipients: readonly MentionRecipient[],
+    range?: CompletionQuery,
+  ) {
+    if (
+      !Array.isArray(recipients) ||
+      !recipients.length ||
+      recipients.some(
+        (person) =>
+          !person ||
+          typeof person.pubkey !== "string" ||
+          !/^[0-9a-f]{64}$/.test(person.pubkey) ||
+          typeof person.name !== "string" ||
+          !person.name.trim(),
+      )
+    )
+      return false;
+    const unique = [
+      ...new Map(recipients.map((person) => [person.pubkey, person])).values(),
+    ];
+    if (unique.length > 32) {
+      setError("Choose at most 32 recipients");
+      return false;
+    }
+    if (
+      !permitted.current ||
+      editingDisabled ||
+      !outbox?.supports(9) ||
+      !input.current?.isConnected ||
+      input.current.disabled ||
+      input.current.readOnly
+    )
+      return false;
+    // Message edits only add references, never new notification intent.
+    if (editing.target)
+      return insert(unique.map(editMentionText).join(""), undefined, range);
+    const admits = mentionAdmission(
+      session,
+      channelId,
+      agentChoices,
+      mentionRoster,
+    );
+    if (unique.some((person) => !admits(person.pubkey))) {
+      setError(
+        "A team member is no longer available. Refresh choices before trying again.",
+      );
+      return false;
+    }
+    const text = unique.map((person) => `@${person.name} `).join("");
+    if (!input.current.insertText(text, unique, range)) {
+      setError(
+        "The team would exceed the message length or 32-recipient limit. Nothing was added.",
+      );
+      return false;
+    }
+    completion.invalidate();
+    for (const person of unique)
+      rememberMention(session, channelId, person.pubkey);
+    setError(undefined);
+    return true;
+  }
   function insertResource(resource: ComposerResource): true | string {
-    if (editingDisabled || !outbox?.supports(9) || !input.current?.isConnected)
+    if (
+      !permitted.current ||
+      editingDisabled ||
+      !outbox?.supports(9) ||
+      !input.current?.isConnected
+    )
       return "The message can't be edited right now";
     completion.invalidate();
     return input.current.insertResource(resource);
@@ -524,16 +915,21 @@ function Composer({
       valueRef.current.text !== observation.text
     )
       return false;
-    if (key === " ") {
+    // A typed terminator (Space, the closing emoji colon) stays literal in code.
+    if (key === " " || key === ":") {
       const doc = readComposerSnapshot(valueRef.current.document);
+      const context = doc
+        ? composerMarkdownContext(doc)
+        : { text: observation.text, protected: [] };
       if (
-        doc &&
-        composerMarkdownContext(doc).protected.some(
+        [...context.protected, ...markdownRanges(context.text).literal].some(
           (r) => query.start < r.end && query.end > r.start,
         )
       )
         return false;
     }
+    if ("mentions" in edit && edit.mentions)
+      return insertMentions(edit.mentions, query);
     if ("mention" in edit && edit.mention)
       return insert(`@${edit.mention.name} `, edit.mention, query);
     return (
@@ -542,6 +938,7 @@ function Composer({
         `${edit.text}${isEmojiOnly(edit.text, emojiCatalog.entries) ? "" : " "}`,
         undefined,
         query,
+        key === ":" ? key : undefined,
       )
     );
   }
@@ -550,25 +947,40 @@ function Composer({
     permitted.current &&
     !sendAttempt.current?.signal.aborted &&
     session.channels.list().channels.find((item) => item.id === channelId)
-      ?.parentChannelId === parentChannelId;
+      ?.parentChannelId === parentChannelId &&
+    (!personalConversation ||
+      !!fullSession(session)?.mePlacement.has(channelId));
   async function prepareRecipients(explicit: readonly string[]) {
     const channel = await session.workSessions.refreshMembership(channelId);
     if (!currentAdmission())
       throw new Error("The session changed. Review its channel and retry.");
-    const recipients = [
-      ...sessionRecipients(
-        channel,
-        session.profiles.snapshot(),
-        session.agentChoices.snapshot(),
-        session.viewer,
-        explicit,
-      ),
-    ];
+    const recipients = personalConversation
+      ? [...explicit]
+      : [
+          ...sessionRecipients(
+            channel,
+            session.profiles.snapshot(),
+            session.agentChoices.snapshot(),
+            session.viewer,
+            explicit,
+          ),
+        ];
     const missing = recipients.filter((key) => !channel.members?.includes(key));
     if (missing.length) {
+      // Classification no longer depends on inventory; refresh before admission.
       await session.agentChoices.refresh();
       if (!currentAdmission())
         throw new Error("The session changed. Review its channel and retry.");
+      if (
+        personalConversation &&
+        missing.some(
+          (key) =>
+            !session.agentChoices
+              .snapshot()
+              .selectable.some((agent) => agent.pubkey === key),
+        )
+      )
+        throw new Error("Only your available agents can be mentioned in Me.");
       await session.workSessions.addAgents(
         channelId,
         missing,
@@ -579,12 +991,14 @@ function Composer({
     }
     return recipients;
   }
-  function selectAgent(key: string) {
-    if (disabled || admission.current) return;
-    setSelectedAgent(key);
-    setError(undefined);
+  function requireCompletedSessionStart() {
+    if (pendingSessionDraft(scope, channelId))
+      throw new Error(
+        "Finish setting up this conversation in Me before sending messages.",
+      );
   }
   async function send() {
+    if (!permitted.current || voice.isCapturing()) return;
     if (editing.target) {
       if (editDisabled || editing.locked) return;
       if (!valueRef.current.text.trim()) {
@@ -606,35 +1020,65 @@ function Composer({
     }
     if (
       disabled ||
+      accepted ||
+      conflict ||
       admission.current ||
       submission?.disabled ||
       (!submission && (input.current?.readOnly || input.current?.disabled)) ||
       (!draft.trim() && !attachments.items.length) ||
       attachments.blocked ||
+      sendPending ||
       sendAttempt.current ||
       !outbox
     )
       return;
+    const recovering = !submission && recoveryFor(session).get(recoveryKey);
+    if (recovering) {
+      setAccepted(recovering);
+      valueRef.current = recovering.next;
+      updateDraft(recovering.next);
+      input.current?.reset(recovering.next);
+      return;
+    }
+    if (!submission && viewRevision(scope, draftKey) !== revision.current) {
+      setConflict(true);
+      return;
+    }
+    const savedRevision = revision.current;
     const attempt = new AbortController();
     sendAttempt.current = attempt;
     const captured = valueRef.current;
     const capturedAttachments = attachments.store.snapshot();
+    const capturedPicks = picks;
     try {
+      if (submission?.receiptOnly) {
+        submission.submit(captured);
+        return;
+      }
       if (captured.recipients.some((p) => archivedMention(session, p.pubkey)))
         throw new Error(
           "A selected recipient is archived. Remove it before sending.",
+        );
+      if (
+        personalConversation &&
+        captured.recipients.some(
+          (person) =>
+            !session.agentChoices
+              .snapshot()
+              .selectable.some((agent) => agent.pubkey === person.pubkey),
+        )
+      )
+        throw new Error(
+          "Only your available agents can be mentioned in Me. Remove the unavailable recipient and retry.",
         );
       if (submission) {
         submission.submit(captured);
         return;
       }
+      requireCompletedSessionStart();
       let references: readonly string[] = [];
-      let recipients = captured.recipients.length
-        ? captured.recipients.map((item) => item.pubkey)
-        : selectedAgent
-          ? [selectedAgent]
-          : [];
-      if (sessionConversation) {
+      let recipients = captured.recipients.map((item) => item.pubkey);
+      if (sessionConversation || personalConversation) {
         admission.current = true;
         setAdmitting(true);
         recipients = await prepareRecipients(recipients);
@@ -642,15 +1086,16 @@ function Composer({
         const channel = session.channels
           .list()
           .channels.find((item) => item.id === channelId);
-        if (
-          (channel?.channelType === "stream" ||
-            channel?.channelType === "forum") &&
-          channel.members
-        ) {
+        if (channel?.members && allowsOutsideMentions(channel)) {
           const missing = captured.recipients.filter(
             (person) => !channel.members?.includes(person.pubkey),
           );
-          if (missing.length) {
+          if (missing.length && channel?.channelType === "dm") {
+            // Nobody can be added to a DM, so there is no choice to offer:
+            // outside people become references without a prompt.
+            references = missing.map((person) => person.pubkey);
+            recipients = recipients.filter((key) => !references.includes(key));
+          } else if (missing.length) {
             setSending(true);
             setError(undefined);
             const decision = await nonmembers.prepare(
@@ -670,64 +1115,148 @@ function Composer({
       attempt.signal.throwIfAborted();
       if (
         valueRef.current !== captured ||
-        attachments.store.snapshot() !== capturedAttachments
+        !sameAttachmentSelection(
+          attachments.store.snapshot(),
+          capturedAttachments,
+        )
       )
         return;
+      if (viewRevision(scope, draftKey) !== savedRevision) {
+        setConflict(true);
+        return;
+      }
       const content =
         threadRootId && mediaTimeSeconds !== undefined
           ? mediaTimeReply(mediaTimeSeconds, composerMarkdown(captured))
           : composerMarkdown(captured);
-      const uploaded = capturedAttachments.flatMap((item) =>
-        item.uploaded ? [item.uploaded] : [],
+      const next = sentMentionFollowup(session, captured, recipients);
+      // Only agents still notified by this message are asked for a model or effort.
+      const sentPicks: MentionPicks = Object.fromEntries(
+        Object.entries(capturedPicks).filter(([key]) =>
+          recipients.includes(key),
+        ),
       );
-      const admissionResult = threadRootId
-        ? session.messages.reply(
-            channelId,
-            threadRootId,
-            content,
-            recipients,
-            uploaded,
-            ...(replyParentId || references.length ? [replyParentId] : []),
-            ...(references.length ? [references] : []),
-          )
-        : references.length
-          ? session.messages.send(
+      const tuned = Object.keys(sentPicks).length > 0;
+      // Destination and content are fixed here; a background send never retargets.
+      const publish = (uploaded: readonly UploadedAttachment[]) => {
+        requireCompletedSessionStart();
+        return threadRootId
+          ? session.messages.reply(
               channelId,
+              threadRootId,
               content,
               recipients,
               uploaded,
-              undefined,
-              references,
+              ...(replyParentId || references.length || tuned
+                ? [replyParentId]
+                : []),
+              ...(references.length || tuned ? [references] : []),
+              ...(tuned ? [sentPicks] : []),
             )
-          : session.messages.send(channelId, content, recipients, uploaded);
-      if (typeof admissionResult !== "string") setSending(true);
-      const id =
-        typeof admissionResult === "string"
-          ? admissionResult
-          : await admissionResult;
+          : references.length || tuned
+            ? session.messages.send(
+                channelId,
+                content,
+                recipients,
+                uploaded,
+                undefined,
+                references,
+                ...(tuned ? [sentPicks] : []),
+              )
+            : session.messages.send(channelId, content, recipients, uploaded);
+      };
+      let id: string | undefined;
+      if (capturedAttachments.length && !fullSession(session)) {
+        setSending(true);
+        const uploaded = await attachments.store.prepareForSend(attempt.signal);
+        attempt.signal.throwIfAborted();
+        id = await publish(uploaded);
+      } else if (capturedAttachments.length) {
+        const followup = JSON.stringify(next);
+        sendInBackground(
+          session,
+          recoveryKey,
+          channelId,
+          capturedAttachments,
+          async (uploaded) => {
+            const sent = await publish(uploaded);
+            if (live.current) onSend?.(sent);
+          },
+          (files, preparationError) => {
+            // Only the original saved draft or the untouched follow-up can be
+            // restored. A later edit belongs to its author, not this job.
+            const current = viewRevision(scope, draftKey);
+            const capturedRevision = JSON.stringify(captured);
+            const cleared = (raw: string | null | undefined) => {
+              if (!raw) return false;
+              try {
+                const draft = mentionDraft(JSON.parse(raw));
+                return (
+                  !draft.text.trim() &&
+                  !draft.recipients.length &&
+                  !composerMarkdown(draft).trim()
+                );
+              } catch {
+                return false;
+              }
+            };
+            if (
+              live.current &&
+              !cleared(JSON.stringify(valueRef.current)) &&
+              (valueRef.current.text !== next.text ||
+                JSON.stringify(valueRef.current.recipients) !==
+                  JSON.stringify(next.recipients)) &&
+              JSON.stringify(valueRef.current) !== capturedRevision
+            )
+              return "conflict";
+            if (
+              current !== savedRevision &&
+              current !== followup &&
+              current !== capturedRevision &&
+              !(
+                cleared(current) &&
+                (!live.current || cleared(JSON.stringify(valueRef.current)))
+              ) &&
+              !(
+                live.current &&
+                current === JSON.stringify(valueRef.current) &&
+                valueRef.current.text === next.text &&
+                JSON.stringify(valueRef.current.recipients) ===
+                  JSON.stringify(next.recipients)
+              )
+            )
+              return "conflict";
+            const target = attachmentDraft(session, recoveryKey, channelId);
+            if (target.snapshot().length) return "conflict";
+            if (
+              current !== capturedRevision &&
+              replaceView(scope, draftKey, current, captured) !== "saved"
+            )
+              return false;
+            if (!target.adopt(files)) return false;
+            recoveryFor(session).delete(recoveryKey);
+            notifyRecovered(session, recoveryKey, {
+              draft: captured,
+              preparationError,
+            });
+            return true;
+          },
+        );
+      } else {
+        const result = publish([]);
+        if (typeof result !== "string") setSending(true);
+        id = typeof result === "string" ? result : await result;
+      }
+      const pending = { next, revision: savedRevision };
+      recoveryFor(session).set(recoveryKey, pending);
+      setAccepted(pending);
       attachments.store.clear();
-      onSend?.(id);
       completion.invalidate();
       clearMediaTime?.();
-      const agents = knownAgentPubkeys(
-        session.profiles.snapshot(),
-        session.agentChoices.snapshot(),
-      );
-      const next = followupDraft(
-        rememberAgentsPreference()
-          ? captured.recipients.filter(
-              (item) =>
-                agents.has(item.pubkey) &&
-                mentionCandidates(
-                  session,
-                  channelId,
-                  agentChoices,
-                  mentionRoster,
-                ).some((c) => c.recipient.pubkey === item.pubkey),
-            )
-          : [],
-      );
-      const changed = saveDraft(next);
+      const changed = JSON.stringify(next) !== JSON.stringify(valueRef.current);
+      valueRef.current = next;
+      updateDraft(next);
+      setPicks({});
       // An unchanged prefill may not render. Do not leave a caret command for
       // the next keystroke to consume after inserting its first character.
       caret.current = changed ? next.text.length : undefined;
@@ -736,6 +1265,8 @@ function Composer({
       if (!changed)
         input.current?.setSelectionRange(next.text.length, next.text.length);
       setError(undefined);
+      if (id) onSend?.(id);
+      finishDraft(pending);
     } catch (reason) {
       if (live.current && !attempt.signal.aborted)
         setError(reason instanceof Error ? reason.message : String(reason));
@@ -751,16 +1282,31 @@ function Composer({
     }
   }
   const host = fullSession(session);
-  const accessories = host && extensions?.accessories && (
-    <ComposerAccessories
-      registry={extensions.accessories}
-      session={host}
-      scope={scope}
-      channelId={channelId}
-      threadRootId={threadRootId}
-      canOpen={(target) => canOpenLink?.(target) ?? false}
-      open={(target) => onOpenLink?.(target) ?? false}
-    />
+  const readingOnly = !outbox?.supports(9) && !cached;
+  const context = (
+    <div className={styles.composerContext}>
+      {!cached && !submission && (
+        <TypingIndicator
+          clickOpensPanel={activityClickOpensPanel}
+          session={session}
+          channelId={channelId}
+          threadRootId={threadRootId}
+          canOpenActivity={canOpenLink}
+          openActivity={onOpenLink}
+        />
+      )}
+      {host && extensions?.accessories && (
+        <ComposerAccessories
+          registry={extensions.accessories}
+          session={host}
+          scope={scope}
+          channelId={channelId}
+          threadRootId={threadRootId}
+          canOpen={(target) => canOpenLink?.(target) ?? false}
+          open={(target) => onOpenLink?.(target) ?? false}
+        />
+      )}
+    </div>
   );
   const renderLeadingTools = (tools: ReactNode) => (
     <>
@@ -801,24 +1347,19 @@ function Composer({
       )}
     </>
   );
-  if (!outbox?.supports(9) && !cached)
+  if (readingOnly)
     return (
       <>
-        {accessories}
+        {context}
         <footer className={styles.composer}>
-          <TypingIndicator
-            session={session}
-            channelId={channelId}
-            threadRootId={threadRootId}
-          />
           This relay connection supports reading only.
         </footer>
       </>
     );
   return (
     <SelectedMentionContext.Provider value={value.recipients}>
-      {accessories}
-      {nonmembers.dialog}
+      {context}
+      {active && nonmembers.dialog}
       <form
         ref={form}
         className={styles.composer}
@@ -874,17 +1415,10 @@ function Composer({
             />
           </div>
         )}
-        {!disabled && !submission && !editing.target && (
-          <TypingIndicator
-            session={session}
-            channelId={channelId}
-            threadRootId={threadRootId}
-          />
-        )}
         <label className="sr-only" htmlFor={inputId}>
           {label}
         </label>
-        {extensions?.completions && (
+        {active && extensions?.completions && (
           <ComposerCompletions
             registry={extensions.completions}
             editor={completion}
@@ -898,6 +1432,7 @@ function Composer({
             resolved={value}
           />
         )}
+        <BackgroundUploadStatus session={session} focusTarget={input} />
         {dragging && <p role="status">Drop files to attach</p>}
         {attachmentError && (
           <ToastNotice
@@ -910,15 +1445,29 @@ function Composer({
           {!editing.target && (
             <ComposerAttachments
               media={session.media}
+              renderers={extensions?.attachments}
               items={attachments.items}
               disabled={editingDisabled}
-              remove={attachments.store.remove}
-              retry={attachments.store.retry}
+              remove={(id) => {
+                const item = attachments.items.find(
+                  (candidate) => candidate.id === id,
+                );
+                attachments.store.remove(id);
+                if (item?.status === "error" && item.error === error)
+                  setError(undefined);
+              }}
+              retry={(id) => {
+                const item = attachments.items.find(
+                  (candidate) => candidate.id === id,
+                );
+                attachments.store.retry(id);
+                if (item?.status === "error" && item.error === error)
+                  setError(undefined);
+              }}
             />
           )}
           <div className={styles.composerInput}>
             <RichComposerInput
-              inviteAgents={agentChoices}
               ref={input}
               id={inputId}
               disabled={editingDisabled}
@@ -935,7 +1484,23 @@ function Composer({
               }}
               onFormatsChange={setActiveFormats}
               onEditLink={setLinkEdit}
+              // Pasted identity links notify admitted recipients under their
+              // current names; edits never add recipients. Send still asks
+              // before adding someone outside the channel.
+              acceptRecipient={(pubkey) =>
+                editing.target
+                  ? null
+                  : pastedMentionRecipient(
+                      session,
+                      channelId,
+                      pubkey,
+                      agentChoices,
+                      mentionRoster,
+                    )
+              }
               data-single-emoji={largeEmojiDraft || undefined}
+              // Choosing this conversation's tab resumes typing here.
+              data-tab-focus=""
               maxLength={16000}
               aria-label={label}
               placeholder={placeholder ?? label}
@@ -1000,7 +1565,16 @@ function Composer({
                   !event.metaKey
                 ) {
                   event.preventDefault();
-                  if (!event.repeat || !editing.target) send();
+                  // Holding Enter must not send after an empty list item exits.
+                  if (event.repeat) return;
+                  if (
+                    activeFormats.includes("bullet_list") ||
+                    activeFormats.includes("ordered_list")
+                  ) {
+                    event.currentTarget.insertLineBreak();
+                    return;
+                  }
+                  send();
                 }
               }}
             />
@@ -1022,57 +1596,63 @@ function Composer({
               />
             </div>
           )}
-        <div className={styles.composerActions}>
-          <ComposerFormattingTools
-            disabled={editingDisabled}
-            activeFormats={activeFormats}
-            toggleFormat={(format) => input.current?.toggleFormat(format)}
-            editLink={() => {
-              const edit = input.current?.editLink();
-              if (edit) setLinkEdit(edit);
-            }}
-          >
-            {extensions ? (
-              <ComposerTools
-                registry={extensions.tools}
-                renderLeading={renderLeadingTools}
-                session={session}
-                scope={scope}
-                channelId={channelId}
-                threadRootId={threadRootId}
-                disabled={editingDisabled}
-                inviteAgents={agentChoices && !editing.target}
-                insertText={(text) => insert(text)}
-                insertMention={insertMention}
-                insertResource={insertResource}
-                focus={() => input.current?.focus()}
-              />
-            ) : (
-              renderLeadingTools(null)
-            )}
-          </ComposerFormattingTools>
-          {!editing.target &&
-            (trailingTool ??
-              (sessionConversation && host ? (
-                <SessionAgentControl
-                  session={host}
+        {voice.element}
+        <div className={styles.composerActions} hidden={voice.capturing}>
+          {active && (
+            <ComposerFormattingTools
+              disabled={editingDisabled}
+              activeFormats={activeFormats}
+              toggleFormat={(format) => input.current?.toggleFormat(format)}
+              editLink={() => {
+                const edit = input.current?.editLink();
+                if (edit) setLinkEdit(edit);
+              }}
+            >
+              {extensions ? (
+                <ComposerTools
+                  registry={extensions.tools}
+                  capture={voice.begin}
+                  renderLeading={renderLeadingTools}
+                  session={session}
+                  scope={scope}
                   channelId={channelId}
-                  value={selectedAgent}
-                  onChange={selectAgent}
+                  threadRootId={threadRootId}
                   disabled={editingDisabled}
+                  inviteAgents={agentChoices && !editing.target}
+                  insertText={(text) => insert(text)}
+                  insertMention={insertMention}
+                  insertMentions={insertMentions}
+                  insertResource={insertResource}
+                  focus={() => input.current?.focus()}
                 />
-              ) : null))}
+              ) : (
+                renderLeadingTools(null)
+              )}
+            </ComposerFormattingTools>
+          )}
+          {active && !editing.target && trailingTool}
+          {active &&
+            !editing.target &&
+            !submission &&
+            !!value.recipients.length && (
+              <ComposerModels
+                pubkeys={value.recipients.map((item) => item.pubkey)}
+                value={picks}
+                disabled={editingDisabled}
+                onChange={setPicks}
+              />
+            )}
           <IconButton
             variant={
               draft.trim() || attachments.items.length ? "primary" : "ghost"
             }
             size="toolbar"
-            shape="round"
             type="submit"
             aria-label={editing.target ? "Save changes" : "Send message"}
             title={editing.target ? "Save changes" : "Send message"}
             disabled={
               disabled ||
+              (!editing.target && (!!accepted || conflict || sendPending)) ||
               (!!editing.target && (editing.locked || editDisabled)) ||
               admitting ||
               sending ||
@@ -1092,6 +1672,37 @@ function Composer({
         {(error || editing.error) && (
           <p role="alert">{error ?? editing.error}</p>
         )}
+        {!editing.target &&
+          !submission &&
+          (accepted || conflict || storageFailed) && (
+            <div>
+              <p role="alert">
+                {accepted
+                  ? "Message accepted. Could not update the saved draft. Retry cleanup before sending again."
+                  : conflict
+                    ? "This draft changed elsewhere. Your edits are kept here; choose which draft to keep."
+                    : "Could not save this draft on this device. Your edits are kept here."}
+              </p>
+              {accepted ? (
+                <Button type="button" onClick={() => finishDraft(accepted)}>
+                  Retry draft cleanup
+                </Button>
+              ) : conflict ? (
+                <>
+                  <Button type="button" onClick={() => resolveDraft(false)}>
+                    Load saved draft
+                  </Button>
+                  <Button type="button" onClick={() => resolveDraft(true)}>
+                    Keep my draft
+                  </Button>
+                </>
+              ) : (
+                <Button type="button" onClick={() => persist(valueRef.current)}>
+                  Retry draft save
+                </Button>
+              )}
+            </div>
+          )}
         {editing.retryable && (
           <>
             <p role="status">Your edit is still in the outbox.</p>
@@ -1124,10 +1735,11 @@ function Composer({
           </Button>
         )}
       </form>
-      {linkEdit && (
+      {active && linkEdit && (
         <ComposerLinkDialog
           edit={linkEdit}
           input={input}
+          finalFocus={() => (permitted.current ? input.current : false)}
           disabled={editingDisabled}
           close={() => setLinkEdit(null)}
         />

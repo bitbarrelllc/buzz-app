@@ -2,33 +2,29 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
-import type { TemplateProviders } from "../../features/channel-templates/provider";
+import { personalGroups } from "../../features/channel-templates/setup";
+import { EmptyState } from "../../shared/design-system/ui/EmptyState";
+import { FolderSimpleIcon } from "../../shared/design-system/icons";
+import { Header } from "../../shared/design-system/ui/Header";
 import { Button } from "../../shared/design-system/ui/Button";
 import { ChannelGroupsDialog } from "./ChannelGroupsDialog";
 import { useSidebarPreferences } from "./useSidebarPreferences";
 
 export function ChannelSetupSettings({
   relay,
-  providers,
   active,
 }: {
   relay: RelayData;
-  providers: TemplateProviders;
   active(): boolean;
 }) {
   const connection = useRelayConnection(relay);
   return (
-    <section aria-label="Personal groups settings" className="mt-8">
-      <h3 className="text-label">Personal groups</h3>
-      <p className="text-body-sm text-muted">
-        Organize channels privately. Moving a channel never changes its members
-        or Canvas.
-      </p>
+    <section aria-label="Personal groups settings">
+      <Header title="Personal groups" />
       {connection.status === "ready" ? (
         <GroupSettings
           key={`${connection.scope}:${connection.generation}`}
           session={connection.session}
-          providers={providers}
           active={active}
         />
       ) : (
@@ -41,11 +37,9 @@ export function ChannelSetupSettings({
 }
 function GroupSettings({
   session,
-  providers,
   active,
 }: {
   session: RelaySession;
-  providers: TemplateProviders;
   active(): boolean;
 }) {
   const kit = useSyncExternalStore(
@@ -57,16 +51,31 @@ function GroupSettings({
   useEffect(() => {
     session.channelKit.ensure();
   }, [session]);
+  const groups = personalGroups(kit.entries)?.record.value;
+  const empty =
+    kit.status === "ready" &&
+    (groups?.type === "groups"
+      ? groups.groups.length === 0
+      : preferences.status === "ready" &&
+        preferences.data?.sections.length === 0);
+  const manageAction = (
+    <Button
+      disabled={!session.channelKit.available || kit.status !== "ready"}
+      onClick={() => {
+        if (active()) setOpen(true);
+      }}
+    >
+      Manage personal groups
+    </Button>
+  );
   return (
     <>
-      <Button
-        disabled={!session.channelKit.available || kit.status !== "ready"}
-        onClick={() => {
-          if (active()) setOpen(true);
-        }}
-      >
-        Manage personal groups
-      </Button>
+      <EmptyState
+        icon={<FolderSimpleIcon />}
+        title={empty ? "No personal groups yet" : "Organize your channels"}
+        description="Group channels privately in your sidebar. Members and Canvas stay unchanged."
+        action={manageAction}
+      />
       {kit.status !== "ready" && (
         <p role="status">
           {kit.error ?? "Saved groups are not ready."}{" "}
@@ -81,7 +90,6 @@ function GroupSettings({
           onOpenChange={setOpen}
           kit={session.channelKit}
           legacy={preferences.data}
-          providers={providers}
           active={active}
         />
       )}

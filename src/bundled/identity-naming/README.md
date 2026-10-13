@@ -96,7 +96,7 @@ can legitimately change a label.
 | --- | --- |
 | Channel or thread identities | Channel members, plus the requested identity for a historical/non-member reference |
 | Mention picker | All actual selectable mention choices, before text-search filtering; not only matching search results |
-| Composer's selected mentions | Channel members, available agent choices (including invitation choices where offered), and already selected recipient keys |
+| Composer's selected mentions | The destination's members (or its explicit recipient roster), minus known-archived identities, plus already selected recipient keys; not the chooser's agent or invitation choices |
 | DM participant labels | That DM's participants |
 | Agent directory/management | The displayed collection's keys and all displayed configured aliases, including cross-community aliases |
 | Local activity/filter choices | The local choice set; unknown keys use the surface's existing key-label fallback |
@@ -247,11 +247,12 @@ bin/pnpm exec vitest run src/features/identity-names/policy.test.ts
 ## Desktop adapter (informative, not an authority protocol)
 
 At the extraction baseline, [directory.ts](../../features/identity-names/directory.ts)
-constructs facts from public profiles, ready agent-library records, ready native
-configuration in the current community, and view-local display facts. Native
-non-empty names take precedence over library names in that community. The first
+constructs facts from public profiles, ready agent-library records, the
+viewer's local agents in the current community, and view-local display
+facts. Local non-empty names take precedence over library names in that
+community. The first
 library record per key uses its trimmed name, then the profile name, then
-`Agent`. Library/native naming records are classified as agents but do not by
+`Agent`. Library/local naming records are classified as agents but do not by
 themselves invent an owner key. Explicit display facts replace that key's normal
 fact and can carry multiple aliases. The requested key is added to an explicit
 candidate set.

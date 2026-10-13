@@ -2,9 +2,16 @@ import { attachmentMessage, type UploadedAttachment } from "./attachments";
 import { validReactionContent, type CustomEmoji } from "./emoji";
 import type { EventTemplate } from "nostr-tools";
 import type { ChannelMessage } from "./contracts";
+import { messageAuthor } from "./fold";
 import { threadReference } from "./thread-reference";
 import type { EventData } from "./events";
 import type { Outbox, OutboxRecovery } from "./outbox";
+
+/** Owner authorization is supplied only after the agent's signed profile is verified. */
+export type AgentOwnerAuthorization = Readonly<{
+  agentId: string;
+  ownerId: string;
+}>;
 
 /** NIP-56 types accepted by the Buzz relay for message reports. */
 export const REPORT_TYPES = [
@@ -17,6 +24,13 @@ export const REPORT_TYPES = [
   "other",
 ] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
+/** `["effort", agentPubkey, level]` and `["model", agentPubkey, model]`: what
+ * a mentioned agent's owner asks of its next run. Only the owner is honoured. */
+export const EFFORT_TAG = "effort";
+export const MODEL_TAG = "model";
+export type RunPick = Readonly<{ model?: string; effort?: string }>;
+/** The model and effort picked for each mentioned agent, by pubkey. */
+export type MentionPicks = Readonly<Record<string, RunPick>>;
 
 /** Domain convenience only. Delivery and read reconciliation remain session-owned. */
 export function createMessages(
@@ -29,6 +43,8 @@ export function createMessages(
   relayOrigin?: string,
   /** Resolves on relay OK. Reports are never echoed, so they bypass the outbox. */
   publishReport?: (template: EventTemplate) => Promise<void>,
+  /** Explicit relay NIP-11 self; never inferred from contacts or a displayed row. */
+  signingAuthority?: string,
 ) {
   const writer = (kind: number, channelId: string) => {
     if (!canParticipate(channelId))
@@ -37,6 +53,8 @@ export function createMessages(
       throw new Error("This connection cannot publish that operation");
     return outbox;
   };
+  const ownedMessage = (event: EventData) =>
+    !!viewer && messageAuthor(event, signingAuthority) === viewer;
   const text = (content: string) => {
     const value = content.trim();
     if (!value) throw new Error("Message is empty");
@@ -60,6 +78,19 @@ export function createMessages(
       throw new Error("Choose at most 32 valid mention references");
     return [...new Set(pubkeys)].map((key) => ["mention", key]);
   };
+  const pickTags = (mentions: readonly string[], picks: MentionPicks) =>
+    Object.entries(picks).flatMap(([key, { model, effort }]) => {
+      if (
+        !mentions.includes(key) ||
+        (model !== undefined && !/^[\w.:[\]-]{1,64}$/.test(model)) ||
+        (effort !== undefined && !/^[a-z0-9-]{1,32}$/.test(effort))
+      )
+        throw new Error("A model or effort applies only to a mentioned agent");
+      return [
+        ...(model === undefined ? [] : [[MODEL_TAG, key, model]]),
+        ...(effort === undefined ? [] : [[EFFORT_TAG, key, effort]]),
+      ];
+    });
   return Object.freeze({
     send(
       channelId: string,
@@ -68,6 +99,7 @@ export function createMessages(
       attachments: readonly UploadedAttachment[] = [],
       recovery?: OutboxRecovery,
       references: readonly string[] = [],
+      picks: MentionPicks = {},
     ) {
       if (!channelId) throw new Error("A channel is required");
       const message = attachmentMessage(content, attachments, relayOrigin);
@@ -79,6 +111,7 @@ export function createMessages(
             ["h", channelId],
             ...mentionTags(channelId, mentions),
             ...referenceTags(references),
+            ...pickTags(mentions, picks),
             ...emojiTags(content),
             ...message.tags,
           ],
@@ -92,7 +125,7 @@ export function createMessages(
       const thread = original && threadReference(original);
       if (original?.kind !== 9 || !thread)
         throw new Error("Load a thread reply before sending it to the channel");
-      if (!viewer || original.pubkey !== viewer || row.authorId !== viewer)
+      if (!ownedMessage(original) || row.authorId !== viewer)
         throw new Error("Only your own messages can be sent to the channel");
       const channelId = original.tags.find(([name]) => name === "h")?.[1];
       if (
@@ -107,7 +140,7 @@ export function createMessages(
       const attachmentSource = find(row.attachmentSourceId ?? row.id);
       if (
         !attachmentSource ||
-        attachmentSource.pubkey !== viewer ||
+        !ownedMessage(attachmentSource) ||
         (attachmentSource.id !== original.id &&
           (attachmentSource.kind !== 40003 ||
             !attachmentSource.tags.some(
@@ -173,6 +206,7 @@ export function createMessages(
       attachments: readonly UploadedAttachment[] = [],
       parentId: string = rootId,
       references: readonly string[] = [],
+      picks: MentionPicks = {},
     ) {
       if (!channelId) throw new Error("A channel is required");
       if (!/^[0-9a-f]{64}$/.test(rootId))
@@ -189,6 +223,7 @@ export function createMessages(
           ["e", parentId, "", "reply"],
           ...mentionTags(channelId, mentions),
           ...referenceTags(references),
+          ...pickTags(mentions, picks),
           ...emojiTags(content),
           ...message.tags,
         ],
@@ -199,7 +234,7 @@ export function createMessages(
       const original = find(messageId);
       if (!original || ![9, 40002].includes(original.kind))
         throw new Error("Load the message before editing it");
-      if (original.pubkey !== viewer)
+      if (!ownedMessage(original))
         throw new Error("Only your own messages can be edited");
       const channelId = original.tags.find((tag) => tag[0] === "h")?.[1];
       if (!channelId) throw new Error("Message has no channel");
@@ -210,7 +245,7 @@ export function createMessages(
         !attachmentSource ||
         (attachmentSource.id !== original.id &&
           (attachmentSource.kind !== 40003 ||
-            attachmentSource.pubkey !== original.pubkey ||
+            !ownedMessage(attachmentSource) ||
             !attachmentSource.tags.some(
               ([name, id]) => name === "e" && id === messageId,
             ) ||
@@ -251,7 +286,10 @@ export function createMessages(
         ],
       });
     },
-    remove(eventIds: readonly string[]) {
+    remove(
+      eventIds: readonly string[],
+      authorization?: AgentOwnerAuthorization,
+    ) {
       const ids = [...new Set(eventIds)];
       if (!ids.length || ids.length > 100)
         throw new Error("Choose between 1 and 100 events to remove");
@@ -259,7 +297,16 @@ export function createMessages(
         const event = find(id);
         if (!event || ![7, 9, 40002].includes(event.kind))
           throw new Error("Load the message or reaction before removing it");
-        if (event.pubkey !== viewer)
+        const agentOwnerRemoval =
+          !!viewer &&
+          event.kind !== 7 &&
+          messageAuthor(event, signingAuthority) === authorization?.agentId &&
+          authorization.ownerId === viewer;
+        if (
+          event.kind === 7
+            ? event.pubkey !== viewer
+            : !ownedMessage(event) && !agentOwnerRemoval
+        )
           throw new Error(
             "Only your own messages and reactions can be removed",
           );

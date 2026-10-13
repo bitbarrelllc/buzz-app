@@ -261,6 +261,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         status: "core",
       },
       {
+        token: "bg-surface-categorical-purple",
+        variable: "--surface-categorical-purple",
+        pointsAt: "purple-3 light / purple-3 dark",
+        use: "Accent-independent categorical fill, paired with text-categorical-purple.",
+        status: "core",
+      },
+      {
         token: "bg-surface-panel",
         variable: "--surface-panel",
         pointsAt: "neutral-1 light / neutral-3 dark",
@@ -360,10 +367,31 @@ export const ROLE_GROUPS: RoleGroup[] = [
         status: "core",
       },
       {
+        token: "icon-status-progress",
+        variable: "--icon-status-progress",
+        pointsAt: "amber-10 light / amber-10 dark",
+        use: "In-progress task icons, paired with a distinct shape and accessible status label. Not text.",
+        status: "core",
+      },
+      {
+        token: "icon-status-complete",
+        variable: "--icon-status-complete",
+        pointsAt: "green-10 light / green-10 dark",
+        use: "Completed task icons, paired with a checkmark and accessible status label. Not text.",
+        status: "core",
+      },
+      {
         token: "text-link",
         variable: "--text-link",
         pointsAt: "blue-11 light / blue-11 dark",
         use: "Inline links and mentions in prose.",
+        status: "core",
+      },
+      {
+        token: "text-categorical-purple",
+        variable: "--text-categorical-purple",
+        pointsAt: "purple-12 light / purple-12 dark",
+        use: "Accent-independent categorical text, paired with surface-categorical-purple.",
         status: "core",
       },
       {
@@ -548,6 +576,20 @@ export const ROLE_GROUPS: RoleGroup[] = [
         variable: "--affordance-subtle-hover",
         pointsAt: "neutral-quiet-hover in both modes",
         use: "A secondary action under a pointer.",
+        status: "core",
+      },
+      {
+        token: "--affordance-backdrop-hover",
+        variable: "--affordance-backdrop-hover",
+        pointsAt: "black 6% light / white 10% dark",
+        use: "Translucent top-bar hover fills over the shell gradient.",
+        status: "core",
+      },
+      {
+        token: "--affordance-backdrop-pressed",
+        variable: "--affordance-backdrop-pressed",
+        pointsAt: "black 10% light / white 16% dark",
+        use: "Translucent top-bar pressed and selected fills over the shell gradient.",
         status: "core",
       },
       {
@@ -1054,7 +1096,7 @@ export const TYPE_ROLES: TypeRole[] = [
     lineHeight: "20px",
     tracking: "-0.005em",
     weight: "400",
-    use: "Reading text and messages.",
+    use: "Interface reading text.",
     status: "core",
   },
   {
@@ -1065,6 +1107,16 @@ export const TYPE_ROLES: TypeRole[] = [
     tracking: "-0.0025em",
     weight: "400",
     use: "Supporting or dense reading text.",
+    status: "core",
+  },
+  {
+    token: "text-message",
+    pointsAt: "body/message",
+    size: "14px",
+    lineHeight: "1.625 (22.75px at default)",
+    tracking: "-0.0025em",
+    weight: "400",
+    use: "Sent and received message prose, with relaxed line spacing.",
     status: "core",
   },
   {
@@ -1336,28 +1388,40 @@ export const SPACE_ROLES = [
 
 export const RADII = [
   {
-    token: "corner-control",
-    variable: "--corner-control",
-    value: "16px",
-    use: "Legacy control corners. New fields use radius-control (12px); panels use radius-panel (24px).",
+    token: "radius-chip",
+    variable: "--radius-chip",
+    value: "4px",
+    use: "Small chips and tight details.",
   },
   {
     token: "radius-row",
     variable: "--radius-row",
+    value: "8px",
+    use: "Dense navigator rows, compact selected regions and compact floating surfaces.",
+  },
+  {
+    token: "radius-icon-button",
+    variable: "--radius-icon-button",
     value: "10px",
-    use: "Dense navigator rows and compact selected regions.",
+    use: "Independent icon controls, including top-bar and content-toolbar actions, with the same radius on every corner.",
   },
   {
     token: "radius-control",
     variable: "--radius-control",
     value: "12px",
-    use: "Inputs and compact icon controls. Text buttons use radius-capsule.",
+    use: "Inputs, rounded cue buttons and the message action toolbar. Icon controls use radius-icon-button; text buttons default to radius-capsule.",
+  },
+  {
+    token: "radius-container",
+    variable: "--radius-container",
+    value: "16px",
+    use: "Medium containers, including menus, content popovers, pickers and the media review frame.",
   },
   {
     token: "radius-panel",
     variable: "--radius-panel",
-    value: "24px",
-    use: "Every major workspace panel.",
+    value: "20px",
+    use: "Major workspace panels and dialogs. Maximum standalone container radius.",
   },
   {
     token: "radius-capsule",

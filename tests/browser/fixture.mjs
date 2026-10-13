@@ -11,17 +11,20 @@ import {
 import { writeFile } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { schnorr } from "@noble/curves/secp256k1.js";
-import { bytesToHex } from "nostr-tools/utils";
+import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { platform, arch } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { relayBrokerPlugin } from "../../dev/relay-broker.mjs";
+import { relayBrokerPlugin } from "../../browser-host/relay-broker.mjs";
 import { policyRelay } from "./policy-relay.mjs";
 import { buildApp } from "./build.mjs";
 import { fixtureBody } from "./fixture-body.mjs";
 import { watchPageErrors } from "./page-errors.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
+// Public nonmember channel for search/preview/join journeys. Real channel ids
+// are UUIDs, and lifecycle commands accept only UUID channel ids.
+const OPEN_CHANNEL = "6f70656e-0000-4000-8000-000000000001";
 export const channels = ["alpha", "beta"];
 export const historySize = 640;
 
@@ -30,7 +33,9 @@ export const historySize = 640;
 // broker/subscriber and model only the upstream relay policy with ephemeral keys.
 export const test = base.extend({
   productionBroker: [false, { option: true }],
+  archiveOnDisk: [false, { option: true }],
   actionProfile: [false, { option: true }],
+  agentMessageDeletion: [false, { option: true }],
   profilePicture: ["", { option: true }],
   readState: [false, { option: true }],
   threadUnread: [false, { option: true }],
@@ -40,12 +45,16 @@ export const test = base.extend({
   threadUnreadOwnedRoot: [true, { option: true }],
   exactMessages: [false, { option: true }],
   openSearch: [false, { option: true }],
+  searchAuthor: [false, { option: true }],
   sessionChannels: [[], { option: true }],
   sessionWriteKinds: [null, { option: true }],
   sessionParents: [{}, { option: true }],
   sidebarUnread: [false, { option: true }],
   savedSidebar: [false, { option: true }],
   personalSidebar: [false, { option: true }],
+  meChannels: [[], { option: true }],
+  meAgentNames: [[], { option: true }],
+  meOutsideAgentNames: [[], { option: true }],
   sortingSidebar: [false, { option: true }],
   initialSidebarSort: [{}, { option: true }],
   channelLifecycle: [false, { option: true }],
@@ -60,6 +69,10 @@ export const test = base.extend({
   dmLabels: [false, { option: true }],
   dmMembers: [{}, { option: true }],
   agentPeers: [false, { option: true }],
+  inboxDm: [false, { option: true }],
+  inboxDmOldAnchor: [false, { option: true }],
+  inboxThreadWindow: [false, { option: true }],
+  inboxSessionAgent: [false, { option: true }],
   tallMessages: [false, { option: true }],
   membershipActivity: [false, { option: true }],
   launchAnimation: [false, { option: true }],
@@ -67,6 +80,8 @@ export const test = base.extend({
   channelIds: [channels, { option: true }],
   developmentReact: [false, { option: true, scope: "worker" }],
   pluginFixtures: [false, { option: true, scope: "worker" }],
+  localAgentActivity: [false, { option: true, scope: "worker" }],
+  pairingFixture: [false, { option: true, scope: "worker" }],
   companionFixture: [false, { option: true, scope: "worker" }],
   compiledApp: [buildApp, { scope: "worker" }],
   app: async (
@@ -76,7 +91,9 @@ export const test = base.extend({
       browserName,
       browser,
       productionBroker,
+      archiveOnDisk,
       actionProfile,
+      agentMessageDeletion,
       profilePicture,
       readState,
       threadUnread,
@@ -86,12 +103,16 @@ export const test = base.extend({
       threadUnreadOwnedRoot,
       exactMessages,
       openSearch,
+      searchAuthor,
       sessionChannels,
       sessionWriteKinds,
       sessionParents,
       sidebarUnread,
       savedSidebar,
       personalSidebar,
+      meChannels,
+      meAgentNames,
+      meOutsideAgentNames,
       sortingSidebar,
       initialSidebarSort,
       channelLifecycle,
@@ -106,6 +127,10 @@ export const test = base.extend({
       dmLabels,
       dmMembers,
       agentPeers,
+      inboxDm,
+      inboxDmOldAnchor,
+      inboxThreadWindow,
+      inboxSessionAgent,
       tallMessages,
       membershipActivity,
       launchAnimation,
@@ -181,8 +206,28 @@ export const test = base.extend({
     );
     // Kind 0 by author for keys a test creates; served on later profile reads.
     const servedProfiles = new Map();
-    const ownerAgentKey = lifecycleOwnerAgent ? generateSecretKey() : undefined;
+    const meAgents = [...meAgentNames, ...meOutsideAgentNames].map((name) => {
+      const key = generateSecretKey();
+      const pubkey = getPublicKey(key);
+      servedProfiles.set(
+        pubkey,
+        sign(0, [], JSON.stringify({ name, is_agent: true }), key),
+      );
+      return { pubkey, name };
+    });
+    const ownerAgentKey =
+      lifecycleOwnerAgent || agentMessageDeletion
+        ? generateSecretKey()
+        : undefined;
     const ownerAgent = ownerAgentKey ? getPublicKey(ownerAgentKey) : undefined;
+    const ownerAuthDigest = ownerAgent
+      ? new Uint8Array(
+          await crypto.subtle.digest(
+            "SHA-256",
+            new TextEncoder().encode(`nostr:agent-auth:${ownerAgent}:`),
+          ),
+        )
+      : undefined;
     const ownerAgentProfile = ownerAgentKey
       ? sign(
           0,
@@ -191,20 +236,22 @@ export const test = base.extend({
               "auth",
               viewer,
               "",
-              bytesToHex(
-                schnorr.sign(
-                  createHash("sha256")
-                    .update(`nostr:agent-auth:${ownerAgent}:`)
-                    .digest(),
-                  userKey,
-                ),
-              ),
+              bytesToHex(schnorr.sign(ownerAuthDigest, userKey)),
             ],
           ],
           JSON.stringify({ name: "Owner Agent", is_agent: true }),
           ownerAgentKey,
         )
       : undefined;
+    const ownerAttestationValid =
+      !!ownerAgent &&
+      !!ownerAgentProfile &&
+      !!ownerAuthDigest &&
+      schnorr.verify(
+        hexToBytes(ownerAgentProfile.tags[0][3]),
+        ownerAuthDigest,
+        hexToBytes(viewer),
+      );
     const participants = largeSidebar
       ? Array.from({ length: 1001 }, (_, i) =>
           (i + 1).toString(16).padStart(64, "0"),
@@ -219,7 +266,9 @@ export const test = base.extend({
           )
         : dmLabels
           ? ["dm-peer", "dm-group"]
-          : [];
+          : inboxDm || inboxDmOldAnchor
+            ? ["dm-peer"]
+            : [];
     const personalChannel = "11111111-1111-4111-8111-111111111111";
     const sortingIds = sortingSidebar ? ["cedar", "maple", "willow"] : [];
     const renamedChannels = new Map();
@@ -340,7 +389,43 @@ export const test = base.extend({
         );
       }
     }
+    if (meChannels.length) {
+      if (!productionBroker)
+        throw new Error("Me placement fixtures require the production decoder");
+      for (const community of ["primary", "secondary"]) {
+        const scope = JSON.parse(fixtureAliases)[community];
+        const coordinate = `buzz-me-kit-v1:${encodeURIComponent(scope)}:groups:me`;
+        const record = {
+          version: 1,
+          community: scope,
+          deleted: false,
+          value: {
+            type: "groups",
+            id: "me",
+            groups: [],
+            assignments: {},
+            channels: meChannels,
+          },
+        };
+        readEvents.get(community).set(
+          coordinate,
+          sign(
+            30078,
+            [
+              ["d", coordinate],
+              ["t", "buzz-me-kit-v1"],
+            ],
+            nip44.v2.encrypt(
+              JSON.stringify(record),
+              nip44.v2.utils.getConversationKey(userKey, viewer),
+            ),
+            userKey,
+          ),
+        );
+      }
+    }
     const hiddenChannels = new Set();
+    const meDetails = new Map();
     const streams = new Map();
     const streamOwners = new Map();
     // Tall histories leave room above the older-page prefetch threshold, even
@@ -367,6 +452,19 @@ export const test = base.extend({
             ),
           ),
         );
+    const ownerAgentMessage = agentMessageDeletion
+      ? sign(
+          9,
+          [["h", "alpha"]],
+          "Owned agent deletion fixture",
+          ownerAgentKey,
+          Math.max(
+            ...histories.get("primary/alpha").map((event) => event.created_at),
+          ) + 1,
+        )
+      : undefined;
+    if (ownerAgentMessage)
+      histories.get("primary/alpha").push(ownerAgentMessage);
     const historyDurationMs = performance.now() - historyStarted;
     for (const community of ["primary", "secondary"])
       for (const id of [...dmIds, ...lifecycleRows.map((row) => row.id)])
@@ -387,7 +485,7 @@ export const test = base.extend({
     if (openSearch) {
       const root = sign(
         9,
-        [["h", "open"]],
+        [["h", OPEN_CHANNEL]],
         "Public conversation root",
         userKey,
         1699999000,
@@ -395,14 +493,14 @@ export const test = base.extend({
       searchTarget = sign(
         9,
         [
-          ["h", "open"],
+          ["h", OPEN_CHANNEL],
           ["e", root.id, "", "reply"],
         ],
         "crew-search exact public reply",
         userKey,
         1699999001,
       );
-      histories.set("primary/open", [root]);
+      histories.set(`primary/${OPEN_CHANNEL}`, [root]);
       targetEvents.push(searchTarget);
     }
     let exact;
@@ -468,6 +566,42 @@ export const test = base.extend({
         membershipEvent("member_joined", 1, 1700000741),
       );
     }
+    let inboxDmAnchor;
+    if (inboxDmOldAnchor) {
+      inboxDmAnchor = sign(
+        9,
+        [["h", "dm-peer"]],
+        "Inbox old DM anchor",
+        peerKey,
+        1700000800,
+      );
+      histories
+        .get("primary/dm-peer")
+        .push(
+          inboxDmAnchor,
+          ...Array.from({ length: 24 }, (_, index) =>
+            sign(
+              9,
+              [["h", "dm-peer"]],
+              `Recent DM ${index}`,
+              userKey,
+              1700000810 + index,
+            ),
+          ),
+        );
+    }
+    if (inboxDm)
+      histories
+        .get("primary/dm-peer")
+        .push(
+          sign(
+            9,
+            [["h", "dm-peer"]],
+            "Inbox DM fixture reply",
+            peerKey,
+            1700000900,
+          ),
+        );
     if (sidebarUnread) {
       for (const id of Object.keys(dmMembers).length
         ? Object.keys(dmMembers)
@@ -594,6 +728,35 @@ export const test = base.extend({
         ),
       );
     }
+    let inboxWindow;
+    if (inboxThreadWindow) {
+      const channelId = channels.find((id) => /^[0-9a-f-]{36}$/.test(id));
+      if (!channelId)
+        throw new Error("Inbox window needs a canonical fixture channel");
+      const root = sign(
+        9,
+        [["h", channelId]],
+        "Inbox strict root",
+        userKey,
+        1700000100,
+      );
+      const replies = Array.from({ length: 15 }, (_, index) =>
+        sign(
+          9,
+          [
+            ["h", channelId],
+            ["e", root.id, "", "reply"],
+            ["p", viewer],
+          ],
+          `Inbox strict reply ${index}`,
+          peerKey,
+          1700000200 + index,
+        ),
+      );
+      histories.set(`primary/${channelId}`, [root, ...replies]);
+      threadReplies.set(root.id, replies);
+      inboxWindow = { channelId, root, replies };
+    }
     // Signed upstream-only stress data; production traversal and mounting stay real.
     let presenceThread;
     if (presenceThreadAuthors) {
@@ -659,6 +822,7 @@ export const test = base.extend({
         browserName,
         developmentReact,
         pluginFixtures,
+        agentMessageDeletion,
         compiledBuild: {
           worker: testInfo.workerIndex,
           durationMs: compiledApp.durationMs,
@@ -678,7 +842,7 @@ export const test = base.extend({
         platform: platform(),
         arch: arch(),
         viewport: testInfo.project.use.viewport,
-        build: `${developmentReact ? "Vite production build with development React" : "production frontend"}; ${productionBroker ? "production broker; modeled upstream WS/HTTP policy" : "fixture broker HTTP"}; no native or real relay`,
+        build: `${developmentReact ? "Vite production build with development React" : "production frontend"}; ${productionBroker ? "production broker; modeled upstream WS/HTTP policy" : "fixture broker HTTP"}; no native; no real relay`,
       },
       queries: [],
       publications: [],
@@ -730,7 +894,7 @@ export const test = base.extend({
         } else expect(filter).toEqual({ kinds: [30617, 30621], limit: 100 });
         return [];
       }
-      if (personalSidebar && filter.ids)
+      if ((personalSidebar || meChannels.length > 0) && filter.ids)
         return [...readEvents.get(community).values()].filter((event) =>
           filter.ids.includes(event.id),
         );
@@ -777,9 +941,13 @@ export const test = base.extend({
               39001,
               [
                 ["d", id],
-                ...(lifecycleRows.some((row) => row.id === id) &&
+                ...((lifecycleRows.some((row) => row.id === id) ||
+                  meChannels.includes(id)) &&
                 ["owner", "admin"].includes(lifecycleRole)
                   ? [["p", viewer, lifecycleRole]]
+                  : []),
+                ...(meChannels.includes(id)
+                  ? meAgents.map(({ pubkey }) => ["p", pubkey, "", "member"])
                   : []),
                 ...(ownerAgent && lifecycleRows.some((row) => row.id === id)
                   ? [["p", ownerAgent, "owner"]]
@@ -804,6 +972,9 @@ export const test = base.extend({
                   ? lifecycleRole
                   : "member",
               ],
+              ...(meChannels.includes(id)
+                ? meAgents.map(({ pubkey }) => ["p", pubkey, "", "member"])
+                : []),
               ...(ownerAgent && lifecycleRows.some((row) => row.id === id)
                 ? [["p", ownerAgent, "", "owner"]]
                 : []),
@@ -834,49 +1005,61 @@ export const test = base.extend({
             ]),
           );
       if (filter.kinds?.includes(39000))
-        return [...rosterIds, ...(openSearch ? ["open"] : [])]
+        return [
+          ...new Set([...rosterIds, ...(openSearch ? [OPEN_CHANNEL] : [])]),
+        ]
           .filter((id) => !filter["#d"] || filter["#d"].includes(id))
-          .map((id) =>
-            sign(
-              39000,
-              [
-                ["d", id],
+          .map(
+            (id) =>
+              meDetails.get(`${community}/${id}`) ??
+              sign(
+                39000,
                 [
-                  "name",
-                  renamedChannels.get(id) ??
-                    channelNames[id] ??
-                    lifecycleRows.find((row) => row.id === id)?.name ??
-                    (id === "alpha" ? "Alpha" : id === "beta" ? "Beta" : id),
+                  ["d", id],
+                  [
+                    "name",
+                    renamedChannels.get(id) ??
+                      channelNames[id] ??
+                      lifecycleRows.find((row) => row.id === id)?.name ??
+                      (id === "alpha"
+                        ? "Alpha"
+                        : id === "beta"
+                          ? "Beta"
+                          : id === OPEN_CHANNEL
+                            ? "open"
+                            : id),
+                  ],
+                  [
+                    "t",
+                    lifecycleRows.find((row) => row.id === id)?.type ??
+                      (dmIds.includes(id) ? "dm" : "stream"),
+                  ],
+                  ...(archivedIds.has(id) ? [["archived", "true"]] : []),
+                  // Ordinary channels are explicitly public; do not add a public
+                  // flag to private sessions or change the separate DM fixtures.
+                  ...(!sessionChannels.includes(id) &&
+                  !dmIds.includes(id) &&
+                  !lifecycleRows.some(
+                    (row) => row.id === id && row.type === "dm",
+                  )
+                    ? [["public"]]
+                    : []),
+                  ...(dmIds.includes(id) ? [["hidden"]] : []),
+                  ...(sessionChannels.includes(id)
+                    ? [
+                        ["private"],
+                        [
+                          "about",
+                          `Buzz session (buzz.sessions/v1)${sessionParents[id] ? `\nparent:${sessionParents[id]}` : ""}`,
+                        ],
+                      ]
+                    : []),
+                  ...(hiddenChannels.has(id) ? [["hidden"]] : []),
                 ],
-                [
-                  "t",
-                  lifecycleRows.find((row) => row.id === id)?.type ??
-                    (dmIds.includes(id) ? "dm" : "stream"),
-                ],
-                ...(archivedIds.has(id) ? [["archived", "true"]] : []),
-                // Ordinary channels are explicitly public; do not add a public
-                // flag to private sessions or change the separate DM fixtures.
-                ...(!sessionChannels.includes(id) &&
-                !dmIds.includes(id) &&
-                !lifecycleRows.some((row) => row.id === id && row.type === "dm")
-                  ? [["public"]]
-                  : []),
-                ...(dmIds.includes(id) ? [["hidden"]] : []),
-                ...(sessionChannels.includes(id)
-                  ? [
-                      ["private"],
-                      [
-                        "about",
-                        `Buzz session (buzz.sessions/v1)${sessionParents[id] ? `\nparent:${sessionParents[id]}` : ""}`,
-                      ],
-                    ]
-                  : []),
-                ...(hiddenChannels.has(id) ? [["hidden"]] : []),
-              ],
-              "",
-              relayKey,
-              lifecycleTime,
-            ),
+                "",
+                relayKey,
+                lifecycleTime,
+              ),
           );
       if (filter.kinds?.includes(30078)) {
         const events = [...readEvents.get(community).values()];
@@ -908,13 +1091,37 @@ export const test = base.extend({
         expect(filter.authors.length).toBeLessThanOrEqual(100);
         return [];
       }
+      if (filter.kinds?.includes(30178)) {
+        expect(filter).toEqual({
+          kinds: [30175, 30178],
+          limit: 63,
+        });
+        return [];
+      }
+      // The Agents service's read of the owner's agent list.
+      if (
+        filter.kinds?.length === 1 &&
+        filter.kinds[0] === 30177 &&
+        !filter["#d"]
+      ) {
+        expect(filter).toEqual({
+          authors: [viewer],
+          kinds: [30177],
+          limit: 500,
+        });
+        return [];
+      }
       if (filter.kinds?.includes(30175) || filter.kinds?.includes(30177)) {
         expect(filter).toEqual({
           authors: [viewer],
           kinds: [30175, 30177],
           limit: 200,
         });
-        return [];
+        return meAgents
+          .filter(({ name }) => meAgentNames.includes(name))
+          .map(({ pubkey, name }) =>
+            sign(30177, [["d", pubkey]], JSON.stringify({ name }), userKey),
+          );
       }
       if (filter.kinds?.includes(30030)) {
         expect(filter).toEqual({
@@ -966,6 +1173,50 @@ export const test = base.extend({
         });
         return [];
       }
+      if (
+        searchAuthor &&
+        filter.kinds?.includes(0) &&
+        filter.search_mode === "prefix"
+      )
+        return [profiles.get(community)].filter((event) =>
+          JSON.parse(event.content)
+            .name.toLowerCase()
+            .startsWith(filter.search.toLowerCase()),
+        );
+      if (
+        searchAuthor &&
+        filter.kinds?.includes(9) &&
+        filter.search === undefined &&
+        filter.authors
+      )
+        return [];
+      if (filter.search !== undefined)
+        return [...histories.entries()]
+          .filter(([key]) => key.startsWith(`${community}/`))
+          .flatMap(([, events]) => events)
+          .concat(community === "primary" ? targetEvents : [])
+          .filter(
+            (event) =>
+              filter.kinds.includes(event.kind) &&
+              event.content
+                .toLowerCase()
+                .includes(filter.search.toLowerCase()) &&
+              (!filter["#h"] ||
+                event.tags.some(
+                  ([key, value]) => key === "h" && filter["#h"].includes(value),
+                )) &&
+              (!filter.authors || filter.authors.includes(event.pubkey)) &&
+              (filter.since === undefined ||
+                event.created_at >= filter.since) &&
+              (filter.until === undefined || event.created_at <= filter.until),
+          )
+          .slice(0, filter.limit);
+      if (
+        agentMessageDeletion &&
+        filter.kinds?.includes(0) &&
+        filter.authors?.includes(ownerAgent)
+      )
+        return ownerAgentProfile ? [ownerAgentProfile] : [];
       if (filter.kinds?.includes(0))
         return [
           ...[...servedProfiles.values()].filter((event) =>
@@ -997,7 +1248,9 @@ export const test = base.extend({
                 0,
                 [],
                 JSON.stringify({
-                  ...(agentPeers && key !== peerKey ? { is_agent: true } : {}),
+                  ...((agentPeers && key !== peerKey) || inboxSessionAgent
+                    ? { is_agent: true }
+                    : {}),
                   display_name: [
                     "Alice Fixture",
                     "Bob Fixture",
@@ -1008,22 +1261,40 @@ export const test = base.extend({
               ),
             ),
         ];
-      if (filter.search !== undefined)
-        return [...histories.entries()]
+      if (filter["#p"] && !filter["#h"] && filter.kinds?.includes(9)) {
+        expect([...filter.kinds].sort((a, b) => a - b)).toEqual([9, 40002]);
+        expect(filter["#p"]).toEqual([viewer]);
+        expect(filter.limit).toBe(50);
+        const candidates = [...histories.entries()]
           .filter(([key]) => key.startsWith(`${community}/`))
           .flatMap(([, events]) => events)
-          .concat(community === "primary" ? targetEvents : [])
+          .concat(
+            community === "primary"
+              ? [...targetEvents, ...[...threadReplies.values()].flat()]
+              : [],
+          );
+        return [
+          ...new Map(candidates.map((event) => [event.id, event])).values(),
+        ]
           .filter(
             (event) =>
               filter.kinds.includes(event.kind) &&
-              event.content.toLowerCase().includes(filter.search.toLowerCase()),
+              event.tags.some(([k, v]) => k === "p" && v === viewer),
+          )
+          .toSorted(
+            (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
           )
           .slice(0, filter.limit);
+      }
       if (filter.ids)
         return [...histories.entries()]
           .filter(([key]) => key.startsWith(`${community}/`))
           .flatMap(([, events]) => events)
-          .concat(community === "primary" ? targetEvents : [])
+          .concat(
+            community === "primary"
+              ? [...targetEvents, ...[...threadReplies.values()].flat()]
+              : [],
+          )
           .filter(
             (event) =>
               filter.ids.includes(event.id) &&
@@ -1056,6 +1327,73 @@ export const test = base.extend({
             (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
           )
           .slice(0, filter.limit);
+      if (filter.thread_window) {
+        const channelId = filter["#h"][0],
+          rootId = filter["#e"][0];
+        const candidates = [
+          ...(histories.get(`${community}/${channelId}`) ?? []),
+          ...(community === "primary" ? (threadReplies.get(rootId) ?? []) : []),
+        ];
+        const rows = [
+          ...new Map(candidates.map((event) => [event.id, event])).values(),
+        ]
+          .filter(
+            (event) =>
+              filter.kinds.includes(event.kind) &&
+              event.tags.some(
+                ([k, v]) => k === "e" && v.toLowerCase() === rootId,
+              ) &&
+              (filter.until === undefined ||
+                event.created_at < filter.until ||
+                (event.created_at === filter.until &&
+                  event.id > filter.before_id)),
+          )
+          .toSorted(
+            (a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id),
+          );
+        const page = rows.slice(0, filter.limit),
+          last = page.at(-1);
+        const hasMore = rows.length > page.length;
+        const binding = createHash("sha256")
+          .update(
+            JSON.stringify([
+              "tw",
+              1,
+              "older",
+              `${community}.example`,
+              viewer,
+              channelId,
+              rootId,
+              filter.limit,
+              filter.depth_limit ?? 100,
+              [...new Set(filter.kinds)].sort((a, b) => a - b),
+              filter.until === undefined
+                ? null
+                : [filter.until, filter.before_id],
+              filter.include_aux ?? false,
+            ]),
+          )
+          .digest("hex");
+        return [
+          ...page,
+          sign(
+            39007,
+            [
+              ["d", `tw:1:${binding}`],
+              ["h", channelId],
+              ["e", rootId],
+            ],
+            JSON.stringify({
+              version: 1,
+              direction: "older",
+              has_more: hasMore,
+              next_cursor: hasMore
+                ? { created_at: last.created_at, id: last.id }
+                : null,
+            }),
+          ),
+        ];
+      }
       if (filter.depth_limit) {
         const rootId = filter["#e"]?.[0];
         const candidates = [
@@ -1219,9 +1557,65 @@ export const test = base.extend({
           ]
         : events;
     };
+    let heldJoin;
+    // Live roster replacement, as the relay republishes after a join. It
+    // reaches the app through its open channel REQ, not a join response.
+    const deliverRoster = (id, community) =>
+      relay.publish(
+        community,
+        sign(
+          39002,
+          [
+            ["d", id],
+            ["p", viewer, "", "member"],
+          ],
+          "",
+          relayKey,
+          Math.floor(Date.now() / 1000),
+        ),
+      );
     const acceptReadPublication = (community, event) => {
       expect(verifyEvent(event)).toBe(true);
       expect(event.pubkey).toBe(viewer);
+      if (openSearch && event.kind === 9021) {
+        // NIP-29 join: the relay adds an open channel's requester to its roster.
+        expect(event.tags).toEqual([["h", OPEN_CHANNEL]]);
+        if (!rosterIds.includes(OPEN_CHANNEL)) rosterIds.push(OPEN_CHANNEL);
+        report.lifecyclePublications ??= [];
+        report.lifecyclePublications.push(event);
+        if (!heldJoin) return;
+        // The relay republishes the roster live before the requester's OK.
+        deliverRoster(OPEN_CHANNEL, community);
+        return heldJoin.promise;
+      }
+      if (
+        event.kind === 9002 &&
+        meChannels.includes(event.tags.find(([key]) => key === "h")?.[1])
+      ) {
+        const id = event.tags.find(([key]) => key === "h")[1];
+        const value = (key) => event.tags.find(([name]) => name === key)?.[1];
+        expect(value("about")).toBe("");
+        meDetails.set(
+          `${community}/${id}`,
+          sign(
+            39000,
+            [
+              ["d", id],
+              ["name", value("name")],
+              ["about", ""],
+              ["t", "stream"],
+              [value("visibility") === "open" ? "public" : "private"],
+              ...(value("ttl") ? [["ttl", value("ttl")]] : []),
+            ],
+            "",
+            relayKey,
+            ++lifecycleTime,
+          ),
+        );
+        report.detailsPublications ??= [];
+        report.detailsPublications.push(event);
+        return;
+      }
       if (channelLifecycle && [9002, 9008, 9022, 41012].includes(event.kind)) {
         const id = event.tags.find(([key]) => key === "h")?.[1];
         expect(lifecycleRows.some((row) => row.id === id)).toBe(true);
@@ -1266,7 +1660,20 @@ export const test = base.extend({
           expect(target.tags).toContainEqual(["h", channel]);
           if (event.kind === 7) expect(target.kind).toBe(9);
           else {
-            expect(target.pubkey).toBe(viewer);
+            const ownerDelete =
+              event.kind === 5 &&
+              agentMessageDeletion &&
+              target.pubkey === ownerAgent &&
+              target.kind === 9;
+            if (ownerDelete) {
+              expect(ownerAgentProfile).toBeDefined();
+              expect(ownerAttestationValid).toBe(true);
+              const auth = ownerAgentProfile.tags.find(
+                ([name]) => name === "auth",
+              );
+              expect(auth).toHaveLength(4);
+              expect(auth[1]).toBe(viewer);
+            } else expect(target.pubkey).toBe(viewer);
             expect([7, 9]).toContain(target.kind);
             if (event.kind === 5)
               expect(event.tags).toContainEqual(["k", String(target.kind)]);
@@ -1292,13 +1699,17 @@ export const test = base.extend({
           "channel-sort",
         ].includes(sidebarCoordinate) ||
         (personalSidebar &&
-          sidebarCoordinate?.startsWith("buzz-channel-kit-v1:"))
+          sidebarCoordinate?.startsWith("buzz-channel-kit-v1:")) ||
+        (meChannels.length > 0 &&
+          sidebarCoordinate?.startsWith("buzz-me-kit-v1:"))
       ) {
         expect(event.tags).toContainEqual([
           "t",
           sidebarCoordinate.startsWith("buzz-channel-kit-v1:")
             ? "buzz-channel-kit-v1"
-            : sidebarCoordinate,
+            : sidebarCoordinate.startsWith("buzz-me-kit-v1:")
+              ? "buzz-me-kit-v1"
+              : sidebarCoordinate,
         ]);
         const blob = JSON.parse(
           nip44.v2.decrypt(
@@ -1552,7 +1963,11 @@ export const test = base.extend({
               .map((event) => [event.id, event]),
           ).values(),
         ];
-        if (filter.until !== undefined && filter["#h"]?.length) {
+        if (
+          filter.search === undefined &&
+          filter.until !== undefined &&
+          filter["#h"]?.length
+        ) {
           pending.push({
             community,
             channel: filter["#h"][0],
@@ -1620,6 +2035,9 @@ export const test = base.extend({
                   next();
                 });
                 const broker = relayBrokerPlugin({
+                  archiveFile: archiveOnDisk
+                    ? testInfo.outputPath("archive.sqlite3")
+                    : ":memory:",
                   relayUrl: fixtureRelayUrl,
                   communityAliases: fixtureAliases,
                   identity: () => userKey.slice(),
@@ -1727,8 +2145,12 @@ export const test = base.extend({
         { viewer, profilePicture, iconCongestion },
       );
       await use({
+        archiveFile: archiveOnDisk
+          ? testInfo.outputPath("archive.sqlite3")
+          : undefined,
         sign: (template) => finalizeEvent(template, userKey),
         channelMetadata: (id, tags) => sign(39000, [["d", id], ...tags]),
+        signRelay: (template) => finalizeEvent(template, relayKey),
         membershipSnapshot(role) {
           expect(["owner", "admin", "member"]).toContain(role);
           return sign(13534, [["member", viewer, role]], "", relayKey);
@@ -1777,8 +2199,26 @@ export const test = base.extend({
           };
         },
         presenceThread,
+        inboxWindow,
+        inboxDmAnchor,
+        deleteInboxAnchor(event) {
+          const deletion = sign(
+            5,
+            [
+              ["h", inboxWindow.channelId],
+              ["e", event.id],
+            ],
+            "",
+            peerKey,
+            event.created_at + 100,
+          );
+          targetEvents.push(deletion);
+          relay.publish("primary", deletion);
+        },
         exact,
+        ownerAgentMessage,
         searchTarget,
+        openChannelId: OPEN_CHANNEL,
         membership(
           type,
           targetIndex,
@@ -1815,6 +2255,7 @@ export const test = base.extend({
           return event;
         },
         participants,
+        meAgents,
         viewer,
         relay,
         observer(raw, agentKey, community = "primary") {
@@ -1857,6 +2298,18 @@ export const test = base.extend({
         omitChannel(id) {
           expect(rosterIds).toContain(id);
           rosterIds.splice(rosterIds.indexOf(id), 1);
+        },
+        // Hold the join's OK; its live roster still arrives first.
+        holdJoin() {
+          let release;
+          const promise = new Promise((resolve) => {
+            release = resolve;
+          });
+          heldJoin = { promise };
+          return () => {
+            heldJoin = undefined;
+            release();
+          };
         },
         // Signed upstream-only simulations: never a browser publication or live relay.
         activity({
@@ -1918,13 +2371,32 @@ export const test = base.extend({
           targetEvents.push(event);
           relay.publish("primary", event);
         },
+        // Relay-owned summary evidence, not a mutation of the client's row.
+        threadSummary(rootId, participants, replyCount) {
+          const event = sign(
+            39005,
+            [
+              ["h", "alpha"],
+              ["e", rootId],
+              ["d", rootId],
+            ],
+            JSON.stringify({ reply_count: replyCount, participants }),
+            relayKey,
+            Math.floor(Date.now() / 1000) + 1,
+          );
+          threadSummaries.push(event);
+          relay.publish("primary", event);
+          return event;
+        },
         reply(rootId, own = false, deliver = true) {
           const replies = threadReplies.get(rootId);
           if (!replies) throw new Error("Unknown fixture thread");
+          const channel = replies[0]?.tags.find(([key]) => key === "h")?.[1];
+          if (!channel) throw new Error("Missing fixture thread channel");
           const event = sign(
             9,
             [
-              ["h", "alpha"],
+              ["h", channel],
               ["e", rootId, "", "reply"],
             ],
             own ? "My reply" : "New peer reply",
@@ -2004,6 +2476,7 @@ export const test = base.extend({
         ...(report.sidebarActivityFailures ?? []),
         ...(report.sidebarStarFailures ?? []),
         ...(report.sidebarAssignmentFailures ?? []),
+        ...(report.sidebarRemovalFailures ?? []),
         ...(report.sidebarPreferenceFailures ?? []),
         ...(report.startupFailures ?? []),
       ];
@@ -2019,11 +2492,25 @@ export const test = base.extend({
         sidebarFailures.splice(match, 1);
         return true;
       };
+      const githubFailures = [...(report.githubFailures ?? [])];
+      const injectedGitHubFailure = (message, index) => {
+        if (
+          !/^Failed to load resource: the server responded with a status of 403/.test(
+            message,
+          )
+        )
+          return false;
+        const match = githubFailures.indexOf(consoleLocations.get(index));
+        if (match < 0) return false;
+        githubFailures.splice(match, 1);
+        return true;
+      };
       expect(
         report.consoleErrors.filter(
           (message, index) =>
             !retiredConsole(message, index) &&
             !injectedSidebarFailure(message, index) &&
+            !injectedGitHubFailure(message, index) &&
             !(
               expectedPageFailure &&
               message.includes("Fixture page render failure")

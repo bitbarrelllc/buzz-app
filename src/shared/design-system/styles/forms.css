@@ -197,7 +197,7 @@
     display: flex;
     flex-shrink: 0;
   }
-  /* Proposed compact row treatment: full labels remain in the popup and hint. */
+  /* Row choices retain a visible boundary; full labels stay in the popup and hint. */
   .buzz-select[data-variant="compact"] {
     display: grid;
     min-width: 0;
@@ -205,12 +205,6 @@
   .buzz-select[data-variant="compact"] .buzz-button {
     min-width: 0;
     max-width: 100%;
-    color: var(--text-subtle);
-  }
-  .buzz-select[data-variant="compact"]
-    .buzz-button:is(:hover, :active, [aria-expanded="true"]):not(
-      [data-disabled]
-    ) {
     color: var(--text-standard);
   }
   .buzz-select[data-variant="compact"] .buzz-button:disabled {
@@ -343,6 +337,41 @@
   }
   html[data-keyboard-navigation] .buzz-input-group > .buzz-input:focus-visible {
     outline-offset: 0;
+  }
+  /* A chip: a choice that reads as a label until hovered or opened. Its value
+     opens the list, so the browse button is dropped. */
+  .buzz-input-group[data-appearance="chip"] {
+    padding-inline: var(--space-control-inset);
+    background: transparent;
+  }
+  .buzz-input-group[data-appearance="chip"]:is(:hover, [data-popup-open]) {
+    background: var(--surface-hover);
+  }
+  .buzz-input-group[data-appearance="chip"] > .buzz-input-trailing {
+    display: none;
+  }
+  .buzz-input-group[data-appearance="chip"] > .buzz-input {
+    caret-color: transparent;
+    cursor: pointer;
+  }
+  .buzz-input-group[data-appearance="chip"]:focus-within {
+    --border: transparent;
+  }
+  html[data-keyboard-navigation]
+    .buzz-input-group[data-appearance="chip"]:focus-within {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+  }
+  /* A title field: the value set as a page title, with no field around it. */
+  .buzz-input[data-appearance="title"] {
+    @apply text-title;
+    min-height: 3.5rem;
+    padding-inline: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .buzz-input[data-appearance="title"]::placeholder {
+    color: var(--text-unavailable);
   }
 
   .buzz-input:where(:focus, [data-popup-open]),

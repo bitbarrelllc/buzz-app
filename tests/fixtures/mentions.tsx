@@ -1,7 +1,6 @@
 import "../../src/shared/styles/globals.css";
 import { useKeyboardFocusVisibility } from "../../src/shared/design-system/useKeyboardFocusVisibility";
 import { AgentSettings } from "../../src/app/AgentSettings";
-import { createAgentControl } from "../../src/features/agents/control";
 import { StrictMode, useState, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { finalizeEvent } from "nostr-tools";
@@ -10,7 +9,6 @@ import { createPluginManager } from "../../src/plugins/manager";
 import { PagesService } from "../../src/features/pages/service";
 import { PanelsService } from "../../src/features/panels/service";
 import { SettingsCardsService } from "../../src/features/settings/service";
-import { TemplateProvidersService } from "../../src/features/channel-templates/provider";
 import { provideNavigation } from "../../src/features/navigation/service";
 import { ConversationService } from "../../src/features/conversation/service";
 import { bundledPlugins } from "../../src/bundled";
@@ -35,7 +33,6 @@ const viewer = keypair(),
   first = keypair(),
   second = keypair(),
   outsider = keypair();
-const browserControl = createAgentControl(null);
 let members = [viewer.pubkey, first.pubkey, second.pubkey];
 let time = 1700000000;
 const publications: RelayEvent[] = [];
@@ -43,13 +40,28 @@ let incoming = (_events: readonly RelayEvent[]) => {};
 let releaseProfiles = () => {};
 let libraryReads = 0;
 const reads: (readonly number[])[] = [];
+// Parallel to `reads`: the directory search term a read carries, or null. The
+// directory reads once per new query by design, unlike cold session reads.
+const readSearches: (string | null)[] = [];
 let pendingReads = 0;
 let libraryIncludesFirst = false;
 const admission = new URLSearchParams(location.search).has(
   "nonmember-admission",
 );
+// With nonmember-admission: make "General" a DM, which can never add members.
+const dm = new URLSearchParams(location.search).has("dm");
 const naming = new URLSearchParams(location.search).has("identity-names");
 let colliding = false;
+const secondProfile = () =>
+  profile(
+    second,
+    {
+      name: naming && !colliding ? "Other Honey" : "Honey",
+      is_agent: true,
+      picture: "https://avatars.test/app-icon.png",
+    },
+    time,
+  );
 const delayed = new URLSearchParams(location.search).has("delayed-profiles");
 const testControls = new URLSearchParams(location.search).has("test-controls");
 const channels = new URLSearchParams(location.search).has("channels");
@@ -68,10 +80,20 @@ const extraChannels = Array.from({ length: channelCount }, (_, index) => [
     ["t", "stream"],
   ]),
 ]).flat();
+// An open channel the viewer has not joined, for `#` public channel search.
+const openChannels = new URLSearchParams(location.search).has("open-channels")
+  ? [
+      roster(relay, "open", [first.pubkey], time),
+      metadata(relay, "open", "Gemstones", time, [["t", "stream"], ["public"]]),
+    ]
+  : [];
 const searches: string[] = [];
 const heldSearches: string[] = [];
 let searchGate: Promise<void> | undefined;
 let releaseSearch = () => {};
+// Exact channel resolves (39000 by `#d`), held to observe a pending lookup.
+let channelGate: Promise<void> | undefined;
+let releaseChannels = () => {};
 // Optional visual preview: real GIF search, with messages still local to this fixture.
 const gifRelay = new URLSearchParams(location.search).get("gif-community");
 const gifCommunity = gifRelay ? relayOrigin(gifRelay) : undefined;
@@ -120,10 +142,20 @@ const owner = createRelaySession(
     },
     async query(filters) {
       reads.push(filters.flatMap((filter) => filter.kinds ?? []));
+      readSearches.push(
+        filters.find((filter) => filter.search !== undefined)?.search ?? null,
+      );
       pendingReads++;
       try {
         if (filters.some((filter) => filter.kinds?.includes(0)))
           await profileGate;
+        if (
+          channelGate &&
+          filters.some(
+            (filter) => filter.kinds?.includes(39000) && filter["#d"],
+          )
+        )
+          await channelGate;
         const search = filters.find((filter) => filter.search)?.search;
         if (search !== undefined) {
           searches.push(search);
@@ -140,13 +172,13 @@ const owner = createRelaySession(
                 kind: 39000,
                 content: JSON.stringify({
                   name: "General",
-                  channel_type: "stream",
+                  channel_type: dm ? "dm" : "stream",
                 }),
                 created_at: time,
                 tags: [
                   ["d", "c"],
                   ["name", "General"],
-                  ["t", "stream"],
+                  ["t", dm ? "dm" : "stream"],
                 ],
               })
             : metadata(
@@ -169,13 +201,10 @@ const owner = createRelaySession(
             name: delayed ? "Mary Jane" : "Honey",
             picture: "https://avatars.test/bestie.png",
           }),
-          profile(second, {
-            name: "Honey",
-            is_agent: true,
-            picture: "https://avatars.test/app-icon.png",
-          }),
+          secondProfile(),
           ...(admission ? [profile(outsider, { name: "Outside Person" })] : []),
           ...extraChannels,
+          ...openChannels,
           ...publications,
         ];
         return events.filter((event) =>
@@ -217,6 +246,38 @@ const names = bindNames(owner.session, {
   subscribe: () => () => {},
 });
 const namedSession = { ...owner.session, names };
+if (new URLSearchParams(location.search).has("teams")) {
+  const state = {
+    status: "ready" as const,
+    entries: [
+      {
+        eventId: "team-head",
+        createdAt: 1,
+        record: {
+          version: 1 as const,
+          community: "fixture",
+          deleted: false,
+          value: {
+            type: "team" as const,
+            id: "honeys",
+            name: "The Honey Team",
+            agents: [first.pubkey, second.pubkey],
+          },
+        },
+      },
+    ],
+  };
+  namedSession.channelKit = {
+    available: true,
+    snapshot: () => state,
+    subscribe: () => () => {},
+    ensure() {},
+    async refresh() {},
+    async save() {
+      throw new Error("Read-only fixture");
+    },
+  };
+}
 owner.session.channels.ensureList();
 const context = new Context();
 const disabledCalls: {
@@ -273,9 +334,9 @@ if (channels) {
   new PagesService(context);
   new PanelsService(context);
   new SettingsCardsService(context);
-  new TemplateProvidersService(context);
   provideNavigation(context);
-  context.provide("agentControl", browserControl);
+  // Channels requires Agents for its page/settings, neither mounted here.
+  context.provide("agents", {});
   // Only the composer is mounted; the Channels page never consumes this service.
   context.provide("relay", {
     snapshot: () => ({ session: namedSession }),
@@ -286,6 +347,8 @@ Object.assign(window, {
   mentionFixture: {
     async collide(value: boolean) {
       colliding = value;
+      ++time;
+      incoming([secondProfile()]);
       await owner.session.agentLibrary.refresh();
     },
     qualifier: (key: string) => names?.lookup(key)?.qualifier,
@@ -305,7 +368,11 @@ Object.assign(window, {
     },
     releaseProfiles: () => releaseProfiles(),
     libraryReads: () => libraryReads,
-    reads: () => ({ kinds: reads, pending: pendingReads }),
+    reads: () => ({
+      kinds: reads,
+      searches: readSearches,
+      pending: pendingReads,
+    }),
     searches: () => [...searches],
     heldSearches: () => [...heldSearches],
     holdSearches() {
@@ -316,6 +383,15 @@ Object.assign(window, {
     releaseSearches() {
       searchGate = undefined;
       releaseSearch();
+    },
+    holdChannelReads() {
+      channelGate = new Promise((resolve) => {
+        releaseChannels = resolve;
+      });
+    },
+    releaseChannelReads() {
+      channelGate = undefined;
+      releaseChannels();
     },
     setLibraryAgent(included: boolean) {
       libraryIncludesFirst = included;
@@ -380,7 +456,7 @@ function Fixture() {
         />
       </div>
       {new URLSearchParams(location.search).has("settings") && (
-        <AgentSettings control={browserControl} />
+        <AgentSettings />
       )}
     </main>
   );

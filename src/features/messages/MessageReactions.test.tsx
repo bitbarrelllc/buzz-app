@@ -9,7 +9,12 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { MessageReactionControls, MessageReactions } from "./MessageReactions";
+import { ConversationPresentation } from "../conversation/ConversationPresentation";
+import {
+  MessageReactionControls,
+  MessageReactions,
+  REACTION_PREVIEW_DELAY_MS,
+} from "./MessageReactions";
 import { createRelaySession } from "../relay/session";
 import {
   flush,
@@ -458,4 +463,47 @@ it("rolls back a failed last-reaction removal and retries it after remount", asy
   });
   expect(publish.mock.calls[1]?.[0]).toEqual(original);
   expect(screen.queryByRole("button", { name: /👍: 1/ })).toBeNull();
+});
+
+it("retires reaction previews while retaining the reaction delivery owner", async () => {
+  const h = harness([react(other)]);
+  vi.useFakeTimers();
+  try {
+    const tree = (active: boolean) => (
+      <ConversationPresentation value={active}>
+        <div hidden={!active} inert={!active}>
+          <h.Controls />
+        </div>
+      </ConversationPresentation>
+    );
+    const view = render(tree(true));
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "👍: 1 person" }));
+    await act(() => vi.advanceTimersByTimeAsync(REACTION_PREVIEW_DELAY_MS));
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    const reactions = screen.getByTestId("reaction-row");
+    view.rerender(tree(false));
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    expect(screen.getByTestId("reaction-row")).toBe(reactions);
+    view.rerender(tree(true));
+    await act(() => vi.runOnlyPendingTimersAsync());
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    expect(h.publish).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("opens the reactor preview after a short hover, not a long dwell", async () => {
+  const h = harness([react(other)]);
+  vi.useFakeTimers();
+  try {
+    render(<h.Controls />);
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "👍: 1 person" }));
+    await act(() => vi.advanceTimersByTimeAsync(99));
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -1,11 +1,16 @@
 # Terminal plugin
 
 In a channel, click **Terminal** in the conversation header or press **Cmd+J**
-(macOS) / **Ctrl+J** (other platforms). The bottom drawer starts a login shell the
+(macOS) / **Ctrl+J** (Linux desktop). The bottom drawer starts a login shell the
 first time it opens for that community/account/channel. **Hide** and the shortcut
 hide the drawer without stopping work; reopening reattaches the same emulator and
 shell. **End session** explicitly terminates it; **Restart** starts a fresh shell.
 An exited shell remains visible until ended/restarted and never respawns automatically.
+
+Pointer openings reuse the panel dock’s 180ms fade and strong ease-out, with 12px
+of upward travel. Closing reclaims the conversation height immediately, matching
+docked side panels. Keyboard openings are immediate; reduced motion keeps only
+the fade. Session lifetime and focus restoration stay with their existing owners.
 
 Settings → Shortcuts can rebind the toggle. Before xterm translates a key into
 shell input, a private synchronous DOM handoff gives the original keydown to the
@@ -24,9 +29,9 @@ channels. Do not copy private keys into `.env.local`. The launcher derives this
 worktree's port from its path; pass `--port` only if another server already owns
 it.
 
-Local PTYs are implemented for macOS/Linux. Windows native startup reports that it
-is unsupported in this slice. Browser-only Buzz hides the terminal launcher and
-does not register its shortcut; there is no HTTP shell endpoint. Automated macOS native tests and browser engines do
+Local PTYs are implemented for macOS/Linux. Terminal remains enabled by default,
+but Windows desktop and browser-only Buzz register neither its panel nor its
+launcher or shortcut. Windows PTY support is not implemented; there is no HTTP shell endpoint. Automated macOS native tests and browser engines do
 not establish Linux or packaged desktop acceptance.
 
 ## Appearance and welcome

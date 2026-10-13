@@ -87,7 +87,10 @@ it("shows no dead permission actions when Dock badges are unavailable", async ()
   const h = setup("unavailable");
   await act(() => h.dock.refresh());
   expect(
-    screen.getByText(/running Buzz from the development server/),
+    screen.getByRole("heading", { name: "Dock unread badge" }),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/Dock badges require a bundled macOS app/),
   ).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
   expect(h.permission.mock.calls).toEqual([[false]]);
@@ -107,8 +110,6 @@ it("offers missing-badge setup only as an explicit action", async () => {
 });
 it.each([
   [true, "Win32"],
-  [true, "Linux x86_64"],
-  [true, ""],
   [false, "MacIntel"],
 ] as const)(
   "hides Dock settings and makes no IPC calls for native=%s platform=%s",

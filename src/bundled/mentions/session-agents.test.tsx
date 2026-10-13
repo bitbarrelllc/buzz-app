@@ -9,10 +9,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
-import { createAgentControl } from "../../features/agents/control";
-import { controlFixture } from "../../features/agents/control-testing";
+import { localAgentsFixture } from "../../features/agents/local-testing";
 import type { RelaySession } from "../../features/relay/session";
 import { MentionPicker } from "./MentionPicker";
 import { MentionCompletion } from "./MentionCompletion";
@@ -30,10 +29,7 @@ import { createAgentLibrary } from "../../features/agents/library";
 import type { CompletionResult } from "../../features/conversation/contracts";
 import { bindNames } from "../../features/identity-names/service";
 import { createAgentDirectory } from "../../features/identity-names/testing";
-import type {
-  AgentControlState,
-  AgentView,
-} from "../../features/agents/control";
+import type { LocalAgentsSnapshot } from "../../features/agents/local";
 import {
   followupDraft,
   type MentionRecipient,
@@ -43,9 +39,18 @@ import type { Outbox } from "../../features/relay/outbox";
 import { MessageMarkdown } from "../../features/messages/MessageMarkdown";
 import { profileTarget } from "../../features/profiles/target";
 import { npubEncode } from "nostr-tools/nip19";
+import { MENTION_DIRECTORY_DELAY_MS } from "./useMentionDirectory";
+// jsdom lacks scrollIntoView; the search highlight keeps its row in view.
+beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
+});
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
 });
 function setup(parent: boolean | null = true, archived = false) {
   const key = "b".repeat(64),
@@ -227,6 +232,50 @@ it("offers outside agents in the session mention picker while ordinary channel p
   view.unmount();
   test.library.dispose();
 });
+function completionLabels(publish: ReturnType<typeof vi.fn>) {
+  return (
+    publish.mock.lastCall?.[0] as CompletionResult | undefined
+  )?.items.map((item) => item.label);
+}
+const emptyCompletion = {
+  scope: "test",
+  channelId: "parent",
+  observation: { revision: 1, text: "@", start: 1, end: 1 },
+  query: { start: 0, end: 1, query: "" },
+};
+it("offers the viewer's own unmanaged agent outside a stream before directory people", async () => {
+  const test = setup();
+  // Remote agent setup refreshes agent choices after creating the agent.
+  await test.library.queries.refresh();
+  const session = {
+    ...test.session,
+    viewer: "d".repeat(64),
+    outbox: { supports: () => true },
+    directMessages: {
+      people: vi.fn(async () => ({
+        people: [{ pubkey: "c".repeat(64), name: "Aaron", isAgent: true }],
+        hasMore: false,
+      })),
+    },
+  } as unknown as RelaySession;
+  const publish = vi.fn();
+  const view = render(
+    <MentionCompletion
+      session={session}
+      {...emptyCompletion}
+      publish={publish}
+    />,
+  );
+  await waitFor(() =>
+    expect(completionLabels(publish)).toEqual([
+      "Member",
+      "Outside agent",
+      "Aaron",
+    ]),
+  );
+  view.unmount();
+  test.library.dispose();
+});
 it("focuses search on open and supports clear, Escape, and outside dismissal", async () => {
   const test = setup(),
     user = userEvent.setup();
@@ -269,7 +318,7 @@ it("focuses search on open and supports clear, Escape, and outside dismissal", a
   view.unmount();
   test.library.dispose();
 });
-it("navigates namesakes with arrows and selects the focused exact identity with Enter", async () => {
+it("navigates namesakes with arrows and selects the highlighted exact identity with Enter", async () => {
   const test = setup(),
     user = userEvent.setup(),
     select = vi.fn(() => true);
@@ -291,18 +340,69 @@ it("navigates namesakes with arrows and selects the focused exact identity with 
   const last = await screen.findByRole("button", {
     name: `Outside agent ${test.key}`,
   });
-  await user.keyboard("{ArrowDown}");
-  expect(first).toHaveFocus();
+  // Focus stays in search; the first row is highlighted before typing, and
+  // the arrows wrap.
+  const search = screen.getByRole("searchbox");
+  expect(search).toHaveFocus();
+  expect(search).toHaveAttribute("aria-activedescendant", first.id);
+  expect(first).toHaveAttribute("data-selected");
   await user.keyboard("{ArrowUp}");
-  expect(last).toHaveFocus();
+  expect(search).toHaveAttribute("aria-activedescendant", last.id);
+  expect(first).not.toHaveAttribute("data-selected");
   await user.keyboard("{ArrowDown}");
-  expect(first).toHaveFocus();
-  await user.keyboard("{ArrowDown}{Enter}");
+  expect(search).toHaveAttribute("aria-activedescendant", first.id);
+  await user.keyboard("{ArrowDown}");
+  expect(search).toHaveAttribute("aria-activedescendant", last.id);
+  expect(search).toHaveFocus();
+  await user.keyboard("{Enter}");
   expect(select).toHaveBeenCalledExactlyOnceWith({
     pubkey: test.key,
     name: "Outside agent",
   });
   expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+  test.library.dispose();
+});
+
+it("keeps focus on the highlighted row after Tab, for arrows and pointer", async () => {
+  const test = setup(),
+    user = userEvent.setup(),
+    select = vi.fn(() => true);
+  test.profiles.set(test.member, { name: "Outside agent" });
+  render(
+    <MentionPicker
+      scope="scope"
+      session={test.session}
+      channelId="parent"
+      disabled={false}
+      inviteAgents
+      select={select}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Mention a member" }));
+  const first = await screen.findByRole("button", {
+    name: `Outside agent ${test.member}`,
+  });
+  const last = await screen.findByRole("button", {
+    name: `Outside agent ${test.key}`,
+  });
+  for (let i = 0; i < 10 && document.activeElement !== first; i += 1)
+    await user.tab();
+  expect(first).toHaveFocus();
+  // Down on a focused row moves the highlight and focus together.
+  await user.keyboard("{ArrowDown}");
+  expect(last).toHaveFocus();
+  expect(last).toHaveAttribute("data-selected");
+  expect(first).not.toHaveAttribute("data-selected");
+  // A pointer highlight moves focus too, so Enter chooses the highlighted row.
+  fireEvent.pointerMove(first, { clientX: 1, clientY: 1 });
+  fireEvent.pointerMove(first, { clientX: 2, clientY: 2 });
+  expect(first).toHaveAttribute("data-selected");
+  expect(first).toHaveFocus();
+  await user.keyboard("{Enter}");
+  expect(select).toHaveBeenCalledExactlyOnceWith({
+    pubkey: test.member,
+    name: "Outside agent",
+  });
   test.library.dispose();
 });
 
@@ -331,7 +431,13 @@ it("selects filtered results from search, ignores IME Enter, and keeps rejected 
   await user.clear(search);
   // Public keys are not completion matches; search by the member's name.
   await user.type(search, "Member");
-  fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+  // Synthetic coverage checks the guard, not native IME behavior.
+  for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+    fireEvent.keyDown(search, { key: "ArrowDown", ...composition });
+    expect(search).toHaveFocus();
+    fireEvent.keyDown(search, { key: "Enter", ...composition });
+    expect(select).not.toHaveBeenCalled();
+  }
   expect(fireEvent.keyDown(search, { key: "Enter", shiftKey: true })).toBe(
     false,
   );
@@ -362,8 +468,10 @@ it("does not keyboard-select disabled members", async () => {
     />,
   );
   await user.click(screen.getByRole("button", { name: "Mention a member" }));
+  const search = screen.getByRole("searchbox");
+  await waitFor(() => expect(search).toHaveFocus());
   await user.keyboard("{ArrowDown}{ArrowUp}{Enter}");
-  expect(screen.getByRole("searchbox")).toHaveFocus();
+  expect(search).toHaveFocus();
   expect(select).not.toHaveBeenCalled();
   test.library.dispose();
 });
@@ -532,7 +640,7 @@ it.each([
 
 // Exercise selection, wire text/p tags, and sent rendering, not an already-bound @name.
 it.each(["picker", "completion"] as const)(
-  "%s keeps native display labels out of serialized mentions",
+  "%s keeps local display labels out of serialized mentions",
   async (surface) => {
     const test = setup();
     const profiles = new Map([[test.key, { name: "Mic" }]]);
@@ -540,25 +648,20 @@ it.each(["picker", "completion"] as const)(
       definitions: [],
       identities: [{ pubkey: test.key, name: "Legacy Mic" }],
     }));
-    let state: AgentControlState = {
+    let state: LocalAgentsSnapshot = {
       status: "ready",
-      busy: false,
-      error: null,
-      data: {
-        runtimeAvailable: true,
-        agents: [
-          {
-            pubkey: test.key,
-            relayUrl: "wss://here.example",
-            name: "Native Mic",
-          } as AgentView,
-        ],
-      },
+      agents: [
+        {
+          pubkey: test.key,
+          relayUrl: "wss://here.example",
+          name: "Native Mic",
+          owner: "aa".repeat(32),
+        },
+      ],
     };
     const listeners = new Set<() => void>();
     const provider = createAgentDirectory({
       snapshot: () => state,
-      refresh: async () => {},
       subscribe(listener) {
         listeners.add(listener);
         return () => {
@@ -692,16 +795,9 @@ it.each(["picker", "completion"] as const)(
         name: "View Native Mic profile",
       });
       act(() => {
-        const data = state.data;
-        const agent = data?.agents[0];
-        if (!data || !agent) throw new Error("Missing native agent");
-        state = {
-          ...state,
-          data: {
-            ...data,
-            agents: [{ ...agent, name: "Renamed Mic" }],
-          },
-        };
+        const agent = state.agents[0];
+        if (!agent) throw new Error("Missing local agent");
+        state = { ...state, agents: [{ ...agent, name: "Renamed Mic" }] };
         for (const listener of listeners) listener();
       });
       expect(
@@ -724,8 +820,14 @@ it.each([false, true])(
   "completion remounts preserve warm evidence (invite=%s)",
   async (inviteAgents) => {
     const test = setup();
-    const f = controlFixture();
-    const native = createAgentControl(f.host);
+    const native = localAgentsFixture([
+      {
+        pubkey: "ab".repeat(32),
+        name: "Fixture agent",
+        relayUrl: "wss://relay.example.test",
+        owner: "aa".repeat(32),
+      },
+    ]);
     const read = vi.fn(async () => ({
       definitions: [],
       identities: [{ pubkey: test.key, name: "Outside agent" }],
@@ -761,7 +863,6 @@ it.each([false, true])(
     );
     const view = render(tree(0));
     try {
-      await waitFor(() => expect(native.snapshot().status).toBe("ready"));
       if (inviteAgents)
         await waitFor(() => expect(result?.items).toHaveLength(1));
       expect(read).toHaveBeenCalledTimes(inviteAgents ? 1 : 0);
@@ -771,9 +872,6 @@ it.each([false, true])(
         await act(async () => {});
         expect(session.agentChoices.snapshot()).toBe(warm);
         expect(read).toHaveBeenCalledTimes(inviteAgents ? 1 : 0);
-        expect(
-          f.calls.filter((call) => call.action === "snapshot"),
-        ).toHaveLength(1);
       }
       // An explicit library change still reaches an ordinary open completion.
       await act(async () => {
@@ -788,7 +886,6 @@ it.each([false, true])(
       lifetime.abort();
       library.dispose();
       test.library.dispose();
-      native.dispose();
     }
   },
 );
@@ -1061,48 +1158,151 @@ it("qualifies outside directory namesakes that have no cached profile", async ()
   names.dispose();
 });
 
-it.each(["dm", "session"] as const)(
-  "never expands %s candidates from the community directory",
-  async (channelType) => {
-    const t = setup();
-    const people = vi.fn(async () => ({
-      people: [{ pubkey: "e".repeat(64), name: "Outside" }],
-      hasMore: false,
-    }));
-    const list = {
-      status: "ready" as const,
-      channels: [
-        {
-          id: "parent",
-          name: "Conversation",
-          channelType,
-          members: ["a".repeat(64)],
-        },
-      ],
-    };
-    const session = {
-      ...t.session,
-      directMessages: { ...t.session.directMessages, people },
-      channels: { ...t.session.channels, list: () => list },
-    };
-    render(
+it("never expands session candidates from the community directory", async () => {
+  vi.useFakeTimers();
+  const t = setup();
+  const people = vi.fn(async () => ({
+    people: [{ pubkey: "e".repeat(64), name: "Outside" }],
+    hasMore: false,
+  }));
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "parent",
+        name: "Conversation",
+        channelType: "session" as const,
+        members: ["a".repeat(64)],
+      },
+    ],
+  };
+  const session = {
+    ...t.session,
+    directMessages: { ...t.session.directMessages, people },
+    channels: { ...t.session.channels, list: () => list },
+  };
+  // Neither surface passes inviteAgents, like a session media comment.
+  const publish = vi.fn();
+  render(
+    <>
       <MentionPicker
         session={session}
         scope="test"
         channelId="parent"
         disabled={false}
         select={() => true}
-      />,
-    );
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Mention a member" }));
-    expect(people).not.toHaveBeenCalled();
+      />
+      <MentionCompletion
+        session={session}
+        scope="test"
+        channelId="parent"
+        observation={{ revision: 1, text: "@Out", start: 4, end: 4 }}
+        publish={publish}
+        query={{ start: 0, end: 4, query: "Out" }}
+      />
+    </>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Mention a member" }));
+  fireEvent.change(screen.getByRole("searchbox"), {
+    target: { value: "Out" },
+  });
+  // Past the directory delay, so a search would have started.
+  await act(() => vi.advanceTimersByTimeAsync(MENTION_DIRECTORY_DELAY_MS * 2));
+  expect(people).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole("button", { name: /Outside/ }),
+  ).not.toBeInTheDocument();
+  const result = publish.mock.lastCall?.[0] as CompletionResult | undefined;
+  expect(result?.items.map((item) => item.label) ?? []).not.toContain(
+    "Outside",
+  );
+  expect(result?.status).toBeUndefined();
+});
+
+it("offers outside directory people in a DM, like a channel", async () => {
+  const t = setup();
+  const outside = { pubkey: "e".repeat(64), name: "Outside" };
+  const people = vi.fn(async () => ({ people: [outside], hasMore: false }));
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "dm",
+        name: "Conversation",
+        channelType: "dm" as const,
+        members: [t.member],
+        participants: [t.member],
+      },
+    ],
+  };
+  const session = {
+    ...t.session,
+    directMessages: { ...t.session.directMessages, people },
+    channels: { ...t.session.channels, list: () => list },
+  };
+  const publish = vi.fn();
+  render(
+    <MentionCompletion
+      session={session}
+      scope="test"
+      channelId="dm"
+      observation={{ revision: 1, text: "@Out", start: 4, end: 4 }}
+      publish={publish}
+      query={{ start: 0, end: 4, query: "Out" }}
+    />,
+  );
+  await waitFor(() => expect(people).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
     expect(
-      screen.queryByRole("button", { name: /Outside/ }),
-    ).not.toBeInTheDocument();
-  },
-);
+      (publish.mock.lastCall?.[0] as CompletionResult | undefined)?.items.map(
+        (item) => item.label,
+      ),
+    ).toEqual(["Outside"]),
+  );
+  expect(
+    (publish.mock.lastCall?.[0] as CompletionResult | undefined)?.items[0]
+      ?.detail,
+  ).toBe("Not in DM · Will not be notified");
+});
+
+it("labels outside directory people in the DM toolbar picker", async () => {
+  const t = setup();
+  const people = vi.fn(async () => ({
+    people: [{ pubkey: "e".repeat(64), name: "Outside" }],
+    hasMore: false,
+  }));
+  const list = {
+    status: "ready" as const,
+    channels: [
+      {
+        id: "dm",
+        name: "Conversation",
+        channelType: "dm" as const,
+        members: [t.member],
+        participants: [t.member],
+      },
+    ],
+  };
+  const session = {
+    ...t.session,
+    directMessages: { ...t.session.directMessages, people },
+    channels: { ...t.session.channels, list: () => list },
+  };
+  render(
+    <MentionPicker
+      session={session}
+      scope="test"
+      channelId="dm"
+      disabled={false}
+      select={() => true}
+    />,
+  );
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: "Mention a member" }));
+  const row = await screen.findByRole("button", { name: /Outside/ });
+  expect(row).toHaveTextContent("Not in DM · Will not be notified");
+});
 
 it("shows local rows before the directory, appends outside rows, and reuses settled pages", async () => {
   vi.useFakeTimers();
@@ -1820,7 +2020,6 @@ it("keeps still-matching directory people across the inline host's per-keystroke
       disconnect() {}
     },
   );
-  HTMLElement.prototype.scrollIntoView = vi.fn();
   const t = setup();
   const larry = { pubkey: "f".repeat(64), name: "Larry Outside" };
   const lara = { pubkey: "e".repeat(64), name: "Lara" };
@@ -1907,7 +2106,6 @@ it("keeps still-matching directory people across the inline host's per-keystroke
   expect(options()).toEqual([]);
   input.remove();
   vi.unstubAllGlobals();
-  delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
 });
 
 it("the persistent toolbar picker reads an empty search again after close and reopen", async () => {
@@ -2106,6 +2304,302 @@ it.each([false, true])(
       view.unmount();
       library.dispose();
       test.library.dispose();
+    }
+  },
+);
+
+function teamFixture(
+  agents?: string[],
+  options: {
+    status?: "ready" | "loading" | "error";
+    query?: string;
+    invite?: boolean;
+    dm?: boolean;
+    missingRoster?: boolean;
+  } = {},
+) {
+  const h = setup();
+  let state = {
+    status: options.status ?? "ready",
+    entries: [
+      {
+        eventId: "head",
+        createdAt: 1,
+        record: {
+          version: 1 as const,
+          community: "fixture",
+          deleted: false,
+          value: {
+            type: "team" as const,
+            id: "court",
+            name: "Member Team",
+            agents: agents ?? [h.member, h.key],
+          },
+        },
+      },
+    ],
+  };
+  const listeners = new Set<() => void>();
+  const channelKit: NonNullable<RelaySession["channelKit"]> = {
+    available: true,
+    snapshot: () => state,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    ensure() {},
+    async refresh() {},
+    async save() {
+      return "head";
+    },
+  };
+  const list = {
+    ...h.session.channels.list(),
+    channels: h.session.channels.list().channels.map((channel) => {
+      const { members, ...rest } = channel;
+      return {
+        ...rest,
+        ...(members && !options.missingRoster ? { members } : {}),
+        ...(options.dm ? { channelType: "dm" as const } : {}),
+      };
+    }),
+  };
+  const publish = vi.fn();
+  const props = {
+    session: {
+      ...h.session,
+      channelKit,
+      channels: {
+        ...h.session.channels,
+        list: () => list,
+      },
+    },
+    scope: "team-test",
+    inviteAgents: options.invite,
+    channelId: "parent",
+    observation: { revision: 1, text: "@Member", start: 7, end: 7 },
+    query: { start: 0, end: 7, query: options.query ?? "Member" },
+    publish,
+  };
+  const view = render(<MentionCompletion {...props} />);
+  const result = () =>
+    publish.mock.lastCall?.[0] as CompletionResult | undefined;
+  const choice = () => result()?.items.find((item) => item.id === "team:court");
+  return {
+    ...h,
+    view,
+    choice,
+    result,
+    change() {
+      act(() => {
+        state = {
+          ...state,
+          entries: state.entries.map((entry) => ({
+            ...entry,
+            eventId: "changed-head",
+          })),
+        };
+        for (const listener of listeners) listener();
+      });
+    },
+  };
+}
+it("saved teams resolve exact keys, block automatic Space and revoke a changed catalog choice", async () => {
+  const h = teamFixture();
+  try {
+    await waitFor(() => expect(h.choice()?.disabled).toBeUndefined());
+    await waitFor(() =>
+      expect(h.choice()?.edit.mentions).toEqual([
+        { pubkey: h.member, name: "Member" },
+        { pubkey: h.key, name: "Outside agent" },
+      ]),
+    );
+    expect(h.result()?.spaceId).toBeUndefined();
+    const selected = h.choice();
+    if (!selected) throw new Error("Team missing");
+    expect(selected.canSelect?.("Enter")).toBe(true);
+    h.change();
+    expect(selected.canSelect?.("Enter")).toBe(false);
+    expect(h.choice()?.disabled).toContain("changed");
+  } finally {
+    h.view.unmount();
+    h.library.dispose();
+  }
+});
+it.each([
+  { members: [] },
+  { members: ["c".repeat(64)] },
+  {
+    members: Array.from({ length: 33 }, (_, i) =>
+      i.toString(16).padStart(64, "0"),
+    ),
+  },
+])(
+  "keeps empty, unavailable and oversized teams visible but disabled (%j)",
+  async ({ members }) => {
+    const h = teamFixture(members);
+    try {
+      await waitFor(() => expect(h.choice()?.disabled).toBeTruthy());
+      expect(h.choice()?.canSelect?.("Enter")).toBe(false);
+      expect(h.choice()?.edit.mentions).toBeUndefined();
+    } finally {
+      h.view.unmount();
+      h.library.dispose();
+    }
+  },
+);
+it("archive changes revoke previously published team acceptance", async () => {
+  const h = teamFixture();
+  try {
+    await waitFor(() => expect(h.choice()?.edit.mentions).toHaveLength(2));
+    const selected = h.choice();
+    if (!selected) throw new Error("Team missing");
+    act(() => h.setArchived([h.key]));
+    expect(selected.canSelect?.("Enter")).toBe(false);
+    expect(h.choice()?.disabled).toContain("unavailable");
+  } finally {
+    h.view.unmount();
+    h.library.dispose();
+  }
+});
+
+it.each(["loading", "error"] as const)(
+  "team catalog %s does not publish choices or Retry for ordinary prose",
+  (status) => {
+    const h = teamFixture(undefined, { status, query: " 5pm" });
+    try {
+      expect(h.result()).toEqual({ items: [] });
+    } finally {
+      h.view.unmount();
+      h.library.dispose();
+    }
+  },
+);
+it("team loading has no Retry action and never replaces a people status", async () => {
+  const loading = teamFixture(undefined, { status: "loading" });
+  await waitFor(() =>
+    expect(loading.result()?.status).toBe("Loading saved teams…"),
+  );
+  expect(loading.result()?.retry).toBeUndefined();
+  loading.view.unmount();
+  loading.library.dispose();
+  const missing = teamFixture(undefined, {
+    status: "error",
+    missingRoster: true,
+  });
+  expect(missing.result()?.status).toBe("Channel membership unavailable.");
+  missing.view.unmount();
+  missing.library.dispose();
+});
+it("a longer team name remains an admitted query after a person's exact name plus Space", async () => {
+  const h = teamFixture(undefined, { query: "Member " });
+  try {
+    await waitFor(() => expect(h.choice()?.edit.mentions).toHaveLength(2));
+    expect(h.result()?.items[0]).toMatchObject({
+      id: h.member,
+      label: "Member",
+      edit: { mention: { pubkey: h.member, name: "Member" } },
+    });
+    expect(h.result()?.items[0]?.canSelect?.("Enter")).toBe(true);
+  } finally {
+    h.view.unmount();
+    h.library.dispose();
+  }
+});
+it("team rows never bypass query admission", () => {
+  const h = teamFixture(undefined, { query: "Member Team " });
+  try {
+    expect(h.result()).toEqual({ items: [] });
+  } finally {
+    h.view.unmount();
+    h.library.dispose();
+  }
+});
+it.each([
+  {
+    options: { invite: true },
+    detail: "Adds 1 to session and parent channel when you send",
+  },
+  { options: { dm: true }, detail: "1 not in DM · Will not be notified" },
+  {
+    options: {},
+    detail: "1 not in channel · Choose whether to add when you send",
+  },
+])(
+  "team choice explains destination consequences: $detail",
+  async ({ options, detail }) => {
+    const h = teamFixture(undefined, options);
+    try {
+      await waitFor(() => expect(h.choice()?.detail).toContain(detail));
+    } finally {
+      h.view.unmount();
+      h.library.dispose();
+    }
+  },
+);
+it.each([
+  { found: [], hasMore: false, space: true },
+  {
+    found: [{ pubkey: "f".repeat(64), name: "Jose" }],
+    hasMore: false,
+    space: false,
+  },
+  { found: [], hasMore: true, space: false },
+])(
+  "Space waits for the full directory before it selects an exact name (%j)",
+  async ({ found, hasMore, space }) => {
+    const h = setup();
+    h.profiles.set(h.member, { name: "José" });
+    let finish: (value: { people: typeof found; hasMore: boolean }) => void =
+      () => {};
+    const people = vi.fn(
+      () =>
+        new Promise<{ people: typeof found; hasMore: boolean }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const publish = vi.fn();
+    const result = () =>
+      publish.mock.lastCall?.[0] as CompletionResult | undefined;
+    const view = render(
+      <MentionCompletion
+        session={
+          {
+            ...h.session,
+            directMessages: { ...h.session.directMessages, people },
+          } as unknown as RelaySession
+        }
+        scope="space-test"
+        channelId="parent"
+        observation={{ revision: 1, text: "@jose", start: 5, end: 5 }}
+        query={{ start: 0, end: 5, query: "jose" }}
+        publish={publish}
+      />,
+    );
+    try {
+      await waitFor(() =>
+        expect(people).toHaveBeenCalledWith("jose", 1, expect.anything()),
+      );
+      // The member José is shown, but an outside Jose may still arrive.
+      const member = result()?.items.find((item) => item.id === h.member);
+      expect(member).toBeDefined();
+      expect(result()?.spaceId).toBeUndefined();
+      expect(member?.canSelect?.(" ")).toBe(false);
+      expect(member?.canSelect?.("Enter")).toBe(true);
+      await act(async () => finish({ people: found, hasMore }));
+      await waitFor(() =>
+        expect(result()?.spaceId).toBe(space ? h.member : undefined),
+      );
+      expect(
+        result()
+          ?.items.find((item) => item.id === h.member)
+          ?.canSelect?.(" "),
+      ).toBe(space);
+    } finally {
+      view.unmount();
+      h.library.dispose();
     }
   },
 );

@@ -1,12 +1,112 @@
 .typing {
-  height: 0;
-  margin-bottom: calc(-1 * var(--composer-gap, var(--space-1)));
+  position: absolute;
+  inset-block-end: calc(100% + var(--space-2));
+  inset-inline: var(--space-4);
+  z-index: 1;
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1h);
   flex-shrink: 0;
-  overflow: visible;
-  color: var(--text-muted);
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-subtle);
   font-size: var(--text-caption);
-  line-height: 1.5;
+  line-height: var(--text-caption--line-height);
+  letter-spacing: var(--text-caption--letter-spacing);
+  font-weight: var(--text-caption--font-weight);
+}
+
+.label {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  transform: translateY(calc(-1lh - var(--space-2)));
+}
+
+.dots {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-half);
+}
+
+.dots > span {
+  width: var(--space-1);
+  height: var(--space-1);
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@keyframes typing-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dots > span {
+    animation: typing-pulse 1.4s ease-in-out infinite;
+  }
+
+  .dots > span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .dots > span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+}
+
+.avatars {
+  display: inline-flex;
+  align-items: center;
+  padding-inline-end: var(--space-1);
+}
+
+.avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.avatars .avatar {
+  padding: var(--space-half);
+  margin-inline-end: calc(-1 * var(--space-1));
+  background: var(--surface-panel);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-sm);
+}
+
+.typing [data-agent-activity-trigger] {
+  pointer-events: auto;
+  padding: var(--space-1);
+  min-height: var(--size-control-sm);
+}
+
+.humans {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-inline-end: auto;
+  max-width: 50%;
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface-panel);
+  border-radius: var(--radius-control);
+}
+
+.overflow {
+  padding-inline-start: var(--space-2);
+}
+
+@media (max-width: 40.625rem) {
+  .typing {
+    inset-inline: var(--space-3);
+  }
 }

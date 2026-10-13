@@ -5,18 +5,87 @@ import {
   useSyncExternalStore,
   type RefObject,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   behindActiveModal,
   observeModals,
 } from "../../shared/design-system/modalLayer";
 
 const floatingQuery = "(hover: hover) and (pointer: fine)";
+// One MediaQueryList for every row: `matchMedia` allocates and evaluates the
+// query on each call, and these run in every row's first render and every
+// external-store snapshot read. The list itself tracks modality changes. Keyed
+// on the `matchMedia` function so a replaced implementation is re-queried.
+let floatingSource: typeof window.matchMedia | undefined;
+let floatingList: MediaQueryList | undefined;
+const floating = () => {
+  if (floatingSource !== window.matchMedia) {
+    floatingSource = window.matchMedia;
+    floatingList = floatingSource?.(floatingQuery);
+  }
+  return floatingList;
+};
 const subscribe = (notify: () => void) => {
-  const query = window.matchMedia?.(floatingQuery);
+  const query = floating();
   query?.addEventListener("change", notify);
   return () => query?.removeEventListener("change", notify);
 };
-const snapshot = () => window.matchMedia?.(floatingQuery).matches ?? false;
+const snapshot = () => floating()?.matches ?? false;
+
+const awaitingKeyboard = new Set<() => void>();
+const activateKeyboardActions = (event: KeyboardEvent) => {
+  if (event.key !== "Tab" || event.metaKey || event.ctrlKey) return;
+  // Native Tab must see the real controls before choosing its destination,
+  // including continuation rows with no preceding avatar/button to focus.
+  flushSync(() => {
+    for (const activate of awaitingKeyboard) activate();
+  });
+};
+
+/** Defer untouched desktop controls, then preserve their state for the row's life. */
+export function useMessageActionBarReady(
+  rowRef: RefObject<HTMLDivElement | null> | undefined,
+) {
+  const [ready, setReady] = useState(
+    () =>
+      !rowRef ||
+      !snapshot() ||
+      document.documentElement.hasAttribute("data-keyboard-navigation"),
+  );
+  useEffect(() => {
+    const row = rowRef?.current;
+    if (ready || !row) return;
+    const activate = () => setReady(true);
+    const query = floating();
+    const modalityChanged = () => {
+      if (!query?.matches) activate();
+    };
+    if (
+      !query?.matches ||
+      row.matches(":hover") ||
+      row.contains(document.activeElement) ||
+      document.documentElement.hasAttribute("data-keyboard-navigation")
+    ) {
+      activate();
+      return;
+    }
+    row.addEventListener("pointerenter", activate);
+    row.addEventListener("focusin", activate);
+    query.addEventListener("change", modalityChanged);
+    if (awaitingKeyboard.size === 0)
+      window.addEventListener("keydown", activateKeyboardActions, true);
+    awaitingKeyboard.add(activate);
+    return () => {
+      row.removeEventListener("pointerenter", activate);
+      row.removeEventListener("focusin", activate);
+      query.removeEventListener("change", modalityChanged);
+      awaitingKeyboard.delete(activate);
+      if (awaitingKeyboard.size === 0)
+        window.removeEventListener("keydown", activateKeyboardActions, true);
+    };
+  }, [ready, rowRef]);
+  return ready;
+}
 
 /** Keep the controls in DOM/tab order while painting outside list containment. */
 export function useFloatingActionBar(

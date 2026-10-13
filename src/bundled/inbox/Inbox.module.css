@@ -1,0 +1,278 @@
+.page {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Status fills only the unused toolbar space, never wrapping controls or rows. */
+.headerTitle {
+  display: flex;
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  align-items: center;
+}
+
+.refreshStatus {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  /* Match usePanelSplit's 320px list reserve and 316px detail minimum. */
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 1fr) minmax(
+      316px,
+      var(--secondary-panel-width, 2fr)
+    );
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace:not([data-selected]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.listPane,
+.detail,
+.detailBody,
+.draftEditor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.detail {
+  position: relative;
+  border-inline-start: 1px solid var(--border-standard);
+}
+
+.detailBody,
+.draftEditor {
+  flex: 1;
+}
+
+.detailHeadingTitle {
+  min-width: 0;
+}
+
+.detailHeadingLink {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-align: start;
+}
+
+.detailHeadingLink:hover {
+  text-decoration: underline;
+}
+
+html[data-keyboard-navigation] .detailHeadingLink:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
+/* Share the header row even when larger text makes its controls wrap. */
+.workspace[data-selected] > .detail {
+  grid-column: 2;
+}
+
+.workspace[data-selected] > .listPane,
+.workspace[data-selected] > .detail {
+  display: grid;
+  grid-row: 1 / span 2;
+  grid-template-rows: subgrid;
+}
+
+.previewFrame {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.previewHistory {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: var(--size-panel-header);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding-inline: var(--space-1);
+  border-bottom: 1px solid var(--border-standard);
+}
+
+.scroll,
+.draftList {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+/* Drafts places its toolbar/list directly in the same grid, without a wrapper. */
+.workspace > .toolbar,
+.workspace > .draftList {
+  grid-column: 1;
+}
+
+.workspace:not([data-selected]) > .listPane {
+  grid-row: 1 / span 2;
+}
+
+@container (max-width: 700px) {
+  .workspace[data-selected] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace[data-selected] > .listPane,
+  .workspace[data-selected] > .toolbar,
+  .workspace[data-selected] > .draftList {
+    display: none;
+  }
+  .detail > [data-panel-resize] {
+    display: none;
+  }
+  .workspace[data-selected] > .detail {
+    grid-column: 1;
+    border-inline-start: 0;
+  }
+}
+
+.coverage,
+.notice {
+  margin: 0;
+  padding: var(--space-3) var(--space-panel-inset);
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.empty {
+  padding: var(--space-page-section-gap) var(--space-panel-inset);
+  max-width: 65ch;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-row-gap) var(--space-panel-inset);
+}
+
+.row {
+  min-width: 0;
+}
+
+.rowSurface {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-row-gap);
+  min-width: 0;
+}
+
+.unreadSlot {
+  display: grid;
+  place-items: center;
+  width: var(--space-2);
+  height: var(--space-2);
+}
+
+.unreadDot {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--text-navigation-unread);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  white-space: normal;
+  padding-block: var(--space-row-gap);
+}
+
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-control-inset);
+}
+
+.sender {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceLine {
+  display: flex;
+  min-width: 0;
+}
+
+.source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+  border-radius: var(--radius-chip);
+  padding-inline: var(--space-chip-inset);
+  background: var(--affordance-subtle);
+  color: var(--text-subtle);
+}
+
+.sourceName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .row {
+    padding-bottom: var(--space-3);
+  }
+  .rowSurface {
+    gap: var(--space-1);
+  }
+}

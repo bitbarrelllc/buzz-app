@@ -1,7 +1,8 @@
 // FOUNDATION: Preview conversation contribution contract; data and delivery stay session-owned.
 import type { ComponentType } from "react";
-import type { Contribution } from "../../plugins/contributions";
-import type { ChannelMessage } from "../relay/contracts";
+import type { Contribution, MatchOrder } from "../../plugins/contributions";
+import type { VoiceRecording } from "../relay/voice-media";
+import type { Attachment, ChannelMessage } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
 import type { ComposerSession } from "../messages/composer-session";
 
@@ -21,11 +22,33 @@ export type ComposerToolProps = Readonly<{
    * Prose never resolves to identities. Membership is checked by session delivery.
    * Like insertText, this command is revoked with the tool/destination lifetime. */
   insertMention(recipient: Readonly<{ pubkey: string; name: string }>): boolean;
+  /** All-or-nothing insertion of a saved selection as individual mentions. */
+  insertMentions(
+    recipients: readonly Readonly<{ pubkey: string; name: string }>[],
+  ): boolean;
   /** Atomically insert a host-owned inline resource at the caret. The host validates
    * the link, escapes the label and sends exactly `[label](uri)` there; the draft
    * keeps it after tool removal. Otherwise returns the host's user-facing reason. */
   insertResource(resource: ComposerResource): true | string;
+  capture?(
+    component: ComponentType<ComposerCaptureProps>,
+  ): (() => void) | false;
   focus(): void;
+}>;
+export type ComposerCaptureProps = Readonly<{
+  accept(recording: VoiceRecording): boolean;
+  cancel(): void;
+}>;
+export type AttachmentRendererProps = Readonly<{
+  attachment: Attachment;
+  source: string;
+  onRemove?: (() => void) | undefined;
+}>;
+export type AttachmentRenderer = Readonly<{
+  id: string;
+  title: string;
+  matches(attachment: Attachment): boolean;
+  component: ComponentType<AttachmentRendererProps>;
 }>;
 export type ReactionToolProps = Readonly<{
   session: RelaySession;
@@ -65,6 +88,8 @@ export type LinkRenderer = Readonly<{
   id: string;
   title: string;
   matches(url: string): boolean;
+  /** Claim strength when several renderers match a URL; see `MatchOrder`. */
+  order?: MatchOrder | undefined;
   className?: string | undefined;
   component: ComponentType<{ url: string }>;
 }>;
@@ -77,12 +102,21 @@ export type ComposerAccessoryProps = Readonly<{
   scope: string;
   channelId: string;
   threadRootId?: string | undefined;
+  /** Present only for message-placed accessories; the exact triggering row. */
+  message?: ChannelMessage;
+  /** Host-owned thread navigation from a timeline message, even before replies.
+   * Absent inside the thread. False after this contribution or message retires. */
+  openThread?: (() => boolean) | undefined;
+  /** Return keyboard focus to a stable host control when a focused accessory retires. */
+  onFocusedRemoval?: (() => void) | undefined;
   /** Presentation only; the host re-resolves targets. No editor or access grant. */
   canOpen(target: string): boolean;
   /** False after contribution removal or the originating composer retires. */
   open(target: string): boolean;
 }>;
 export type ComposerAccessory = Readonly<{
+  /** Defaults to the composer. Message accessories render beside reactions. */
+  placement?: "composer" | "message";
   id: string;
   title: string;
   order?: number;
@@ -99,8 +133,28 @@ export type MessageRenderer = Readonly<{
     open?: ((target: string) => boolean) | undefined;
   }>;
 }>;
+/** One ⋯ menu entry for a message. The host owns the menu, focus and row lifetime. */
+export type MessageAction = Readonly<{
+  id: string;
+  title: string;
+  icon?: ComponentType;
+  matches(message: ChannelMessage, session: RelaySession): boolean;
+  /** Mounted by the row after the menu closes; call close() to dismiss. */
+  component: ComponentType<{
+    message: ChannelMessage;
+    session: RelaySession;
+    close(): void;
+  }>;
+  /**
+   * Optional presentation beside the message timestamp, such as a state mark.
+   * Rendered only while `matches` passes: hiding the menu entry hides the mark.
+   */
+  marker?: ComponentType<{ message: ChannelMessage; session: RelaySession }>;
+}>;
 export type ConversationExtensions = Readonly<{
+  attachments?: ContributionReader<AttachmentRenderer>;
   messages?: ContributionReader<MessageRenderer>;
+  actions?: ContributionReader<MessageAction>;
   accessories?: ContributionReader<ComposerAccessory>;
   tools: ContributionReader<ComposerTool>;
   inline: ContributionReader<InlineRenderer>;
@@ -125,10 +179,16 @@ export type CompletionQuery = Readonly<{
   query: string;
 }>;
 export type CompletionEdit =
-  | Readonly<{ text: string; mention?: never }>
+  | Readonly<{ text: string; mention?: never; mentions?: never }>
   | Readonly<{
       mention: Readonly<{ pubkey: string; name: string }>;
       text?: never;
+      mentions?: never;
+    }>
+  | Readonly<{
+      mentions: readonly Readonly<{ pubkey: string; name: string }>[];
+      text?: never;
+      mention?: never;
     }>;
 export type CompletionSuggestion = Readonly<{
   id: string;

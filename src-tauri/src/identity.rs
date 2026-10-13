@@ -1,6 +1,7 @@
 //! One create-only human identity. Never consult legacy, agent, file or environment keys.
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use bech32::{primitives::decode::CheckedHrpstring, Bech32, Hrp};
+use buzz_credential_store as credentials;
 use nostr::{
     event::Event,
     key::{Keys, SecretKey as NostrSecretKey},
@@ -15,13 +16,6 @@ use zeroize::Zeroizing;
 type Result<T> = std::result::Result<T, String>;
 const INVALID: &str = "Enter a valid nsec private key";
 const MALFORMED: &str = "Saved identity is malformed; nothing was changed. Keep your key backup and contact support before changing secure storage.";
-// Debug identities must never occupy the create-only release item.
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
-const SERVICE: &str = if cfg!(debug_assertions) {
-    "dev.local.buzz.foundation.identity.debug"
-} else {
-    "dev.local.buzz.foundation.identity"
-};
 
 // Batch-local conversation keys avoid repeating ECDH for every self-encrypted slot.
 // Callers enforce their encoded-payload budget before reaching this helper.
@@ -157,13 +151,25 @@ impl Key {
 trait Store: Send + Sync {
     fn read(&self) -> Result<Option<Zeroizing<Vec<u8>>>>;
     fn add(&self, value: &[u8]) -> Result<()>;
+    /// Only Sign out may call this, from the next launch; an absent item is success.
+    fn delete(&self) -> Result<()>;
 }
 struct OsStore;
+#[cfg(not(test))]
+fn read_saved() -> Result<Option<Zeroizing<Vec<u8>>>> {
+    match credentials::read_human() {
+        Ok(value) => Ok(Some(value)),
+        Err(credentials::Error::Absent) => Ok(None),
+        Err(credentials::Error::Denied) => Err("Secure storage access was denied. Allow access and retry; no identity was created.".into()),
+        Err(credentials::Error::Busy) => Err("Another Buzz app is accessing secure storage. Retry shortly.".into()),
+        Err(credentials::Error::Corrupt) => Err(MALFORMED.into()),
+        Err(_) => Err("Your identity could not be accessed in secure storage. Unlock your credential store and retry without changing keys.".into()),
+    }
+}
 #[cfg(all(target_os = "macos", not(test)))]
 mod platform {
     use super::*;
     use security_framework::os::macos::keychain::SecKeychain;
-    const ACCOUNT: &str = "human";
     fn error(error: security_framework::base::Error) -> String {
         match error.code() {
             -25299 => {
@@ -178,26 +184,37 @@ mod platform {
     }
     impl Store for OsStore {
         fn read(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
-            let keychain = SecKeychain::default().map_err(error)?;
-            match keychain.find_generic_password(SERVICE, ACCOUNT) {
-                Ok((password, _)) => Ok(Some(Zeroizing::new(password.to_vec()))),
-                Err(e) if e.code() == -25300 => Ok(None),
-                Err(e) => Err(error(e)),
-            }
+            read_saved()
         }
         fn add(&self, value: &[u8]) -> Result<()> {
             SecKeychain::default()
                 .map_err(error)?
-                .add_generic_password(SERVICE, ACCOUNT, value)
+                .add_generic_password(
+                    credentials::HUMAN_SERVICE,
+                    credentials::HUMAN_ACCOUNT,
+                    value,
+                )
                 .map_err(error)
+        }
+        fn delete(&self) -> Result<()> {
+            match SecKeychain::default()
+                .map_err(error)?
+                .find_generic_password(credentials::HUMAN_SERVICE, credentials::HUMAN_ACCOUNT)
+            {
+                Ok((_, item)) => {
+                    item.delete();
+                    Ok(())
+                }
+                Err(e) if e.code() == -25300 => Ok(()),
+                Err(e) => Err(error(e)),
+            }
         }
     }
 }
 #[cfg(all(any(target_os = "windows", target_os = "linux"), not(test)))]
 mod keyring_platform {
     use super::*;
-    use buzz_credential_store::{self as credentials, Error};
-    const ACCOUNT: &str = "human";
+    use buzz_credential_store::Error;
     fn error(error: Error) -> String {
         match error {
             Error::Occupied => "An identity is already saved; nothing was overwritten. Restart to restore it.",
@@ -209,14 +226,21 @@ mod keyring_platform {
     }
     impl Store for OsStore {
         fn read(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
-            match credentials::read(SERVICE, ACCOUNT) {
-                Ok(value) => Ok(Some(value)),
-                Err(Error::Absent) => Ok(None),
-                Err(e) => Err(error(e)),
-            }
+            read_saved()
         }
         fn add(&self, value: &[u8]) -> Result<()> {
-            credentials::add(SERVICE, ACCOUNT, value).map_err(error)
+            credentials::add(
+                credentials::HUMAN_SERVICE,
+                credentials::HUMAN_ACCOUNT,
+                value,
+            )
+            .map_err(error)
+        }
+        fn delete(&self) -> Result<()> {
+            match credentials::delete(credentials::HUMAN_SERVICE, credentials::HUMAN_ACCOUNT) {
+                Ok(()) | Err(Error::Absent) => Ok(()),
+                Err(e) => Err(error(e)),
+            }
         }
     }
 }
@@ -232,6 +256,22 @@ impl Store for OsStore {
     fn add(&self, _: &[u8]) -> Result<()> {
         Err("Secure identity storage is not available on this platform yet".into())
     }
+    fn delete(&self) -> Result<()> {
+        Err("Secure identity storage is not available on this platform yet".into())
+    }
+}
+
+/// Delete the saved human key and confirm a fresh read finds nothing.
+fn remove_key(store: &dyn Store) -> Result<()> {
+    store.delete()?;
+    match store.read()? {
+        None => Ok(()),
+        Some(_) => Err("Your key is still saved in secure storage".into()),
+    }
+}
+/// Sign out's next-launch step; never reachable from the webview.
+pub(crate) fn remove_saved_key() -> Result<()> {
+    remove_key(&OsStore)
 }
 
 #[derive(Default)]
@@ -240,6 +280,9 @@ enum State {
     Unread,
     Missing,
     Ready(Key),
+    /// Signing out: the key is dropped and nothing reads, saves or uses one
+    /// again until Buzz restarts.
+    Closed,
 }
 struct Identity {
     state: State,
@@ -247,6 +290,9 @@ struct Identity {
 }
 impl Identity {
     fn restore(&mut self) -> Result<Option<String>> {
+        if matches!(self.state, State::Closed) {
+            return Err("Buzz is signing out".into());
+        }
         if matches!(self.state, State::Unread) {
             self.state = match self.store.read()? {
                 None => State::Missing,
@@ -275,6 +321,9 @@ impl Identity {
         self.store.add(nsec.as_bytes())?;
         self.state = State::Ready(key); // Commit in memory only after secure persistence.
         Ok(viewer)
+    }
+    fn close(&mut self) {
+        self.state = State::Closed;
     }
     fn export(&mut self) -> Result<String> {
         self.restore()?;
@@ -377,7 +426,141 @@ fn validate_sidebar_payload(coordinate: &str, value: &serde_json::Value) -> Resu
         }
         _ => return Err(invalid()),
     }
+    if let Some(meta) = data.get("meta") {
+        if matches!(coordinate, "channel-sections" | "channel-sort") {
+            validate_sidebar_meta(coordinate, meta)?;
+            let projection = project_sidebar_meta(coordinate, meta);
+            let projected = projection.as_object().ok_or_else(invalid)?;
+            if projected
+                .iter()
+                .any(|(key, value)| data.get(key) != Some(value))
+            {
+                return Err("Sidebar projection disagrees with metadata".into());
+            }
+        }
+    }
     Ok(())
+}
+
+// The signer admits only the bounded Desktop register schema, not arbitrary
+// renderer-controlled trees. Retained tombstones share the plaintext byte budget.
+fn validate_sidebar_meta(coordinate: &str, value: &serde_json::Value) -> Result<()> {
+    use serde_json::Value;
+    const MAX_SAFE: u64 = 9_007_199_254_740_991;
+    fn text(value: &Value, max: usize) -> bool {
+        value
+            .as_str()
+            .is_some_and(|s| !s.trim().is_empty() && s.encode_utf16().count() <= max)
+    }
+    fn reg(value: &Value, valid: impl Fn(&Value) -> bool) -> bool {
+        value.as_array().is_some_and(|r| {
+            r.len() == 3
+                && r[0].as_u64().is_some_and(|v| v <= MAX_SAFE)
+                && r[1].as_str().is_some_and(|s| {
+                    s.len() == 16
+                        && s.bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                })
+                && valid(&r[2])
+        })
+    }
+    fn map(value: Option<&Value>, max: usize, valid: impl Fn(&Value) -> bool) -> bool {
+        value.map_or(true, |value| {
+            value.as_object().is_some_and(|entries| {
+                entries.iter().all(|(key, value)| {
+                    key != "__proto__"
+                        && !key.trim().is_empty()
+                        && key.encode_utf16().count() <= max
+                        && valid(value)
+                })
+            })
+        })
+    }
+    let invalid = || "Invalid sidebar metadata".to_owned();
+    let meta = value.as_object().ok_or_else(invalid)?;
+    let allowed: &[&str] = if coordinate == "channel-sections" {
+        &["v", "s", "a"]
+    } else {
+        &["v", "g"]
+    };
+    if meta.get("v").and_then(Value::as_u64) != Some(1)
+        || meta.keys().any(|key| !allowed.contains(&key.as_str()))
+    {
+        return Err(invalid());
+    }
+    let valid = if coordinate == "channel-sort" {
+        map(meta.get("g"), 264, |v| {
+            reg(v, |v| {
+                v.is_null() || matches!(v.as_str(), Some("alpha" | "recent"))
+            })
+        })
+    } else {
+        map(meta.get("a"), 256, |v| {
+            reg(v, |v| v.is_null() || text(v, 256))
+        }) && map(meta.get("s"), 256, |v| {
+            v.as_object().is_some_and(|fields| {
+                fields.iter().all(|(field, value)| {
+                    reg(value, |v| match field.as_str() {
+                        "name" => text(v, 256),
+                        "icon" => v.is_null() || text(v, 128),
+                        "live" => v.is_boolean(),
+                        "order" => v.as_i64().is_some_and(|n| n.unsigned_abs() <= MAX_SAFE),
+                        _ => false,
+                    })
+                })
+            })
+        })
+    };
+    if !valid {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+// Called only after shape validation. Requiring these exact fields also binds
+// metadata's live counts to the existing projection limits above.
+fn project_sidebar_meta(coordinate: &str, meta: &serde_json::Value) -> serde_json::Value {
+    use serde_json::{json, Value};
+    if coordinate == "channel-sort" {
+        let groups: serde_json::Map<_, _> = meta["g"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(_, reg)| !reg[2].is_null())
+            .map(|(key, reg)| (key.clone(), reg[2].clone()))
+            .collect();
+        return json!({"groups": groups});
+    }
+    let mut sections: Vec<_> = meta["s"].as_object().into_iter().flatten()
+        .filter(|(_, node)| node["live"][2] == true && node["name"][2].is_string())
+        .map(|(id, node)| {
+            let mut section = json!({"id": id, "name": node["name"][2], "order": node["order"][2].as_i64().unwrap_or(0)});
+            if node["icon"][2].is_string() { section["icon"] = node["icon"][2].clone(); }
+            section
+        }).collect();
+    sections.sort_by(|a, b| {
+        a["order"].as_i64().cmp(&b["order"].as_i64()).then_with(|| {
+            a["id"]
+                .as_str()
+                .unwrap_or("")
+                .encode_utf16()
+                .cmp(b["id"].as_str().unwrap_or("").encode_utf16())
+        })
+    });
+    for (order, section) in sections.iter_mut().enumerate() {
+        section["order"] = json!(order);
+    }
+    let ids: std::collections::HashSet<_> =
+        sections.iter().filter_map(|s| s["id"].as_str()).collect();
+    let assignments: serde_json::Map<_, _> = meta["a"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(_, reg)| reg[2].as_str().is_some_and(|id| ids.contains(id)))
+        .map(|(key, reg)| (key.clone(), reg[2].clone()))
+        .collect();
+    let result: Value = json!({"sections": sections, "assignments": assignments});
+    result
 }
 
 pub(crate) fn sidebar_coordinate(value: &str) -> bool {
@@ -686,23 +869,42 @@ impl IdentityHost {
     }
 
     pub(crate) async fn sign(&self, event: EventTemplate) -> Result<serde_json::Value> {
+        self.sign_bounded(event, 64 * 1024).await
+    }
+
+    /// Signs with a caller-validated serialized-event bound, e.g. NIP-AP catalogs.
+    pub(crate) async fn sign_bounded(
+        &self,
+        event: EventTemplate,
+        max_event_bytes: usize,
+    ) -> Result<serde_json::Value> {
         with_identity(self.clone(), move |identity| {
             identity.restore()?;
             match &identity.state {
-                State::Ready(key) => key.sign(event),
+                State::Ready(key) => key.sign_bounded(event, max_event_bytes),
                 _ => Err("Set up your identity first".into()),
             }
         })
         .await
     }
 
-    /// Callers bind `agent` to a key the app generated; the owner must be this identity.
+    /// Prepares a NIP-OA proof for one agent key; the owner must be this identity.
     pub(crate) async fn authorize_agent(
         &self,
         owner: String,
         agent: String,
     ) -> Result<Vec<String>> {
         with_identity(self.clone(), move |identity| {
+            if agent.len() != 64
+                || !agent
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            {
+                return Err("Agent pubkey must be 64 lowercase hex characters".into());
+            }
+            if agent == owner {
+                return Err("Owner and agent pubkeys must differ".into());
+            }
             if identity.restore()?.as_deref() != Some(owner.as_str()) {
                 return Err("The agent owner is not your signed-in identity".into());
             }
@@ -712,6 +914,13 @@ impl IdentityHost {
             }
         })
         .await
+    }
+}
+impl IdentityHost {
+    /// Close signing for the rest of this process. Taken under the same lock
+    /// every operation holds while it runs, so jobs already queued refuse too.
+    pub(crate) fn close(&self) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).close();
     }
 }
 impl Default for IdentityHost {
@@ -735,6 +944,81 @@ async fn with_identity<T: Send + 'static>(
     })
     .await
     .map_err(|_| "Identity operation could not complete")?
+}
+/// Prepares an unconditional NIP-OA proof; the caller submits it to the remote agent service.
+#[tauri::command]
+pub async fn identity_prepare_remote_agent_authorization(
+    host: tauri::State<'_, IdentityHost>,
+    owner: String,
+    agent_pubkey: String,
+) -> Result<Vec<String>> {
+    host.authorize_agent(owner, agent_pubkey).await
+}
+
+/// Builderlab's identity-binding origin; this signer never binds the key elsewhere.
+const BUILDERLAB_ORIGIN: &str = "https://app.builderlab.xyz";
+
+/// The challenge fields Builderlab returns for binding this identity.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuilderlabChallenge {
+    challenge_id: String,
+    nonce: String,
+    verification_code: String,
+    origin: String,
+    expires_at: String,
+}
+impl BuilderlabChallenge {
+    /// block/buzz's `nostr_bind` checks and kind 24243 tags, pinned to Builderlab.
+    fn template(self, now: u64) -> Result<EventTemplate> {
+        let nonce_ok = self.nonce.len() == 43
+            && self
+                .nonce
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+        let expires = chrono::DateTime::parse_from_rfc3339(&self.expires_at)
+            .map(|at| at.timestamp())
+            .unwrap_or(i64::MIN);
+        if self.challenge_id.len() != 36
+            || uuid::Uuid::parse_str(&self.challenge_id).is_err()
+            || !nonce_ok
+            || self.verification_code.len() != 6
+            || !self.verification_code.bytes().all(|b| b.is_ascii_digit())
+            || self.origin != BUILDERLAB_ORIGIN
+            || expires <= i64::try_from(now).unwrap_or(i64::MAX)
+        {
+            return Err("Invalid Nostr identity challenge".into());
+        }
+        let tag = |name: &str, value: String| vec![name.to_owned(), value];
+        Ok(EventTemplate {
+            created_at: now,
+            kind: 24243,
+            content: String::new(),
+            tags: vec![
+                tag("challenge_id", self.challenge_id),
+                tag("nonce", self.nonce),
+                tag("verification_code", self.verification_code),
+                tag("audience", "buzz:nostr-identity".into()),
+                tag("action", "bind_nostr_identity".into()),
+                tag("protocol", "buzz-nostr-identity".into()),
+                tag("version", "1".into()),
+                tag("origin", self.origin),
+                tag("expires_at", self.expires_at),
+            ],
+        })
+    }
+}
+/// Signs only a valid Builderlab binding challenge; never a general event signer.
+#[tauri::command]
+pub async fn identity_sign_builderlab_binding(
+    host: tauri::State<'_, IdentityHost>,
+    challenge: BuilderlabChallenge,
+) -> Result<serde_json::Value> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "System clock is before 1970")?
+        .as_secs();
+    host.sign(challenge.template(now)?).await
 }
 #[tauri::command]
 pub async fn identity_restore(host: tauri::State<'_, IdentityHost>) -> Result<Option<String>> {

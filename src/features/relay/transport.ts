@@ -1,3 +1,6 @@
+import type { ReminderHost } from "./reminders";
+import { archiveClient } from "../archive/client";
+import type { ArchiveHost } from "../archive/types";
 import {
   memoryResponseText,
   type MemoryReader,
@@ -7,12 +10,22 @@ import { publicationRefusal } from "../developer/traffic";
 import { avatarSource } from "../../shared/avatar-source";
 import { brokerUpload, hostUpload, type AttachmentUpload } from "./attachments";
 import type { ChannelKitHost } from "../channel-templates/host";
-import type { KitRecord } from "../channel-templates/model";
+import type { PrivateRecord } from "../channel-templates/model";
 import { workflowHost } from "../workflows/http";
-import { projectGitHost, type ProjectGit } from "../projects/git";
+import {
+  communityGitRepository,
+  projectGitHost,
+  type ProjectGit,
+} from "../projects/git";
 import type { WorkflowHost } from "../workflows/host";
 import { readReceiptText } from "./receipt";
-import type { ReadStateHost, ReadStateSigning } from "./read-state-host";
+import {
+  ReadStateTimestampRejected,
+  readStateRefusal,
+  READ_STATE_TIMESTAMP_REFUSAL,
+  type ReadStateHost,
+  type ReadStateSigning,
+} from "./read-state-host";
 import {
   parseReadSnapshot,
   readSnapshotFilter,
@@ -22,6 +35,7 @@ import type { AgentLibraryReader } from "../agents/library";
 import {
   projectSidebarPreferences,
   type SidebarAssignmentMutator,
+  type SidebarSectionRemovalWriter,
   type SidebarStarMutator,
   type SidebarSortMutator,
   type SidebarDecoder,
@@ -75,6 +89,11 @@ export interface ReadTransport {
     target: { id: string; pubkey: string; relayUrl: string },
     nonce: string,
   ) => Promise<string>;
+  /** One-repository Git authorization for this community's Buzz git; null for any other URL.
+   * The token is the NIP-98 value after `Authorization: Nostr `. */
+  readonly authorizeGit?: (
+    repository: string,
+  ) => Promise<{ repository: string; token: string } | null>;
   readonly uploadAttachment?: AttachmentUpload;
   /** Host-owned idempotent DM opening. The session verifies membership before use. */
   readonly openDirectMessage?: (
@@ -91,6 +110,7 @@ export interface ReadTransport {
   readonly identityArchive?: RelayWriter;
   /** Purpose-bound observer decoding on the shared host live stream. */
   readonly agentActivity?: boolean;
+  readonly activityArchive?: ArchiveHost;
   /** Explicit relay-advertised session command support. */
   /** Host-projected local library; display only, never relay authority. */
   readonly readAgentLibrary?: AgentLibraryReader;
@@ -98,6 +118,8 @@ export interface ReadTransport {
   readonly decodeSidebarPreferences?: SidebarDecoder;
   readonly writeSidebarSort?: SidebarSortMutator;
   readonly readState?: ReadStateHost;
+  /** Purpose-bound NIP-ER codec; never a general NIP-44 or signing primitive. */
+  readonly reminders?: ReminderHost;
   readonly channelKit?: ChannelKitHost;
   /** Strictly validated atomic writer snapshot; never an ordinary event-array query. */
   readStateSnapshot?(
@@ -121,6 +143,7 @@ export interface ReadTransport {
   readonly writeSidebarMute?: SidebarMuteMutator;
   /** Host-only, relay-scoped mutation of one existing sidebar group assignment. */
   readonly writeSidebarAssignment?: SidebarAssignmentMutator;
+  readonly removeSidebarSection?: SidebarSectionRemovalWriter;
   readonly writeSidebarStar?: SidebarStarMutator;
   readonly profiling?: RelayProfiler;
   /** Verified incoming traffic. The session owns this subscription and fences late delivery. */
@@ -171,8 +194,8 @@ export function mediaUrl(
 export interface Signer {
   getPublicKey(): Promise<string>;
   signEvent(event: EventTemplate): Promise<VerifiedEvent>;
-  /** Native hosts authenticate and send exact bytes without exposing credentials to JS. */
-  request?(url: string, body: string, signal?: AbortSignal): Promise<Response>;
+  /** The host authenticates and sends exact bytes without exposing credentials to JS. */
+  request(url: string, body: string, signal?: AbortSignal): Promise<Response>;
   /** Native hosts sign and send `PUT /upload` for these exact bytes. */
   upload?(file: File, signal: AbortSignal): Promise<Response>;
   /** Native hosts serve relay `/media/` URLs through an authenticated proxy. */
@@ -350,7 +373,7 @@ export async function registerBrokerCommunity(
   }
 }
 
-/** Dev-only: a same-origin broker (see dev/relay-broker.mjs) holds the key and signs reads. */
+/** Dev-only: a same-origin broker (see browser-host/relay-broker.mjs) holds the key and signs reads. */
 export async function connectBrokerTransport(
   base = "",
   signal?: AbortSignal,
@@ -388,10 +411,12 @@ export async function connectBrokerTransport(
     sidebarMuteWrites?: boolean;
     channelKit?: boolean;
     sidebarPreferenceWrites?: boolean;
+    sidebarSectionRemoval?: boolean;
     sidebarStarWrites?: boolean;
     agentLibrary?: boolean;
     agentMemories?: boolean;
     agentLogProof?: boolean;
+    gitAuthorization?: boolean;
     agentActivity?: boolean;
     readState?: boolean;
     readStateCommunity?: string;
@@ -488,6 +513,26 @@ export async function connectBrokerTransport(
         }
       : {}),
     agentActivity: session.agentActivity === true && session.live === true,
+    ...(session.agentActivity === true && session.live === true
+      ? {
+          activityArchive: archiveClient("broker", async (input, signal) => {
+            const response = await fetch(`${endpoint}/archive`, {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ viewer: session.viewer, ...input }),
+              signal: signal
+                ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+                : AbortSignal.timeout(10000),
+            });
+            if (!response.ok)
+              throw new Error(
+                "Archive operation failed; retry without deleting stored data",
+              );
+            return response.json();
+          }).host,
+        }
+      : {}),
     ...(session.live
       ? {
           subscribe: (callbacks: LiveCallbacks) => {
@@ -594,6 +639,32 @@ export async function connectBrokerTransport(
           },
         }
       : {}),
+    ...(session.gitAuthorization === true && community && session.relayUrl
+      ? {
+          authorizeGit: async (input: string) => {
+            const repository = communityGitRepository(
+              relayOrigin(session.relayUrl ?? ""),
+              input,
+            );
+            if (!repository) return null;
+            const response = await fetch(`${endpoint}/git-authorization`, {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ repository }),
+            });
+            const value: unknown = response.ok ? await response.json() : null;
+            if (
+              !value ||
+              typeof value !== "object" ||
+              !("token" in value) ||
+              typeof value.token !== "string"
+            )
+              throw new Error("Repository sign-in unavailable");
+            return { repository, token: value.token };
+          },
+        }
+      : {}),
     ...(session.agentMemories === true && community
       ? {
           readAgentMemories: async (
@@ -656,7 +727,7 @@ export async function connectBrokerTransport(
     ...(session.channelKit
       ? {
           channelKit: {
-            async prepare(record: KitRecord, signal: AbortSignal) {
+            async prepare(record: PrivateRecord, signal: AbortSignal) {
               const response = await fetch(`${endpoint}/channel-kit-prepare`, {
                 method: "POST",
                 credentials: "same-origin",
@@ -671,7 +742,7 @@ export async function connectBrokerTransport(
               const result = await response.json();
               if (
                 typeof result.content !== "string" ||
-                result.content.length > 24 * 1024
+                result.content.length > 64 * 1024
               )
                 throw new Error("Invalid encrypted recipe");
               return result.content as string;
@@ -733,7 +804,7 @@ export async function connectBrokerTransport(
                 body: JSON.stringify(event),
                 signal,
               });
-              await acceptPublish(response, event.id);
+              await acceptReadStatePublish(response, event.id);
             },
           },
         }
@@ -834,6 +905,34 @@ export async function connectBrokerTransport(
       : {}),
     ...(session.identityArchives === true
       ? { identityArchive: routeWriter("identity-archive") }
+      : {}),
+    ...(session.sidebarSectionRemoval
+      ? {
+          async removeSidebarSection(sectionId: string, signal: AbortSignal) {
+            const response = await fetch(
+              `${endpoint}/sidebar-section-removal`,
+              {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sectionId }),
+                signal,
+              },
+            );
+            if (!response.ok)
+              throw new Error((await readApiFailure(response)).error);
+            const value = await response.json();
+            const { sections, assignments } = projectSidebarPreferences(
+              {
+                version: 1,
+                sections: value.sections,
+                assignments: value.assignments,
+              },
+              undefined,
+            );
+            return { sections, assignments };
+          },
+        }
       : {}),
     ...(session.sidebarPreferenceWrites
       ? {
@@ -982,10 +1081,6 @@ export async function connectBrokerTransport(
   };
 }
 
-const hex = (buffer: ArrayBuffer) =>
-  [...new Uint8Array(buffer)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 const signedAdmissions = createHostAdmission();
 /** A native purpose-bound read shares signed HTTP capacity and server cooldowns. */
 export function admittedSignedWorkflowRead(
@@ -1006,14 +1101,16 @@ export const admitSignedRequest = (
   request: () => Promise<Response>,
   signal?: AbortSignal,
   priority: "foreground" | "background" = "foreground",
+  reason?: (body: unknown) => string | undefined,
 ) =>
   admittedApiRequest(
     signedAdmissions(relayOrigin(origin), viewer).api,
     request,
     signal,
     priority,
+    reason,
   );
-/** NIP-98 signed reads for a host that owns a signer (Tauri, NIP-07). Reads and writes use the same identity and relay scope. */
+/** NIP-98 signed reads and writes through a host that owns the signer and authenticates each HTTP request. Reads and writes use the same identity and relay scope. */
 export async function connectSignedTransport(
   signer: Signer,
   httpOrigin: string,
@@ -1178,60 +1275,37 @@ async function signedPost(
   signal?.throwIfAborted();
   return admission.prepare(async () => {
     const body = JSON.stringify(value);
-    const request = signer.request?.bind(signer);
-    if (request)
-      return dispatch(() => {
-        signal?.throwIfAborted();
-        return profiling.measureAsync("http.fetch", id, () =>
-          request(url, body, signal),
-        );
-      });
-    const payload = hex(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)),
-    );
-    if (signal?.aborted) throw signal.reason;
-    const auth = await profiling.measureAsync("http.auth", id, () =>
-      signer.signEvent({
-        kind: 27235,
-        created_at: Math.floor(Date.now() / 1000),
-        content: "",
-        tags: [
-          ["u", url],
-          ["method", "POST"],
-          ["payload", payload],
-          ["nonce", crypto.randomUUID()],
-        ],
-      }),
-    );
-    if (signal?.aborted) throw signal.reason;
-    // Preparation retains this principal. Dispatch rechecks capacity and any
-    // server pause learned during asynchronous signing.
-    const queued = profiling.start("http.admission", id);
-    try {
-      return await dispatch(() => {
-        queued();
-        signal?.throwIfAborted();
-        if (Math.abs(Math.floor(Date.now() / 1000) - auth.created_at) > 45)
-          throw new ApiNotSent(
-            "Request authentication expired before dispatch; retry available",
-          );
-        return profiling.measureAsync("http.fetch", id, () =>
-          fetch(url, {
-            method: "POST",
-            headers: {
-              Authorization: `Nostr ${btoa(JSON.stringify(auth))}`,
-              "Content-Type": "application/json",
-            },
-            body,
-            signal: signal ?? null,
-          }),
-        );
-      });
-    } finally {
-      queued();
-    }
+    return dispatch(() => {
+      signal?.throwIfAborted();
+      return profiling.measureAsync("http.fetch", id, () =>
+        signer.request(url, body, signal),
+      );
+    });
   });
 }
+export async function acceptReadStatePublish(response: Response, id: string) {
+  if (!response.ok) {
+    const failure = await readApiFailure(response, (body) => {
+      if (readStateRefusal(body)) return READ_STATE_TIMESTAMP_REFUSAL;
+      const value = body as { sent?: unknown; error?: unknown } | null;
+      if (
+        value?.sent === false &&
+        typeof value.error === "string" &&
+        value.error.startsWith("rate-limited:")
+      )
+        return publicationRefusal(value.error);
+    });
+    if (
+      (response.status === 400 ||
+        (response.status === 503 && failure.sent === false)) &&
+      failure.error === READ_STATE_TIMESTAMP_REFUSAL
+    )
+      throw new ReadStateTimestampRejected();
+    response = Response.json(failure, { status: response.status });
+  }
+  return acceptPublish(response, id);
+}
+
 /** A transport failure is an unknown outcome; only a definitive rejection is a failed write. */
 export async function acceptPublish(response: Response, id: string) {
   if (!response.ok) {

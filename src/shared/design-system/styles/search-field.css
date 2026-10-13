@@ -50,7 +50,8 @@
 
 html[data-keyboard-navigation] .search-field:has(input:focus-visible),
 :host([data-keyboard-navigation]) .search-field:has(input:focus-visible) {
-  /* Match the temporary global focus rule, including the shadow-root host. */
+  /* Unresolved visible-focus gap: this cancels the ring with no perimeter
+     replacement. See DESIGN.md § Focus appearance. */
   outline: none;
 }
 
@@ -78,7 +79,7 @@ html[data-keyboard-navigation] .search-field:has(input:focus-visible),
   min-height: 0;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-icon-button);
   background: transparent;
   color: var(--text-metadata);
   cursor: pointer;

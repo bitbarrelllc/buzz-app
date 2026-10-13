@@ -14,7 +14,8 @@ import {
 import { StrictMode, useRef, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SessionsPage } from "../../bundled/sessions/SessionsPage";
-import { writeView } from "../../shared/view-state";
+import type { PageNavigation } from "../navigation/service";
+import { meTarget } from "../../bundled/me/routes";
 import { SESSION_CHANNEL_DESCRIPTION } from "../sessions/metadata";
 import { createRelaySession } from "../relay/session";
 import { keypair, message, roster, signed } from "../relay/testing";
@@ -59,18 +60,28 @@ async function fixture(archived = false) {
   );
   const viewer = keypair(),
     relay = keypair();
-  const root = message(viewer, "work", "Image", 1, [
-    ["imeta", `url ${image.url}`, "m image/png"],
+  const root = message(
+    viewer,
+    "11111111-1111-4111-8111-111111111111",
+    "Image",
+    1,
+    [["imeta", `url ${image.url}`, "m image/png"]],
+  );
+  const comment = message(
+    viewer,
+    "11111111-1111-4111-8111-111111111111",
+    "Existing review comment",
+    2,
+    [["e", root.id, "", "reply"]],
+  );
+  const membership = roster(relay, "11111111-1111-4111-8111-111111111111", [
+    viewer.pubkey,
   ]);
-  const comment = message(viewer, "work", "Existing review comment", 2, [
-    ["e", root.id, "", "reply"],
-  ]);
-  const membership = roster(relay, "work", [viewer.pubkey]);
   const channel = signed(relay, {
     kind: 39000,
     content: "",
     tags: [
-      ["d", "work"],
+      ["d", "11111111-1111-4111-8111-111111111111"],
       ["name", "Work"],
       ["t", "stream"],
       ["private"],
@@ -176,12 +187,43 @@ it.each([false, true])(
   "the production Sessions timeline owns drops and rejects an unavailable composer (archived=%s)",
   async (archived) => {
     const h = await fixture(archived);
-    writeView(h.scope, "sessions:selected", "work");
+    const placement = {
+      ...h.owner.session.mePlacement.snapshot(),
+      status: "ready" as const,
+    };
+    const relaySnapshot = h.relayData.snapshot();
+    const session = {
+      ...relaySnapshot.session,
+      mePlacement: {
+        ...relaySnapshot.session.mePlacement,
+        snapshot: () => placement,
+      },
+    };
+    const snapshot = { ...relaySnapshot, session };
+    const relayData = { ...h.relayData, snapshot: () => snapshot };
+    const navigation: PageNavigation = {
+      entryId: "visit",
+      target: meTarget(h.scope, "11111111-1111-4111-8111-111111111111"),
+      signal: new AbortController().signal,
+      forSession: () => navigation,
+      complete: () => true,
+      resolve: () => true,
+    };
     const other = vi.fn();
     render(
       <StrictMode>
         <OuterComposer attach={other}>
-          <SessionsPage relay={h.relayData} extensions={extensions} />
+          <SessionsPage
+            panels={{
+              snapshot: () => empty,
+              subscribe: () => () => {},
+              register() {},
+              resolve: () => undefined,
+            }}
+            relay={relayData}
+            extensions={extensions}
+            navigation={navigation}
+          />
         </OuterComposer>
       </StrictMode>,
     );
@@ -203,12 +245,11 @@ it.each([false, true])(
       expect(h.upload).not.toHaveBeenCalled();
     } else {
       await waitFor(() =>
-        expect(within(form).getByRole("status")).toHaveTextContent(
-          "notes.txt: 1 KB · Ready",
-        ),
+        expect(
+          within(form).getByRole("status", { name: "" }),
+        ).toHaveTextContent("notes.txt: 1 KB · Queued"),
       );
-      expect(h.upload).toHaveBeenCalledTimes(1);
-      expect(h.upload.mock.calls[0]?.[0].name).toBe("notes.txt");
+      expect(h.upload).not.toHaveBeenCalled();
     }
     expect(other).not.toHaveBeenCalled();
   },
@@ -234,7 +275,7 @@ it.each([false, true])(
             attachment={image}
             session={session}
             scope={h.scope}
-            channelId="work"
+            channelId="11111111-1111-4111-8111-111111111111"
             channelName="Work"
             messageId={h.root.id}
             initialTime={0}
@@ -267,17 +308,17 @@ it.each([false, true])(
       expect(h.upload).not.toHaveBeenCalled();
     } else {
       await waitFor(() =>
-        expect(within(pane).getByRole("status")).toHaveTextContent(
-          "notes.txt: 1 KB · Ready",
-        ),
+        expect(
+          within(pane).getByRole("status", { name: "" }),
+        ).toHaveTextContent("notes.txt: 1 KB · Queued"),
       );
-      expect(h.upload).toHaveBeenCalledTimes(1);
+      expect(h.upload).not.toHaveBeenCalled();
     }
     expect(other).not.toHaveBeenCalled();
   },
 );
 
-it("announces preparation, upload and readiness politely while editor focus stays put", async () => {
+it("announces queued files, then background preparation and upload, while editor focus stays put", async () => {
   const h = await fixture();
   const header = deferred<ArrayBuffer>();
   const upload = deferred<typeof h.uploaded>();
@@ -290,7 +331,7 @@ it("announces preparation, upload and readiness politely while editor focus stay
     <MessageComposer
       session={h.owner.session}
       scope={h.scope}
-      channelId="work"
+      channelId="11111111-1111-4111-8111-111111111111"
       channelName="Work"
     />,
   );
@@ -299,27 +340,37 @@ it("announces preparation, upload and readiness politely while editor focus stay
   fireEvent.paste(editor, {
     clipboardData: { items: [{ kind: "file", getAsFile: () => source }] },
   });
-  const status = screen.getByRole("status");
+  const status = screen.getByRole("status", { name: "" });
   expect(status).toHaveAttribute("aria-live", "polite");
   expect(status).toHaveAttribute("aria-atomic", "true");
-  expect(status).toHaveTextContent("notes.txt: 1 KB · Preparing…");
+  expect(status).toHaveTextContent("notes.txt: 1 KB · Queued");
   expect(editor).toHaveFocus();
   const send = screen.getByRole("button", { name: "Send message" });
-  expect(send).toBeDisabled();
+  expect(send).toBeEnabled();
+  expect(h.upload).not.toHaveBeenCalled();
+
+  fireEvent.click(send);
+  // The file leaves the composer; the background pill announces its phases.
+  await waitFor(() => expect(status).not.toBeInTheDocument());
+  expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+    "Preparing",
+  );
+  expect(editor).toHaveFocus();
   await act(async () => {
     header.resolve(new ArrayBuffer(0));
   });
-  expect(status).toHaveTextContent("notes.txt: 1 KB · Uploading…");
+  expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+    /^Uploading$/,
+  );
   expect(editor).toHaveFocus();
-  expect(send).toBeDisabled();
   await act(async () => {
     upload.resolve(h.uploaded);
   });
-  expect(status).toHaveTextContent("notes.txt: 1 KB · Ready");
+  await waitFor(() =>
+    expect(screen.queryByRole("status", { name: "" })).toBeNull(),
+  );
   expect(editor).toHaveFocus();
-  expect(send).toBeEnabled();
-  expect(screen.getAllByRole("status")).toHaveLength(1);
   expect(
-    screen.getByRole("region", { name: "Attachments" }),
-  ).not.toHaveAttribute("aria-live");
+    screen.queryByRole("region", { name: "Attachments" }),
+  ).not.toBeInTheDocument();
 });

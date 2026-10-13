@@ -1,5 +1,6 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: The history region must support keyboard scrolling.
 import { useChannelIdentityNames } from "../identity-names/react";
+import { useMessageSelectionCopy } from "./selection-copy";
 import { Button } from "../../shared/design-system/ui/Button";
 import { MembershipRow } from "./MembershipRow";
 import { membershipRows } from "./membership-rows";
@@ -11,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  Fragment,
   type KeyboardEvent,
 } from "react";
 import { Virtualizer, type VirtualizerHandle } from "virtua";
@@ -123,9 +125,17 @@ export type ChannelTimelineProps = {
   continuityKey?: string | undefined;
   window: ChannelWindow;
   launchPending?: boolean | undefined;
+  /** Sessions page history on scroll; retain an explicit button for errors. */
+  historyControl?: "button" | "scroll";
   onOpenLink(url: string): boolean;
   canOpenLink?: ((target: string) => boolean) | undefined;
   revealMessageId?: string | undefined;
+  /** One inline exact visit: focus the verified mounted row, without a page navigation. */
+  inlineTarget?:
+    | Readonly<{ messageId: string; signal: AbortSignal }>
+    | undefined;
+  /** Draft context starts at the returned tail, never reads/writes canonical scroll. */
+  transient?: boolean | undefined;
   navigation?: PageNavigation | undefined;
   onOpenThread?(
     messageId: string,
@@ -161,15 +171,21 @@ function Timeline({
   queries,
   window,
   launchPending,
+  historyControl = "button",
   onOpenLink,
   canOpenLink,
   revealMessageId,
+  inlineTarget,
+  transient = false,
   navigation,
   onOpenThread,
   onOpenMediaReview,
 }: ChannelTimelineProps) {
+  useMessageSelectionCopy();
   const [initialPosition] = useState(() =>
-    readView<ReadingPosition | null>(scope, `scroll:${channelId}`, null),
+    transient
+      ? null
+      : readView<ReadingPosition | null>(scope, `scroll:${channelId}`, null),
   );
   const savedPosition = useRef(initialPosition);
   const restoredAnchor = useRef<ReadingPosition["anchor"]>(undefined);
@@ -183,15 +199,19 @@ function Timeline({
     [window.rows, profiles, resolveName],
   );
   const [focusedMessageId, setFocusedMessageId] = useState<string>();
-  const [pinnedIds, setPinnedIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  // Holders are counted per row: a report notice and an image viewer can hold
+  // the same row, and releasing one must not drop the other's pin.
+  const [pinnedIds, setPinnedIds] = useState<ReadonlyMap<string, number>>(
+    () => new Map(),
   );
   const keepRowMounted = useCallback((id: string) => {
-    setPinnedIds((ids) => new Set(ids).add(id));
+    setPinnedIds((ids) => new Map(ids).set(id, (ids.get(id) ?? 0) + 1));
     return () =>
       setPinnedIds((ids) => {
-        const next = new Set(ids);
-        next.delete(id);
+        const next = new Map(ids);
+        const count = (ids.get(id) ?? 0) - 1;
+        if (count > 0) next.set(id, count);
+        else next.delete(id);
         return next;
       });
   }, []);
@@ -326,10 +346,12 @@ function Timeline({
       align: "end",
     });
   }, [rows.length]);
+  const inlineSignal = inlineTarget?.signal;
   const targetId =
-    navigation?.target.kind === "conversation"
+    inlineTarget?.messageId ??
+    (navigation?.target.kind === "conversation"
       ? navigation.target.messageId
-      : undefined;
+      : undefined);
   const targetIndex = rows.findIndex((row) => row.id === targetId);
   const prepareTarget = useCallback(() => {
     if (!handle.current) return;
@@ -351,7 +373,7 @@ function Timeline({
     ),
     settled,
     messageId: targetId,
-    signal: navigation?.signal,
+    signal: inlineSignal ?? navigation?.signal,
     ready: !!size.width && !!size.height && targetIndex >= 0,
     prepare: prepareTarget,
     complete: completeTarget,
@@ -389,6 +411,15 @@ function Timeline({
         next.edgeHeight === measuredSize.edgeHeight
       )
         return;
+      // A growing composer shrinks the viewport. Pin a reader who was at the
+      // bottom before paint so history rises with it; the restore lands later.
+      if (
+        follow.current &&
+        settled.current &&
+        next.height < measuredSize.height &&
+        element.scrollHeight - measuredSize.height - element.scrollTop < 2
+      )
+        element.scrollTop = element.scrollHeight;
       measuredSize = next;
       settled.current = false;
       setSize(next);
@@ -404,7 +435,8 @@ function Timeline({
       upwardGesture.current = false;
       olderDemand.current = false;
       settled.current = false;
-      writeView(scope, `scroll:${channelId}`, savedPosition.current);
+      if (!transient)
+        writeView(scope, `scroll:${channelId}`, savedPosition.current);
       observer.disconnect();
       if (handle.current)
         geometry.set(
@@ -415,7 +447,7 @@ function Timeline({
         );
     };
     // Initial signature only; mutations invalidate the saved cache on remount.
-  }, [channelId, geometry, scope]);
+  }, [channelId, geometry, scope, transient]);
   // A reveal completes when its scroll runs. Until then it stays pending under
   // the intent that scheduled it: a row update that cancels its frame (an echo,
   // an edit, an older-history prepend) reschedules it, while any newer intent
@@ -457,12 +489,15 @@ function Timeline({
       arrivals > 0 &&
       previousIds.size > 0 &&
       !follow.current &&
-      (!targetId || exactRevealed.current === navigation?.signal)
+      (!targetId ||
+        exactRevealed.current === (inlineSignal ?? navigation?.signal))
     ) {
       setNewMessageCount((count) => count + arrivals);
     }
     if (
-      (targetId && navigation && exactRevealed.current !== navigation.signal) ||
+      (targetId &&
+        (inlineSignal || navigation) &&
+        exactRevealed.current !== (inlineSignal ?? navigation?.signal)) ||
       !size.width ||
       !size.height ||
       !rows.length ||
@@ -589,6 +624,7 @@ function Timeline({
     recordPosition,
     targetId,
     navigation,
+    inlineSignal,
     exactRevealed,
     updateJumpToLatest,
     revealMessageId,
@@ -712,7 +748,7 @@ function Timeline({
         {window.error && <span role="alert">{window.error}</span>}
         {window.historyLimited ? (
           <span>History window limit reached</span>
-        ) : window.hasMore ? (
+        ) : window.hasMore && (historyControl === "button" || window.error) ? (
           <Button
             type="button"
             disabled={window.loadingOlder}
@@ -723,21 +759,28 @@ function Timeline({
                 olderDemand.current = false;
             }}
           >
-            {window.loadingOlder ? "Loading older…" : "Load older messages"}
+            {window.loadingOlder
+              ? "Loading older…"
+              : window.error
+                ? "Retry older messages"
+                : "Load older messages"}
           </Button>
+        ) : window.loadingOlder ? (
+          <span role="status">Loading older…</span>
         ) : null}
       </div>
-      {showJumpToLatest && (
-        <JumpToLatestButton
-          newMessageCount={newMessageCount}
-          onClick={jumpToLatest}
-        />
-      )}
+      <JumpToLatestButton
+        visible={showJumpToLatest}
+        newMessageCount={newMessageCount}
+        onClick={jumpToLatest}
+      />
       {width > 0 && (
         <Virtualizer
           ref={handle}
           scrollRef={scroller}
-          shift={prepend}
+          // Before Virtua measures its viewport there is no reading position
+          // to preserve; shifting then can freeze its initial empty range.
+          shift={prepend && !!handle.current?.viewportSize}
           bufferSize={1600}
           // Reflow must not evict the focused control or a row's open report.
           keepMounted={keptIndices}
@@ -754,43 +797,48 @@ function Timeline({
                     (rows[index - 1]?.createdAt ?? 0) * 1000,
                   ).toDateString() !==
                   new Date(row.createdAt * 1000).toDateString();
-            return row.membership ? (
-              <MembershipRow
-                resolveName={resolveName}
-                names={queries.names}
-                key={row.id}
-                row={row}
-                profiles={profiles}
-                viewer={viewer}
-                media={queries.media}
-                agentPubkeys={agentPubkeys}
-                day={day}
-              />
-            ) : (
-              <MessageRow
-                layout={
-                  continuesMessageGroup(rows[index - 1], row)
-                    ? "continuation"
-                    : "timeline"
-                }
-                session={queries}
-                scope={scope}
-                key={row.id}
-                row={row}
-                unread={queries.unread}
-                extensions={extensions}
-                profile={profiles.get(row.authorId)}
-                participantProfiles={profiles}
-                agentPubkeys={agentPubkeys}
-                media={queries.media}
-                onOpenLink={onOpenLink}
-                canOpenLink={canOpenLink}
-                onOpenThread={onOpenThread}
-                {...(onOpenMediaReview ? { onOpenMediaReview } : {})}
-                retry={queries.outbox?.retry}
-                keepMounted={keepRowMounted}
-                day={day}
-              />
+            return (
+              <Fragment key={row.id}>
+                {row.membership ? (
+                  <MembershipRow
+                    resolveName={resolveName}
+                    names={queries.names}
+                    row={row}
+                    profiles={profiles}
+                    viewer={viewer}
+                    media={queries.media}
+                    agentPubkeys={agentPubkeys}
+                    day={day}
+                  />
+                ) : (
+                  <MessageRow
+                    layout={
+                      continuesMessageGroup(rows[index - 1], row)
+                        ? "continuation"
+                        : "timeline"
+                    }
+                    session={queries}
+                    scope={scope}
+                    row={row}
+                    unread={queries.unread}
+                    extensions={extensions}
+                    profile={profiles.get(row.authorId)}
+                    participantProfiles={profiles}
+                    agentPubkeys={agentPubkeys}
+                    media={queries.media}
+                    onOpenLink={onOpenLink}
+                    canOpenLink={canOpenLink}
+                    onOpenThread={onOpenThread}
+                    {...(onOpenMediaReview ? { onOpenMediaReview } : {})}
+                    retry={queries.outbox?.retry}
+                    keepMounted={keepRowMounted}
+                    day={day}
+                  />
+                )}
+                {index === rows.length - 1 && (
+                  <div className={styles.timelineEnd} aria-hidden="true" />
+                )}
+              </Fragment>
             );
           })}
         </Virtualizer>

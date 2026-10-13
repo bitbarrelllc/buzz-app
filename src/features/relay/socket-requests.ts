@@ -1,6 +1,10 @@
 import type { VerifiedEvent } from "nostr-tools";
 import { publicationRefusal } from "../developer/traffic.ts";
 import { eventDto } from "./events.ts";
+import {
+  isCatalogKind,
+  MAX_EVENT_BYTES as CATALOG_EVENT_BYTES,
+} from "../agents/catalog-envelope.ts";
 
 /** False means proven non-delivery, not merely a negative or missing OK. */
 export class SocketRequestError extends Error {
@@ -30,9 +34,12 @@ export function createSocketPublications(wake: () => void) {
         throw new SocketRequestError("Publication already in flight", false);
       if (pending.size >= 32)
         throw new SocketRequestError("Publication capacity reached", false);
+      // NIP-AP catalog events may exceed the ordinary frame; the relay's
+      // default frame limit is far above their envelope bound.
+      const frame = isCatalogKind(event.kind) ? CATALOG_EVENT_BYTES : 65536;
       if (
         new TextEncoder().encode(JSON.stringify(["EVENT", event])).length >
-        65536
+        frame
       )
         throw new SocketRequestError("Publication exceeds frame limit", false);
       return new Promise((resolve, reject) => {
@@ -107,11 +114,12 @@ export function createSocketPublications(wake: () => void) {
           /^(invalid|blocked|restricted|auth-required|rate-limited):/.test(
             data[3],
           ) ||
-          // Buzz workflow CAS/authority and artifact CAS refusals precede
+          // Buzz workflow CAS/authority and Canvas/artifact CAS refusals precede
           // domain mutation.
           ([30620, 46020].includes(job.event.kind) &&
             /^(conflict|forbidden):/.test(data[3])) ||
-          (job.event.kind === 45010 && data[3].startsWith("conflict:"));
+          ([40100, 45010].includes(job.event.kind) &&
+            data[3].startsWith("conflict:"));
         job.finish(
           undefined,
           new SocketRequestError(

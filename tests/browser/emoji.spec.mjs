@@ -43,7 +43,7 @@ test("community picker uses keyboard, proxy thumbnails, event-local history and 
     const draft = () =>
       page.getByRole("textbox", { name: /Message #general|Reply to thread/ });
     const picker = page.getByRole("button", {
-      name: "Insert emoji",
+      name: "Emoji and GIFS",
       exact: true,
     });
     await expect(
@@ -215,9 +215,47 @@ test("community picker uses keyboard, proxy thumbnails, event-local history and 
       text: "Quote :party:\n\ncode\n",
       trusted: true,
     });
+    // Across rows, the handler must omit the same user-select: none row chrome
+    // engines do: the hovered action bars and the hidden full dates.
+    const brokenBody = page.getByText("Broken :missing:", { exact: true });
+    await historic.hover();
+    await brokenBody.hover();
+    await historic.evaluate(
+      (image, end) => {
+        const range = document.createRange();
+        range.setStartBefore(image.closest("p"));
+        range.setEndAfter(end);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      },
+      await brokenBody.elementHandle(),
+    );
+    await observeCopyPayload();
+    await copySelection();
+    await expect
+      .poll(copyPayload)
+      .toMatchObject({ prevented: true, trusted: true });
+    const { text: rowsText } = await copyPayload();
+    expect(rowsText).toMatch(
+      /^Historic :unknown:party: and https:\/\/example\.test\/:party:\n/,
+    );
+    expect(rowsText).toMatch(
+      /\nFixture ReaderJan 1, 1970 at 12:00 AM\nBroken :missing:$/,
+    );
+    expect(rowsText).not.toMatch(/Thursday|👍|❤️|😂/u);
     // Independently prove this browser's real clipboard transport with the exact
     // handler payload; the editable source path intentionally uses native copy.
     await draft().fill(":party:");
+    // A lone custom emoji is enlarged without enlarging the editor's separator.
+    await expect(draft().locator('img[alt=":party:"]')).toHaveCSS(
+      "width",
+      "42px",
+    );
+    await expect(draft().locator("img.ProseMirror-separator")).toHaveCSS(
+      "width",
+      "0px",
+    );
     await draft().press("ControlOrMeta+a");
     await page.keyboard.press("ControlOrMeta+c");
     await draft().fill("");
@@ -407,8 +445,12 @@ test("community picker uses keyboard, proxy thumbnails, event-local history and 
     const surface = page.locator("em-emoji-picker #root");
     const region = page.getByRole("dialog", { name: "Emoji picker" });
     await expect(surface).toHaveAttribute("data-theme", "light");
-    await expect(region).toHaveCSS("background-color", "rgb(255, 255, 255)");
-    await expect(region).toHaveCSS("border-radius", "24px");
+    await expect(region).toHaveCSS(
+      "background-color",
+      "rgba(255, 255, 255, 0.9)",
+    );
+    await expect(region).toHaveCSS("backdrop-filter", "blur(8px)");
+    await expect(region).toHaveCSS("border-radius", "16px");
     await expect(region).toHaveCSS("border-top-width", "1px");
     await expect(region).not.toHaveCSS("box-shadow", "none");
     await expect(

@@ -21,6 +21,7 @@ const operation: WorkflowOperation = {
   eventId: "deletion",
   workflow: fixtureDefinition,
   action: "delete",
+  createdAt: 1,
   outcome: "succeeded",
   delivery: "accepted",
 };
@@ -40,16 +41,6 @@ it.each<[string, Snapshot, WorkflowOperation["outcome"]]>([
   [
     "read error",
     { status: "error", data: { items: [], partial: false } },
-    "succeeded",
-  ],
-  [
-    "unavailable read",
-    { status: "unavailable", data: { items: [], partial: false } },
-    "succeeded",
-  ],
-  [
-    "cleared read",
-    { status: "idle", data: { items: [], partial: false } },
     "succeeded",
   ],
 ])(

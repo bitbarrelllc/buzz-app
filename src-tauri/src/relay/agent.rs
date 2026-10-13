@@ -113,13 +113,13 @@ pub(crate) async fn relay_agent_log_proof(
 
 #[derive(Deserialize, serde::Serialize, Clone)]
 pub(crate) struct AgentEvent {
-    id: String,
-    pubkey: String,
-    sig: String,
-    created_at: u64,
-    kind: u16,
-    tags: Vec<Vec<String>>,
-    content: String,
+    pub(crate) id: String,
+    pub(crate) pubkey: String,
+    pub(crate) sig: String,
+    pub(crate) created_at: u64,
+    pub(crate) kind: u16,
+    pub(crate) tags: Vec<Vec<String>>,
+    pub(crate) content: String,
 }
 fn verified(event: &AgentEvent) -> Result<()> {
     if !key(&event.id)
@@ -195,17 +195,30 @@ pub(crate) async fn relay_agent_observer(
         .await
 }
 fn decode_observer_with_key(secret: &[u8; 32], viewer: &str, event: &AgentEvent) -> Result<Value> {
+    if event.kind != 24200 {
+        return Err("Invalid observer envelope".into());
+    }
+    decode_archive(secret, viewer, event, false)
+}
+pub(crate) fn decode_archive(
+    secret: &[u8; 32],
+    viewer: &str,
+    event: &AgentEvent,
+    history: bool,
+) -> Result<Value> {
     verified(event)?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| "Invalid clock")?
         .as_secs();
-    if event.kind != 24200
+    if !matches!(event.kind, 24200 | 44200)
         || !exact(event, "p", viewer)
         || !exact(event, "agent", &event.pubkey)
-        || !exact(event, "frame", "telemetry")
-        || now.abs_diff(event.created_at) > 300
+        || (event.kind == 24200 && !exact(event, "frame", "telemetry"))
+        || event.created_at > now + 300
+        || now.saturating_sub(event.created_at) > if history { 90 * 24 * 60 * 60 } else { 300 }
         || event.content.len() < 132
+        || event.content.len() > 87472
     {
         return Err("Invalid observer envelope".into());
     }
@@ -286,7 +299,7 @@ fn unique_json(text: &str) -> Result<Value> {
         .map_err(|_| "Invalid memory body".into())
 }
 
-fn slug(s: &str) -> bool {
+pub(crate) fn slug(s: &str) -> bool {
     if s == "core" {
         return true;
     }
@@ -694,6 +707,33 @@ mod tests {
         assert!(slug("mem/a/b_2"));
     }
     #[test]
+    fn snapshot_memory_events_round_trip_through_native_owner_reader() {
+        let agent_key = buzz_agent_controller::Secret::generate().unwrap();
+        let agent = agent_key.pubkey().to_owned();
+        let owner_bytes = [2; 32];
+        let owner = signed_event(&owner_bytes, 1, vec![], String::new()).pubkey;
+        let events = [
+            ("core", "private fixture core"),
+            ("mem/one", "private fixture entry"),
+        ]
+        .into_iter()
+        .map(|(slug, body)| {
+            Some(
+                agent_key
+                    .memory_event(&owner, slug, body, 1_700_000_001)
+                    .unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+        let listing =
+            decode_memories_with_key(&owner_bytes, &owner, &owner, &agent, &events).unwrap();
+        assert_eq!(listing["partial"], false);
+        assert_eq!(listing["entries"][0]["body"], "private fixture core");
+        assert_eq!(listing["entries"][1]["body"], "private fixture entry");
+        assert_ne!(agent, owner);
+    }
+
+    #[test]
     fn encrypted_memory_and_observer_fixtures() {
         let (viewer_secret, viewer) = fixture();
         let agent_secret = [2; 32];
@@ -908,9 +948,22 @@ mod tests {
             decode_observer_with_key(&viewer_secret, &viewer, &observer).unwrap()["agent"],
             agent
         );
+        let mut historical = observer.clone();
+        historical.created_at -= 3600;
+        resign(&mut historical, &agent_secret);
+        assert!(decode_observer_with_key(&viewer_secret, &viewer, &historical).is_err());
+        assert_eq!(
+            decode_archive(&viewer_secret, &viewer, &historical, true).unwrap()["plaintext"],
+            r#"{"type":"status","message":"active"}"#
+        );
+        assert!(decode_archive(&viewer_secret, &agent, &historical, true).is_err());
+        historical.created_at -= 90 * 24 * 60 * 60;
+        resign(&mut historical, &agent_secret);
+        assert!(decode_archive(&viewer_secret, &viewer, &historical, true).is_err());
         observer.tags.push(vec!["p".into(), viewer.clone()]);
         resign(&mut observer, &agent_secret);
         assert!(decode_observer_with_key(&viewer_secret, &viewer, &observer).is_err());
+        assert!(decode_archive(&viewer_secret, &viewer, &observer, true).is_err());
     }
 
     #[test]

@@ -14,12 +14,12 @@ import { createServer, type RequestListener } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { ViteDevServer } from "vite";
 import { afterEach, expect, it, vi } from "vitest";
-import { relayBrokerPlugin } from "../../../dev/relay-broker.mjs";
-import { AgentCard } from "../../bundled/agents/AgentCard";
-import { controlFixture } from "../agents/control-testing";
+import { relayBrokerPlugin } from "../../../browser-host/relay-broker.mjs";
 import { keypair } from "../relay/testing";
-import { AgentEditor } from "../../bundled/agents/AgentEditor";
-import { createAgentControl } from "../agents/control";
+import { Avatar } from "../../shared/design-system/ui/Avatar";
+import { ToastProvider } from "../../shared/design-system/ui/Toast";
+import { AvatarEditor } from "./AvatarEditor";
+import { useAvatarPreview } from "./use-avatar-preview";
 
 const community = "https://unjoined.example";
 const picture = `${community}/media/avatar.png`;
@@ -30,40 +30,28 @@ function deferred() {
   });
   return { promise, resolve };
 }
-function preview(
-  kind: "card" | "editor" | "display-only",
-  value = picture,
-  relay = community,
-) {
-  const fixture = controlFixture();
-  const agent = { ...fixture.agent, picture: value, relayUrl: relay };
-  if (kind !== "card") {
-    return (
-      <AgentEditor
-        agent={agent}
-        control={createAgentControl(fixture.host)}
-        state={{
-          status: "ready",
-          busy: false,
-          error: null,
-          data: {
-            ...fixture.data,
-            agents: [agent],
-            avatarEditingAvailable: kind === "editor",
-          },
-        }}
-        onClose={() => {}}
-      />
-    );
-  }
-  return <AgentCard name="Agent" identities={[]} editable={[agent]} />;
+function Card({ value, relay }: { value: string; relay: string }) {
+  const src = useAvatarPreview(value, relay);
+  return <Avatar src={src} alt="Agent" fallback="Agent" />;
+}
+function preview(kind: "card" | "editor", value = picture, relay = community) {
+  return kind === "card" ? (
+    <Card value={value} relay={relay} />
+  ) : (
+    <AvatarEditor
+      value={value}
+      name="Agent"
+      community={relay}
+      onChange={() => {}}
+    />
+  );
 }
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-it.each(["card", "editor", "display-only"] as const)(
+it.each(["card", "editor"] as const)(
   "%s registers a persisted avatar destination on a fresh production broker before exposing its image",
   async (kind) => {
     const identity = keypair();
@@ -74,6 +62,7 @@ it.each(["card", "editor", "display-only"] as const)(
     let handler: RequestListener | undefined;
     const server = createServer((req, res) => handler?.(req, res));
     const plugin = relayBrokerPlugin({
+      archiveFile: ":memory:",
       identity: () => identity.secret,
       upstreamFetch: upstream,
     });
@@ -109,7 +98,7 @@ it.each(["card", "editor", "display-only"] as const)(
     try {
       expect((await nativeFetch(`${base}${brokerUrl}`)).status).toBe(400);
       expect(upstream).not.toHaveBeenCalled();
-      render(preview(kind));
+      render(preview(kind), { wrapper: ToastProvider });
       await act(async () => {
         await started.promise;
       });

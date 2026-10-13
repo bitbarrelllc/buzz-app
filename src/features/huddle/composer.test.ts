@@ -1,4 +1,17 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import {
+  act,
+  cleanup as cleanupReact,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { createElement } from "react";
+import { MessageComposer } from "../messages/MessageComposer";
+import { composerDOMFixture } from "../messages/composer-testing";
+import { followupDraft } from "../messages/mention-draft";
 import { afterEach, expect, it, vi } from "vitest";
 import { communityFromScope, relayGifRequests } from "../relay/gifs";
 import { createRelaySession } from "../relay/session";
@@ -7,8 +20,10 @@ import { createHuddleComposerOwner } from "./composer-owner";
 import { createHuddleComposerClient } from "./composer-client";
 import type { ComposerCommand, ComposerResponse } from "./composer-contract";
 
+composerDOMFixture();
 const cleanup: (() => void)[] = [];
 afterEach(() => {
+  cleanupReact();
   for (const fn of cleanup.splice(0).reverse()) fn();
   localStorage.clear();
   vi.restoreAllMocks();
@@ -78,6 +93,7 @@ function harness(legacy = false) {
   };
   return {
     owner,
+    session,
     disableEmoji: () => {
       emojiEnabled = false;
     },
@@ -111,7 +127,10 @@ it("keeps drafts on rejection, clears persisted accepted intent in main, and ref
   await expect(remote.messages.send("room", "Hello")).resolves.toBe(
     "accepted-id",
   );
-  expect(readView(h.scope, "draft:room", null)).toBe("");
+  expect(readView(h.scope, "draft:room", null)).toEqual({
+    text: "",
+    recipients: [],
+  });
   await remote.agentChoices.refresh();
   expect(h.refresh).toHaveBeenCalledWith(true);
   h.revoke();
@@ -165,9 +184,15 @@ it("clears admitted drafts even when the child closes before acknowledgment and 
     args: { ...command.args, text: next.text, draft: JSON.stringify(next) },
   });
   await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
-  expect(readView(h.scope, "draft:room", null)).toBe("");
+  expect(readView(h.scope, "draft:room", null)).toEqual({
+    text: "",
+    recipients: [],
+  });
   const { remote } = await h.connect();
-  expect(readView(h.scope, "draft:room", null)).toBe("");
+  expect(readView(h.scope, "draft:room", null)).toEqual({
+    text: "",
+    recipients: [],
+  });
   await expect(remote.messages.send("other", "Wrong room")).rejects.toThrow(
     "destination changed",
   );
@@ -265,5 +290,56 @@ it.each(["cancel", "close"])(
     await expect(
       next.gifs.search("https://example.test", "again"),
     ).resolves.toEqual([]);
+  },
+);
+
+it.each([false, true])(
+  "preserves the real owner's remembered-agent followup and concurrent drafts (changed=%s)",
+  async (changed) => {
+    const h = harness();
+    const agent = { pubkey: "ef".repeat(32), name: "Helper" };
+    const profiles = new Map([
+      [agent.pubkey, { ...agent, isAgent: true as const }],
+    ]);
+    h.session.profiles = { ...h.session.profiles, snapshot: () => profiles };
+    h.session.channels.get().members.push(agent.pubkey);
+    const draft = followupDraft([agent]);
+    writeView(h.scope, "draft:room", draft);
+    const { remote } = await h.connect();
+    const sent = vi.fn();
+    const newer = { text: "New work from another editor", recipients: [] };
+    if (changed)
+      h.send.mockImplementationOnce(() => {
+        writeView(h.scope, "draft:room", newer);
+        return "accepted-id";
+      });
+    render(
+      createElement(MessageComposer, {
+        session: remote,
+        scope: h.scope,
+        channelId: "room",
+        channelName: "Huddle",
+        label: "Huddle draft",
+        onSend: sent,
+      }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Huddle draft" });
+    await waitFor(() => expect(editor).toHaveTextContent("Helper"));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sent).toHaveBeenCalledWith("accepted-id"));
+    await act(async () => {});
+    expect(readView(h.scope, "draft:room", null)).toEqual(
+      changed ? newer : draft,
+    );
+    expect(editor).toHaveTextContent(changed ? newer.text : "Helper");
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.send).toHaveBeenCalledWith(
+      "room",
+      expect.any(String),
+      [agent.pubkey],
+      [],
+      undefined,
+      [],
+    );
   },
 );

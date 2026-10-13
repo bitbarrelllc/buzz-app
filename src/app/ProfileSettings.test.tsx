@@ -110,7 +110,7 @@ it("loads and publishes the selected community profile before updating the local
     picture: "",
     about: "Community bio",
   });
-  expect(screen.getByText("Profile updated")).toBeVisible();
+  expect(await screen.findByText("Profile updated")).toBeVisible();
   expect(inspect).toHaveBeenCalledWith("community-id");
 });
 
@@ -298,7 +298,7 @@ it("edits and trims the profile description with a visible limit", async () => {
     picture: "",
     about: "Building with Buzz",
   });
-  expect(screen.getByText("Profile updated")).toBeVisible();
+  expect(await screen.findByText("Profile updated")).toBeVisible();
 });
 
 it("preserves an over-limit remote description and blocks unrelated saves", async () => {
@@ -367,10 +367,10 @@ it("shows exact public identity formats and copies either value", async () => {
     wrapper: ToastProvider,
   });
 
-  expect(screen.getByLabelText("Public key (hex)")).toHaveValue(viewer);
-  expect(screen.getByLabelText("Nostr address (npub)")).toHaveValue(
-    npubEncode(viewer),
-  );
+  expect(screen.getByText(viewer, { exact: true })).toHaveTextContent(viewer);
+  expect(
+    screen.getByText(npubEncode(viewer), { exact: true }),
+  ).toHaveTextContent(npubEncode(viewer));
 
   await user.click(screen.getByRole("button", { name: "Copy public key" }));
   expect(writeText).toHaveBeenLastCalledWith(viewer);
@@ -421,13 +421,16 @@ it("keeps the identity selectable and explains manual recovery when copy fails",
     wrapper: ToastProvider,
   });
 
-  const publicKey = screen.getByLabelText("Public key (hex)");
+  const publicKey = screen.getByText(viewer, { exact: true });
   await user.click(screen.getByRole("button", { name: "Copy public key" }));
   expect(screen.getByText(/Select it and copy manually\./)).toBeVisible();
 
-  await user.click(publicKey);
-  expect((publicKey as HTMLInputElement).selectionStart).toBe(0);
-  expect((publicKey as HTMLInputElement).selectionEnd).toBe(viewer.length);
+  // Native text selection is exercised in both browser engines.
+  expect(publicKey.tagName).toBe("CODE");
+  expect(publicKey).toHaveTextContent(viewer);
+  expect(
+    screen.queryByRole("textbox", { name: "Public key (hex)" }),
+  ).toBeNull();
 });
 
 function setup() {
@@ -492,7 +495,7 @@ it("shows Cancel then Save only for edits, including picture edits, and restores
   expect(saveProfile).not.toHaveBeenCalled();
 });
 
-it("retains edits on failure and hides actions after a successful retry", () => {
+it("retains edits on failure and hides actions after a successful retry", async () => {
   const { name, saveProfile } = setup();
   fireEvent.change(name, { target: { value: "Updated" } });
   saveProfile.mockImplementationOnce(() => {
@@ -505,7 +508,7 @@ it("retains edits on failure and hides actions after a successful retry", () => 
   expect(
     screen.queryByRole("button", { name: "Save" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByText("Profile updated")).toBeVisible();
+  expect(await screen.findByText("Profile updated")).toBeVisible();
 });
 
 it("keeps cancel available for invalid edits and refuses unchanged form submission", () => {
@@ -636,11 +639,11 @@ it("keeps identity details available without requesting a community profile when
   expect(
     screen.getByText("Community profiles are not available in this build yet."),
   ).toBeVisible();
-  expect(screen.getByLabelText("Nostr address (npub)")).toHaveValue(
-    npubEncode(viewer),
-  );
   expect(
-    screen.getByText(/same identity across all communities/),
+    screen.getByText(npubEncode(viewer), { exact: true }),
+  ).toHaveTextContent(npubEncode(viewer));
+  expect(
+    screen.getByText(/identity is shared across communities/),
   ).toBeVisible();
   expect(inspect).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Save" })).toBeNull();

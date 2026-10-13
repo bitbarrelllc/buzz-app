@@ -1,13 +1,10 @@
-import { useState } from "react";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "nostr-tools/utils";
-import { AgentSelection } from "../../src/bundled/channel-templates/TemplateFields";
-import { Dialog } from "../../src/shared/design-system/ui/Dialog";
-import { Button } from "../../src/shared/design-system/ui/Button";
 import { ToastProvider } from "../../src/shared/design-system/ui/Toast";
 import { createRoot } from "react-dom/client";
 import { ChannelMembersButton } from "../../src/bundled/channels/ChannelMembersDialog";
 import { createRelaySession } from "../../src/features/relay/session";
+import { PublishRejected } from "../../src/features/relay/outbox";
 import { matchesEvent } from "../../src/features/relay/projection";
 import { bindNames } from "../../src/features/identity-names/service";
 import { createNameProvider } from "../../src/features/identity-names/directory";
@@ -20,6 +17,12 @@ import {
 } from "../../src/features/relay/testing";
 import "../../src/shared/styles/globals.css";
 
+const administration = new URLSearchParams(location.search).has(
+  "administration",
+);
+const rejectRemoval = new URLSearchParams(location.search).has(
+  "reject-removal",
+);
 const viewer = keypair();
 const relay = keypair();
 const person = keypair();
@@ -38,13 +41,6 @@ const namesReady = new Promise<void>((resolve) => {
   releaseNames = resolve;
 });
 let namesRequested = false;
-// A team long enough to scroll inside its dialog.
-const team = new URLSearchParams(location.search).has("team")
-  ? Array.from({ length: 12 }, (_, index) => ({
-      pubkey: keypair().pubkey,
-      name: `Agent ${index + 1}`,
-    }))
-  : [{ pubkey: person.pubkey, name: "Morgan" }];
 const additions: string[] = [];
 const channelId = "11111111-1111-4111-8111-111111111111";
 // Only the scroll-dismissal journey needs an overflowing roster.
@@ -97,6 +93,7 @@ const managedProfiles = await Promise.all(
 );
 const members = [
   viewer.pubkey,
+  ...(administration ? [person.pubkey] : []),
   ...scrollMembers.map(({ key }) => key.pubkey),
   ...managed.map(({ key }) => key.pubkey),
 ];
@@ -139,7 +136,33 @@ const { session: sharedSession } = createRelaySession(
         await namesReady;
       }
       return [
-        roster(relay, channelId, members, clock),
+        ...(administration
+          ? [
+              signed(relay, {
+                kind: 39001,
+                created_at: clock,
+                content: "",
+                tags: [
+                  ["d", channelId],
+                  ["p", viewer.pubkey, "owner"],
+                ],
+              }),
+              signed(relay, {
+                kind: 39002,
+                created_at: clock,
+                content: "",
+                tags: [
+                  ["d", channelId],
+                  ...members.map((key) => [
+                    "p",
+                    key,
+                    "",
+                    key === viewer.pubkey ? "owner" : "member",
+                  ]),
+                ],
+              }),
+            ]
+          : [roster(relay, channelId, members, clock)]),
         signed(relay, {
           kind: 39000,
           content: "",
@@ -158,6 +181,22 @@ const { session: sharedSession } = createRelaySession(
         filters.some((filter) => matchesEvent(event, filter)),
       );
     },
+    ...(administration
+      ? {
+          memberAdministration: {
+            sign: async (template: import("nostr-tools").EventTemplate) =>
+              signed(viewer, template),
+            publish: async () => {
+              publishStarted();
+              await held;
+              if (rejectRemoval)
+                throw new PublishRejected("Permission changed");
+              members.splice(members.indexOf(person.pubkey), 1);
+              clock++;
+            },
+          },
+        }
+      : {}),
     writer: {
       kinds: [9000],
       sign: async (template) => signed(viewer, template),
@@ -206,8 +245,6 @@ session.channels.ensureList();
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing fixture root");
 function Fixture() {
-  const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
   return (
     <ToastProvider>
       <ChannelMembersButton
@@ -216,15 +253,6 @@ function Fixture() {
         canOpenLink={() => true}
         onOpenLink={() => true}
       />
-      <Button onClick={() => setOpen(true)}>Edit team</Button>
-      <Dialog open={open} onOpenChange={setOpen} title="Team">
-        <AgentSelection
-          session={session}
-          selected={selected}
-          onChange={setSelected}
-          agents={team}
-        />
-      </Dialog>
     </ToastProvider>
   );
 }

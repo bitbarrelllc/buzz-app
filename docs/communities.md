@@ -77,9 +77,13 @@ owns or administers the selected community and this build can mint invites,
 with the role read from the relay-signed roster through the selected
 community's existing session rather than a further session request. The
 Membership settings card applies the same role gate in both development and
-native builds. Native owners and admins can read the relay-signed member list
-and mint invite links, but direct additions and per-member actions remain absent:
-the packaged adapter does not carry the broker's `member` route. Copy,
+native builds. Owners and admins in both builds read the relay-signed member
+list, mint invite links, add members directly and change or remove members. Each
+change is one NIP-43 command (kind 9030 add, 9031 remove, 9032 role) signed by
+the viewer: the broker signs it in development, and the native host signs only
+that exact shape and posts it to the relay's `/events`. The relay alone decides
+authority; the client offers only the actions its matrix would allow, shows its
+listed refusals verbatim and re-reads the roster after an accepted change. Copy,
 Community settings and Leave work on inactive communities without opening their
 sessions. Leave asks for confirmation, then sends a signed NIP-43 leave request
 (kind 28936) to that community's relay before the device forgets it. Three
@@ -110,7 +114,10 @@ community origin and viewer; channel IDs alone are not sufficient keys.
 ## Session lifetime
 
 Selecting a saved membership lazily acquires its session. Sessions survive page
-navigation and switching; startup opens only the selected one. Opened communities
+navigation and switching; startup opens only the selected one. Once its agent
+list loads, Agents also opens each joined community where the viewer has an
+agent, through `open`, which connects without selecting so those agents keep
+running, and retries one whose connection failed while it is not selected. Opened communities
 retain their existing per-session query/cache budgets. Arbitrary destinations mean
 there is **no longer a two-session maximum**: retained session count grows with
 communities opened until app disposal. This slice does not add background eviction
@@ -135,8 +142,7 @@ discovery, admission, leave requests, profile publication, authenticated reads a
 supported event writes. Native invite minting and relay-advertised KLIPY GIF search
 use the same captured HTTPS community; neither requires the development broker.
 Windows/Linux installed-app acceptance remains unverified. Community creation and
-background connection eviction are not implemented. Native agent enrollment has
-its own [local control contract](agent-control.md). Avatar uploads still require
+background connection eviction are not implemented. Avatar uploads still require
 the development media host. Agents have local
 configuration plus separately scoped participation; selecting a community must
 not become a deployment or enrollment command.

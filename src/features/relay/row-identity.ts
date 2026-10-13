@@ -21,11 +21,14 @@ function sameRow(left: ChannelMessage, right: ChannelMessage) {
     left.delivery === right.delivery &&
     left.deliveryError === right.deliveryError &&
     left.authorId === right.authorId &&
+    left.signerId === right.signerId &&
+    left.workflowOwnerId === right.workflowOwnerId &&
     left.createdAt === right.createdAt &&
     left.createdAtMs === right.createdAtMs &&
     left.content === right.content &&
     left.sourceContent === right.sourceContent &&
     left.agentEnvelope === right.agentEnvelope &&
+    left.audience === right.audience &&
     !!left.diff === !!right.diff &&
     left.diff?.filePath === right.diff?.filePath &&
     left.diff?.repoUrl === right.diff?.repoUrl &&
@@ -36,8 +39,8 @@ function sameRow(left: ChannelMessage, right: ChannelMessage) {
     left.membership?.actor === right.membership?.actor &&
     left.membership?.target === right.membership?.target &&
     left.edited === right.edited &&
-    left.attachmentContentRemoved === right.attachmentContentRemoved &&
     left.attachmentSourceId === right.attachmentSourceId &&
+    sameArray(left.attachmentSeams, right.attachmentSeams) &&
     sameArray(left.mentions, right.mentions) &&
     sameArray(left.mentionReferences ?? [], right.mentionReferences ?? []) &&
     sameArray(
@@ -50,6 +53,8 @@ function sameRow(left: ChannelMessage, right: ChannelMessage) {
         a.size === b.size &&
         a.name === b.name &&
         a.duration === b.duration &&
+        a.voiceNote === b.voiceNote &&
+        sameArray(a.waveform, b.waveform) &&
         a.dimensions?.width === b.dimensions?.width &&
         a.dimensions?.height === b.dimensions?.height &&
         a.blurhash === b.blurhash &&

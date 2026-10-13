@@ -1,22 +1,26 @@
-import {
-  useEffect,
-  useId,
-  useState,
-  type RefObject,
-  type ReactNode,
-} from "react";
+import { useEffect, type RefObject, type ReactNode } from "react";
 import type { ChatCircleIcon } from "../../shared/design-system/icons/index";
+import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { NavigationSection } from "../../shared/design-system/ui/NavigationSection";
 import { SearchField } from "../../shared/design-system/ui/SearchField";
 import { isApplePlatform } from "../../features/shortcuts/format";
+import { MatchedLabel } from "../../features/search/MatchedLabel";
+import { useSearchHighlight } from "../../features/search/use-search-highlight";
+import { PageIcon } from "./PageIcon";
 import "./SearchChoices.css";
 
 export type SearchDestination = {
   key: string;
   label: string;
   detail?: string;
+  /** Code points of `label` that match the typed text. */
+  matches?: readonly number[];
   icon: typeof ChatCircleIcon;
+  image?: string | undefined;
+  avatar?:
+    | { src?: string | undefined; shape: "circle" | "squircle" }
+    | undefined;
   run: () => void;
 };
 
@@ -27,12 +31,20 @@ export type SearchInputProps = {
   label?: string;
   placeholder?: string | undefined;
   scope?: { label: string; onRemove: () => void } | undefined;
+  authorChip?:
+    | { label: string; title: string; onRemove: () => void }
+    | undefined;
+  displayQuery?: string | undefined;
+  onDisplayQueryChange?: ((value: string) => void) | undefined;
 };
 
 export function SearchChoices({
   groups,
   query,
   onQueryChange,
+  authorChip,
+  displayQuery,
+  onDisplayQueryChange,
   input,
   label = "Search Buzz",
   placeholder = "Search pages, conversations and messages…",
@@ -46,33 +58,26 @@ export function SearchChoices({
   }[];
   children?: ReactNode;
 }) {
-  const id = useId();
   const destinations = groups.flatMap((group) => group.destinations);
   const apple = isApplePlatform(navigator.platform);
   const shortcutNumbers = new Map(
     destinations.slice(0, 9).map(({ key }, index) => [key, index + 1]),
   );
-  // Follow a destination's identity, not its index, as relay results arrive.
-  // Clear removed choices immediately so a later reappearance cannot reactivate one.
-  const [selection, setSelection] = useState({ query, key: "" });
-  const valid =
-    selection.query === query &&
-    destinations.some(({ key }) => key === selection.key);
-  if (selection.query !== query || (selection.key && !valid))
-    setSelection({ query, key: "" });
-  const selected = valid ? selection.key : "";
-  const optionId = (key: string) => `${id}-${key}`;
+  const highlight = useSearchHighlight({
+    query,
+    keys: destinations.map(({ key }) => key),
+    onChoose: (key) => destinations.find((row) => row.key === key)?.run(),
+  });
+  const selected = highlight.active;
   useEffect(() => {
     input.current?.focus();
   }, [input]);
-  useEffect(() => {
-    if (selected)
-      document
-        .getElementById(`${id}-${selected}`)
-        ?.scrollIntoView({ block: "nearest" });
-  }, [selected, id]);
   return (
-    <div className="search-palette" data-search-palette="">
+    <div
+      className="search-palette"
+      data-search-palette=""
+      {...highlight.listProps}
+    >
       {scope && (
         <button
           type="button"
@@ -84,16 +89,31 @@ export function SearchChoices({
         </button>
       )}
       <SearchField
+        prefix={
+          authorChip ? (
+            <span className="search-palette-author-prefix">
+              <button
+                type="button"
+                className="search-palette-author-chip"
+                aria-label={`Remove author ${authorChip.label}`}
+                title={authorChip.title}
+                onClick={authorChip.onRemove}
+              >
+                <span aria-hidden="true">×</span> from:@{authorChip.label}
+              </button>
+            </span>
+          ) : undefined
+        }
         inputRef={input}
         role="combobox"
-        aria-controls={id}
+        aria-controls={highlight.listId}
         aria-expanded="true"
         aria-autocomplete="list"
-        aria-activedescendant={selected ? optionId(selected) : undefined}
+        {...highlight.fieldProps}
         label={label}
         placeholder={placeholder}
-        value={query}
-        onValueChange={onQueryChange}
+        value={displayQuery ?? query}
+        onValueChange={onDisplayQueryChange ?? onQueryChange}
         spellCheck={false}
         autoCorrect="off"
         autoCapitalize="off"
@@ -117,42 +137,12 @@ export function SearchChoices({
             }
             return;
           }
-          if (
-            event.nativeEvent.isComposing ||
-            event.nativeEvent.keyCode === 229 ||
-            event.metaKey ||
-            event.ctrlKey ||
-            event.altKey
-          )
-            return;
-          const index = destinations.findIndex(({ key }) => key === selected);
-          if (event.key === "Enter" && index >= 0) {
-            event.preventDefault();
-            destinations[index]?.run();
-          } else if (
-            (event.key === "ArrowDown" || event.key === "ArrowUp") &&
-            destinations.length
-          ) {
-            event.preventDefault();
-            const next =
-              index < 0
-                ? event.key === "ArrowDown"
-                  ? 0
-                  : destinations.length - 1
-                : Math.max(
-                    0,
-                    Math.min(
-                      destinations.length - 1,
-                      index + (event.key === "ArrowDown" ? 1 : -1),
-                    ),
-                  );
-            setSelection({ query, key: destinations[next]?.key ?? "" });
-          }
+          highlight.keyDown(event);
         }}
       />
       <div className="search-palette-scroll">
         <div
-          id={id}
+          id={highlight.listId}
           role="listbox"
           aria-label="Search results"
           className="search-palette-results"
@@ -172,10 +162,19 @@ export function SearchChoices({
               >
                 <NavigationSection label={label}>
                   {destinations.map(
-                    ({ key, label, detail, icon: Icon, run }) => (
+                    ({
+                      key,
+                      label,
+                      detail,
+                      matches,
+                      icon,
+                      image,
+                      avatar,
+                      run,
+                    }) => (
                       <NavigationItem
                         key={key}
-                        id={optionId(key)}
+                        {...highlight.rowProps(key)}
                         role="option"
                         tabIndex={-1}
                         aria-selected={selected === key}
@@ -189,13 +188,23 @@ export function SearchChoices({
                         }
                         icon={
                           <span className="grid size-6 shrink-0 place-items-center">
-                            <Icon size={17} aria-hidden="true" />
+                            {avatar ? (
+                              <Avatar
+                                alt=""
+                                fallback={label}
+                                src={avatar.src}
+                                size="small"
+                                shape={avatar.shape}
+                              />
+                            ) : (
+                              <PageIcon icon={icon} image={image} size={17} />
+                            )}
                           </span>
                         }
                         label={
                           <>
                             <span className="block truncate text-body-sm">
-                              {label}
+                              <MatchedLabel label={label} positions={matches} />
                             </span>
                             {detail && (
                               <span className="block truncate text-caption text-subtle">
@@ -205,10 +214,6 @@ export function SearchChoices({
                           </>
                         }
                         onClick={run}
-                        onPointerEnter={(event) => {
-                          if (event.pointerType !== "touch")
-                            setSelection({ query, key });
-                        }}
                       />
                     ),
                   )}

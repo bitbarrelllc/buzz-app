@@ -1,11 +1,24 @@
+import { workflowOwner } from "../../features/relay/workflow-attribution";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { objectBody } from "../../features/relay/body";
 import type { RelaySession } from "../../features/relay/session";
+import type { ReadFilter } from "../../features/relay/events";
+import { foldProfiles } from "../../features/relay/profiles";
+import { normalizeName } from "../../features/search/person-match";
+import {
+  isHexPubkey,
+  normalizeFromHandle,
+  normalizeInChannel,
+  parseSearchOperators,
+} from "./parseSearchOperators";
+
+const noAgentNames: ReadonlyMap<string, string> = new Map();
 
 export type SearchMessage = Readonly<{
   id: string;
   channelId: string;
   authorId: string;
+  workflowOwnerId?: string | undefined;
   createdAt: number;
   preview: string;
 }>;
@@ -13,6 +26,7 @@ type Result = {
   owner: object;
   messages: readonly SearchMessage[];
   error?: string;
+  ambiguousAuthor?: boolean;
 };
 
 /** Finite, ranked results belong to this open palette, not a retained event view. */
@@ -20,6 +34,11 @@ export function useSearchMessages(
   session: RelaySession,
   query: string,
   scopedChannelId?: string,
+  operatorChannelId?: string | null,
+  /** Selectable agents' own names, by public key. The author picker matches
+   * an agent by its own name too, so a completed author name resolves the
+   * same way. */
+  agentNames: ReadonlyMap<string, string> = noAgentNames,
 ) {
   const ordinaryChannel = useCallback(
     (id: string, includePending = false) => {
@@ -32,11 +51,35 @@ export function useSearchMessages(
     },
     [session],
   );
+  const parsed = useMemo(() => parseSearchOperators(query), [query]);
+  // Rerun the search only when the names change, not on every new map.
+  const agentKey = JSON.stringify([...agentNames]);
+  const agents = useMemo(
+    () => new Map<string, string>(JSON.parse(agentKey)),
+    [agentKey],
+  );
+  const channelId = scopedChannelId ?? operatorChannelId;
+  const unresolvedChannel =
+    !scopedChannelId &&
+    !!(parsed.in && normalizeInChannel(parsed.in)) &&
+    !channelId;
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<Result>();
+  const hasFilters =
+    !!(parsed.from && normalizeFromHandle(parsed.from)) ||
+    !!(parsed.in && normalizeInChannel(parsed.in)) ||
+    parsed.since !== null ||
+    parsed.until !== null;
+  // An unfinished author token is an identity prompt, not free-text search.
+  // Both from:name and from:@name take the same picker path until an exact key
+  // is selected (or the token is completed with a space).
+  const unfinishedAuthor = /(?:^|\s)from:(@?)([^\s]*)$/i.exec(query);
+  const canSearch =
+    !(unfinishedAuthor && !isHexPubkey(unfinishedAuthor[2] ?? "")) &&
+    (!!parsed.text || hasFilters);
   const owner = useMemo(
-    () => ({ session, query, scopedChannelId, attempt }),
-    [session, query, scopedChannelId, attempt],
+    () => ({ session, query, channelId, unresolvedChannel, attempt }),
+    [session, query, channelId, unresolvedChannel, attempt],
   );
   // The copied result changes synchronously even if React has not committed it yet.
   const copied = useRef<Result | undefined>(undefined);
@@ -61,34 +104,121 @@ export function useSearchMessages(
     [session, replace, ordinaryChannel],
   );
   useEffect(() => {
-    if (!query) return;
+    if (!canSearch || unresolvedChannel) return;
     const controller = new AbortController();
     // Typeahead waits for a brief typing pause; cancellation also owns the delay.
     const timer = setTimeout(() => {
-      void session
-        .read(
-          [
-            {
-              kinds: [9, 40002, 40008],
-              search: query,
-              search_mode: "prefix",
-              limit: 20,
-              ...(scopedChannelId ? { "#h": [scopedChannelId] } : {}),
-            },
-          ],
-          { signal: controller.signal, priority: "foreground", fresh: true },
-        )
-        .then((events) => {
+      void (async (): Promise<{
+        events: Awaited<ReturnType<typeof session.read>>;
+        ambiguousAuthor?: boolean;
+      }> => {
+        let author: string | undefined;
+        if (parsed.from) {
+          if (isHexPubkey(parsed.from)) {
+            author = parsed.from.toLowerCase();
+          } else {
+            const typed = normalizeFromHandle(parsed.from).trim();
+            const handle = normalizeName(typed);
+            if (!handle) return { events: [] };
+            const knownMembers = channelId
+              ? (session.channels.get?.(channelId)?.members ?? [])
+              : [];
+            if (knownMembers.length) {
+              await session.profiles.ensure(knownMembers, "foreground");
+              controller.signal.throwIfAborted();
+            }
+            // A key matches by its profile name or, for a selectable agent,
+            // by the agent's own name.
+            const named = (pubkey: string, profileName = "") =>
+              normalizeName(profileName) === handle ||
+              normalizeName(agents.get(pubkey) ?? "") === handle;
+            // Selectable agents are offered wherever the picker runs, so they
+            // are always candidates, alongside members or relay matches.
+            const agentMatches = [...agents.keys()].filter((pubkey) =>
+              named(pubkey, session.profiles.snapshot().get(pubkey)?.name),
+            );
+            const scoped = knownMembers.filter((pubkey) =>
+              named(pubkey, session.profiles.snapshot().get(pubkey)?.name),
+            );
+            const resolve = (keys: readonly string[]) => {
+              const unique = [...new Set(keys)];
+              if (unique.length > 1) return { ambiguous: true };
+              return { author: unique[0] };
+            };
+            if (scoped.length) {
+              const found = resolve([...scoped, ...agentMatches]);
+              if (found.ambiguous) return { events: [], ambiguousAuthor: true };
+              author = found.author;
+            } else {
+              // The signed kind-0 index is prefix-based and limited. A match
+              // outside its first page is unknown; duplicate names are ambiguous.
+              // The relay does not fold accents, so it gets the typed text.
+              const candidates = await session.read(
+                [
+                  {
+                    kinds: [0],
+                    search: typed.toLowerCase(),
+                    search_mode: "prefix",
+                    limit: 40,
+                  },
+                ],
+                {
+                  signal: controller.signal,
+                  priority: "foreground",
+                  fresh: true,
+                },
+              );
+              const matches = [...foldProfiles(candidates)]
+                .filter(
+                  ([pubkey, profile]) =>
+                    named(pubkey, profile.name) || pubkey === handle,
+                )
+                .map(([pubkey]) => pubkey);
+              const found = resolve([...matches, ...agentMatches]);
+              if (found.ambiguous) return { events: [], ambiguousAuthor: true };
+              author = found.author;
+            }
+            if (!author) return { events: [] };
+          }
+        }
+        // Revalidate public previews on every scoped read. Joined members are
+        // skipped by resolve; a retained public preview is not live authority.
+        if (channelId)
+          await session.channels.resolve?.([channelId], {
+            signal: controller.signal,
+            priority: "foreground",
+          });
+        if (channelId && !session.channels.get?.(channelId))
+          return { events: [] };
+        const filter: ReadFilter = {
+          kinds: [9, 40002, 40008],
+          ...(parsed.text
+            ? { search: parsed.text, search_mode: "prefix" as const }
+            : {}),
+          limit: 20,
+          ...(channelId ? { "#h": [channelId] } : {}),
+          ...(author ? { authors: [author] } : {}),
+          ...(parsed.since !== null ? { since: parsed.since } : {}),
+          ...(parsed.until !== null ? { until: parsed.until } : {}),
+        };
+        const events = await session.read([filter], {
+          signal: controller.signal,
+          priority: "foreground",
+          fresh: true,
+        });
+        return { events };
+      })()
+        .then(({ events, ambiguousAuthor }) => {
           if (controller.signal.aborted) return;
           const messages = events.flatMap((event): SearchMessage[] => {
             const destinations = event.tags.filter(([name]) => name === "h");
-            const channelId = destinations[0]?.[1];
+            const hitChannelId = destinations[0]?.[1];
             if (
               ![9, 40002, 40008].includes(event.kind) ||
               destinations.length !== 1 ||
-              !channelId ||
-              (scopedChannelId && channelId !== scopedChannelId) ||
-              !ordinaryChannel(channelId, true)
+              !hitChannelId ||
+              (channelId && hitChannelId !== channelId) ||
+              !ordinaryChannel(hitChannelId, true)
             )
               return [];
             // Search returns original indexed events, not an auxiliary edit fold.
@@ -104,8 +234,12 @@ export function useSearchMessages(
             return [
               {
                 id: event.id,
-                channelId,
+                channelId: hitChannelId,
                 authorId: event.pubkey,
+                workflowOwnerId: workflowOwner(
+                  event,
+                  session.workflowAuthority,
+                ),
                 createdAt: event.created_at,
                 preview:
                   text.replace(/\s+/g, " ").trim().slice(0, 240) ||
@@ -113,7 +247,11 @@ export function useSearchMessages(
               },
             ];
           });
-          replace({ owner, messages });
+          replace({
+            owner,
+            messages,
+            ...(ambiguousAuthor ? { ambiguousAuthor } : {}),
+          });
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted)
@@ -128,14 +266,26 @@ export function useSearchMessages(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [session, query, scopedChannelId, owner, replace, ordinaryChannel]);
+  }, [
+    canSearch,
+    session,
+    parsed,
+    channelId,
+    unresolvedChannel,
+    owner,
+    replace,
+    scopedChannelId,
+    agents,
+    ordinaryChannel,
+  ]);
   const current = result?.owner === owner ? result : undefined;
   return {
     messages: (current?.messages ?? []).filter((message) =>
       ordinaryChannel(message.channelId),
     ),
-    loading: !!query && !current,
+    loading: canSearch && !unresolvedChannel && !current,
     error: current?.error,
+    ambiguousAuthor: current?.ambiguousAuthor,
     retry: () => setAttempt((value) => value + 1),
   };
 }

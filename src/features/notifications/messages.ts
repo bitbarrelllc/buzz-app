@@ -91,7 +91,8 @@ export function bindMessageNotifications(
       for (const message of messages) {
         if (!valid()) return;
         const age = Date.now() - message.createdAt * 1000;
-        if (age < -30000 || age > 120000) continue;
+        // Coordination between agents never alerts people.
+        if (age < -30000 || age > 120000 || message.audience) continue;
         const attention = owned.unread.attention(
           message.channelId,
           message.messageId,
@@ -142,11 +143,12 @@ export function bindMessageNotifications(
               )
                 return "wait";
             }
+            const whileViewing =
+              notifications.snapshot().preferences.notifyWhileViewing;
             if (
               attention.status === "ineligible" ||
               (!attention.pending && attention.category !== category) ||
-              (!notifications.snapshot().preferences.notifyWhileViewing &&
-                attention.viewing)
+              (!whileViewing && attention.viewing)
             )
               return false;
             if (
@@ -157,7 +159,10 @@ export function bindMessageNotifications(
               attention.status === "unknown"
             )
               return "wait";
-            return attention.unread;
+            // The open view's reading dwell can mark the row read before
+            // presentation settles. With Notify while viewing, that read must
+            // not cancel the alert; a read row no longer in view stays quiet.
+            return attention.unread || (whileViewing && attention.viewing);
           },
           () =>
             messageNotificationText(
@@ -166,9 +171,11 @@ export function bindMessageNotifications(
               owned.channels
                 .list()
                 .channels.find((item) => item.id === message.channelId),
-              owned.profiles.snapshot().get(message.authorId),
+              owned.profiles
+                .snapshot()
+                .get(message.workflowOwnerId ?? message.authorId),
               owned.names.resolve(
-                message.authorId,
+                message.workflowOwnerId ?? message.authorId,
                 undefined,
                 owned.channels
                   .list()

@@ -119,9 +119,10 @@ it("keeps pill order from the first reaction when counts change", () => {
   ).toEqual(["❤️", "😂"]);
 });
 
-it("incremental channel projection applies delete-of-reaction and rolls back a failed deletion", () => {
+it("incremental channel projection applies delete-of-reaction and rejects an owner deletion of a reaction", () => {
   const mine = reaction(),
-    deletion = remove(mine);
+    deletion = remove(mine),
+    foreignDelete = remove(mine, other);
   const projection = new MessageProjection(
     "c",
     relay.pubkey,
@@ -130,6 +131,9 @@ it("incremental channel projection applies delete-of-reaction and rolls back a f
   expect(projection.reconcile([root, mine], [])[0]?.reactions).toHaveLength(1);
   expect(
     projection.reconcile([root, mine, remove(mine, other)], [])[0]?.reactions,
+  ).toHaveLength(1);
+  expect(
+    projection.reconcile([root, mine, foreignDelete], [])[0]?.reactions,
   ).toHaveLength(1);
   expect(
     projection.reconcile([root, mine, deletion], [])[0]?.reactions,
@@ -180,6 +184,125 @@ it("removal validates every loaded author and conversation before queuing one de
       ["e", mine.id],
       ["e", duplicate.id],
       ["k", "7"],
+    ],
+  });
+});
+
+it("requires matching viewer and agent identities to remove agent messages", () => {
+  const mine = reaction(),
+    agentReaction = reaction(other),
+    agentMessage = message(other, "c", "Agent message", 4);
+  const events = [root, mine, agentReaction, agentMessage];
+  const send = vi.fn(() => "operation");
+  const messages = createMessages(
+    {
+      ready: async () => {},
+      recover: async () => {},
+      acknowledge: async () => {},
+      supports: () => true,
+      send,
+      retry() {},
+      dismiss: async () => {},
+      snapshot: () => [],
+      subscribe: () => () => {},
+      observeSend: () => () => {},
+    },
+    viewer.pubkey,
+    (id) => events.find((item) => item.id === id),
+    () => [],
+    () => {},
+  );
+  const authorization = { agentId: other.pubkey, ownerId: viewer.pubkey };
+
+  expect(() => messages.remove([agentMessage.id])).toThrow(/Only your own/);
+  expect(() =>
+    messages.remove([agentMessage.id], {
+      ...authorization,
+      ownerId: other.pubkey,
+    }),
+  ).toThrow(/Only your own/);
+  expect(() =>
+    messages.remove([agentMessage.id], {
+      ...authorization,
+      agentId: viewer.pubkey,
+    }),
+  ).toThrow(/Only your own/);
+  expect(() => messages.remove([agentReaction.id], authorization)).toThrow(
+    /Only your own/,
+  );
+  expect(send).not.toHaveBeenCalled();
+
+  messages.remove([agentMessage.id], authorization);
+  expect(send).toHaveBeenCalledExactlyOnceWith({
+    kind: 5,
+    content: "",
+    tags: [
+      ["h", "c"],
+      ["e", agentMessage.id],
+      ["k", "9"],
+    ],
+  });
+});
+
+it("authorizes removal against the relay-attributed agent author, not the relay signer", () => {
+  const agent = keypair();
+  const attributed = signed(relay, {
+    kind: 9,
+    content: "Agent output",
+    created_at: 5,
+    tags: [
+      ["actor", agent.pubkey],
+      ["h", "c"],
+    ],
+  });
+  const forged = signed(other, {
+    kind: 9,
+    content: "Forged actor",
+    created_at: 6,
+    tags: [
+      ["actor", agent.pubkey],
+      ["h", "c"],
+    ],
+  });
+  const events = [attributed, forged];
+  const send = vi.fn(() => "operation");
+  const messages = createMessages(
+    {
+      ready: async () => {},
+      recover: async () => {},
+      acknowledge: async () => {},
+      supports: () => true,
+      send,
+      retry() {},
+      dismiss: async () => {},
+      snapshot: () => [],
+      subscribe: () => () => {},
+      observeSend: () => () => {},
+    },
+    viewer.pubkey,
+    (id) => events.find((item) => item.id === id),
+    () => [],
+    () => {},
+    undefined,
+    undefined,
+    undefined,
+    relay.pubkey,
+  );
+  const authorization = { agentId: agent.pubkey, ownerId: viewer.pubkey };
+
+  expect(() => messages.remove([forged.id], authorization)).toThrow(
+    /Only your own/,
+  );
+  expect(send).not.toHaveBeenCalled();
+
+  messages.remove([attributed.id], authorization);
+  expect(send).toHaveBeenCalledExactlyOnceWith({
+    kind: 5,
+    content: "",
+    tags: [
+      ["h", "c"],
+      ["e", attributed.id],
+      ["k", "9"],
     ],
   });
 });
@@ -324,3 +447,65 @@ it.each(["channel", "dm", "thread"])(
     expect(next.row()?.reactions).toEqual([]);
   },
 );
+
+it("real session publishes attributed-owner edits and deletion through its trusted authority", async () => {
+  const wire = scriptedTransport(viewer.pubkey, relay.pubkey);
+  let live!: LiveCallbacks;
+  const published: RelayEvent[] = [];
+  const owner = createRelaySession(
+    {
+      ...wire.transport,
+      archiveAuthority: relay.pubkey,
+      writer: {
+        sign: async (template) => signed(viewer, template),
+        publish: async (event) => {
+          published.push(event);
+        },
+      },
+      subscribe(callbacks) {
+        live = callbacks;
+        return { update() {}, retry() {}, dispose() {} };
+      },
+    },
+    { outboxStorage: { load: () => [], save() {} } },
+  );
+  owners.push(owner);
+  owner.session.channels.ensure("c");
+  const attributed = signed(relay, {
+    kind: 9,
+    content: "Original",
+    tags: [
+      ["h", "c"],
+      ["actor", viewer.pubkey],
+    ],
+  });
+  live.receive([roster(relay, "c", [viewer.pubkey], 1), attributed]);
+  expect(owner.session.channels.window("c").rows[0]?.authorId).toBe(
+    viewer.pubkey,
+  );
+  await owner.session.outbox?.ready();
+  const editId = owner.session.messages.edit(
+    attributed.id,
+    "Edited",
+    attributed.id,
+  );
+  await vi.waitFor(() =>
+    expect(published.some((event) => event.id === editId)).toBe(true),
+  );
+  const edit = published.find((event) => event.id === editId);
+  expect(edit).toMatchObject({ kind: 40003, pubkey: viewer.pubkey });
+  expect(edit?.tags).toContainEqual(["e", attributed.id]);
+  if (!edit) throw new Error("Missing published edit");
+  live.receive([edit]);
+  expect(owner.session.channels.window("c").rows[0]?.content).toBe("Edited");
+  const deletionId = owner.session.messages.remove([attributed.id]);
+  await vi.waitFor(() =>
+    expect(published.some((event) => event.id === deletionId)).toBe(true),
+  );
+  const deletion = published.find((event) => event.id === deletionId);
+  expect(deletion).toMatchObject({ kind: 5, pubkey: viewer.pubkey });
+  expect(deletion?.tags).toContainEqual(["e", attributed.id]);
+  if (!deletion) throw new Error("Missing published deletion");
+  live.receive([deletion]);
+  expect(owner.session.channels.window("c").rows).toEqual([]);
+});

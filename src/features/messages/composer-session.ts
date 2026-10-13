@@ -9,11 +9,19 @@ export type ComposerSession = Pick<
   "viewer" | "media" | "scope"
 > & {
   names?: import("../identity-names/service").IdentityNameView | undefined;
-  projects: Pick<RelaySession["projects"], "home" | "load">;
+  projects: Pick<RelaySession["projects"], "home" | "load" | "peekHome">;
   channels: Pick<
     RelaySession["channels"],
-    "list" | "subscribeList" | "get" | "window" | "ensureList" | "refreshList"
-  >;
+    | "list"
+    | "subscribeList"
+    | "get"
+    | "window"
+    | "ensureList"
+    | "refreshList"
+    | "searchPublic"
+    | "matchPublic"
+  > &
+    Partial<Pick<RelaySession["channels"], "subscribeWindow">>;
   profiles: RelaySession["profiles"];
   emoji: Pick<
     RelaySession["emoji"],

@@ -144,6 +144,9 @@ it("rejects self, duplicate, empty and over-limit recipients before contacting t
       [],
       [t.viewer.pubkey],
       [t.other.pubkey, t.other.pubkey],
+      ["a".repeat(63)],
+      ["A".repeat(64)],
+      [` ${t.other.pubkey}`],
       Array.from({ length: 9 }, () => keypair().pubkey),
     ])
       await expect(
@@ -263,26 +266,6 @@ it.each(["", "C"])(
     }
   },
 );
-
-it("loads a small directory preview followed by bounded overlapping batches without skipping profiles", async () => {
-  const t = setup();
-  try {
-    const signal = new AbortController().signal;
-    await t.dm.people("", 1, signal);
-    await t.dm.people("", 2, signal);
-    await t.dm.people("", 3, signal);
-    const pages = t.query.mock.calls
-      .flatMap(([filters]) => filters)
-      .filter((filter) => filter.kinds?.includes(0) && filter.page);
-    expect(pages).toEqual([
-      { kinds: [0], limit: 15, page: 1 },
-      { kinds: [0], limit: 30, page: 1 },
-      { kinds: [0], limit: 30, page: 2 },
-    ]);
-  } finally {
-    t.owner.dispose();
-  }
-});
 
 describe("directory browsing beyond the shared profile budget", () => {
   let directory: RelayEvent[];

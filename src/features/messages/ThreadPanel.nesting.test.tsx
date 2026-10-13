@@ -41,6 +41,8 @@ vi.mock("./MessageRow", () => ({
     </article>
   ),
 }));
+// A background send keeps the onSend from the render where Send happened.
+let heldSend: ((id: string) => void) | undefined;
 vi.mock("./MessageComposer", () => ({
   MessageComposer: ({
     replyContext,
@@ -53,9 +55,21 @@ vi.mock("./MessageComposer", () => ({
       <button type="button" disabled={disabled} onClick={() => onSend?.("new")}>
         Send fixture reply
       </button>
+      <button type="button" onClick={() => (heldSend = onSend)}>
+        Send fixture upload
+      </button>
     </section>
   ),
 }));
+// jsdom has no layout observer; browser resize behavior is covered in Playwright.
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe() {}
+    disconnect() {}
+  },
+);
+
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -192,6 +206,17 @@ it("targets a child, cancels on repeated Reply, resets after send and reveals th
   expect(screen.getByText("new")).toBeVisible();
   expect(composer).not.toHaveAttribute("data-parent");
   expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+});
+it("keeps a reply target chosen while a background send is still publishing", () => {
+  setup();
+  fireEvent.click(screen.getByRole("button", { name: "View 2 replies" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reply to parent" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send fixture upload" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reply to child" }));
+  const composer = screen.getByLabelText("Composer");
+  expect(composer).toHaveAttribute("data-parent", "child");
+  act(() => heldSend?.("new"));
+  expect(composer).toHaveAttribute("data-parent", "child");
 });
 it("reveals all available ancestors for a selected descendant, including late history", () => {
   const h = setup("grandchild");

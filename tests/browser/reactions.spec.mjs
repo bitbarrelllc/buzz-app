@@ -22,6 +22,16 @@ test("reaction plus opens a visible emoji-only picker, restores focus and publis
       exact: true,
     });
   // Every message exposes first-reaction controls, not just previously reacted rows.
+  const rows = page.locator("[data-message-id]");
+  await expect(rows).toHaveCount(6);
+  for (const row of await rows.all()) {
+    await row.hover();
+    await expect(
+      row
+        .getByRole("group", { name: "Message actions" })
+        .getByRole("button", { name: "Add reaction", exact: true }),
+    ).toBeVisible();
+  }
   await expect(
     page
       .getByRole("group", { name: "Message actions" })
@@ -198,6 +208,12 @@ test("reaction plus opens a visible emoji-only picker, restores focus and publis
     "party",
     "https://a.test/media/reaction.png",
   ]);
+  // The pointer is still on the pill, so its reactor preview opens and would
+  // sit over the row; leave the row before measuring the hovered actions.
+  await page.mouse.move(0, 0);
+  await expect(
+    page.locator('.buzz-preview-card[role="tooltip"][data-open]'),
+  ).toHaveCount(0);
   for (const width of [360, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await root.hover();

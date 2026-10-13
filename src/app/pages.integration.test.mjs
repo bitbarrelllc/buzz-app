@@ -46,7 +46,56 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
     );
     assert.notEqual(services.accountActions.snapshot()[0], firstFeedback);
     await settle();
-    assert.equal(services.pages.snapshot().length, 7);
+    assert.equal(services.pages.snapshot().length, 8);
+    const { bundledPlugins } = await vite.ssrLoadModule(
+      "/src/bundled/index.ts",
+    );
+    for (const plugin of bundledPlugins) {
+      assert.equal(
+        typeof plugin.enabledByDefault,
+        "boolean",
+        plugin.manifest.id,
+      );
+      assert.equal(
+        plugin.enabledByDefault,
+        !["buzz.bestie", "buzz.todos"].includes(plugin.manifest.id),
+        plugin.manifest.id,
+      );
+    }
+    assert.equal(
+      services.pages.snapshot().some((p) => p.pluginId === "buzz.bestie"),
+      false,
+    );
+    assert.equal(
+      services.panels.snapshot().some((p) => p.pluginId === "buzz.bestie"),
+      false,
+    );
+    const me = services.pages
+      .snapshot()
+      .find((page) => page.key === "buzz.me/me");
+    assert.equal(me.primary, true);
+    assert.equal(me.placement, "topbar");
+    assert.match(
+      renderToStaticMarkup(createElement(me.component)),
+      /Connect to a community to work with your agents\./,
+    );
+    const messages = services.pages
+      .snapshot()
+      .find((page) => page.key === "buzz.channels/channels");
+    assert.equal(messages.primary, true);
+    assert.equal(messages.placement, "topbar");
+    await services.plugins.change("disable", "buzz.me");
+    assert.equal(
+      services.pages.snapshot().some((page) => page.key === "buzz.me/me"),
+      false,
+    );
+    await services.plugins.change("enable", "buzz.me");
+    await vi.waitFor(() =>
+      assert.ok(
+        services.pages.snapshot().some((page) => page.key === "buzz.me/me"),
+      ),
+    );
+    await services.plugins.change("disable", "buzz.me");
     const inbox = services.pages
       .snapshot()
       .find((page) => page.pluginId === "buzz.inbox");
@@ -55,12 +104,59 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
     assert.equal(inbox.primary, true);
     assert.match(
       renderToStaticMarkup(createElement(inbox.component)),
-      /Content coming soon/,
+      /Choose a community to see your inbox/,
     );
-    assert.deepEqual(services.channelTemplates.snapshot(), []);
+    const unread = services.relay.snapshot().session.unread;
+    await services.plugins.change("disable", "buzz.inbox");
+    assert.equal(
+      services.pages.snapshot().some((page) => page.key === "buzz.inbox/inbox"),
+      false,
+    );
+    assert.equal(services.relay.snapshot().session.unread, unread);
+    await services.plugins.change("enable", "buzz.inbox");
+    await vi.waitFor(() =>
+      assert.ok(
+        services.pages
+          .snapshot()
+          .some((page) => page.key === "buzz.inbox/inbox"),
+      ),
+    );
     assert.deepEqual(
-      services.settingsCards.snapshot().map((card) => card.pluginId),
-      ["buzz.channels", "block.hosted-communities", "buzz.emoji"],
+      services.settingsCards
+        .snapshot()
+        .map((card) => card.pluginId)
+        .sort(),
+      [
+        "block.builderlab",
+        "block.hosted-communities",
+        "buzz.channels",
+        "buzz.channels",
+        "buzz.channels",
+        "buzz.emoji",
+        "buzz.pairing",
+      ],
+    );
+    // Messages owns thread placement through the plugin-settings boundary.
+    assert.equal(services.settingsCards.has("buzz.channels/messages"), true);
+    const messageSettings = services.settingsCards
+      .snapshot()
+      .find((card) => card.key === "buzz.channels/messages");
+    assert.equal(messageSettings.title, "Messages");
+    const pairingCard = services.settingsCards
+      .snapshot()
+      .find((card) => card.key === "buzz.pairing/mobile");
+    assert.ok(pairingCard);
+    await services.plugins.change("disable", "buzz.pairing");
+    assert.equal(services.settingsCards.has("buzz.pairing/mobile"), false);
+    await services.plugins.change("enable", "buzz.pairing");
+    await vi.waitFor(() =>
+      assert.ok(services.settingsCards.has("buzz.pairing/mobile")),
+    );
+    assert.notEqual(
+      services.settingsCards
+        .snapshot()
+        .find((card) => card.key === "buzz.pairing/mobile"),
+      pairingCard,
     );
     assert.equal(
       services.panels.snapshot().some((p) => p.pluginId === "buzz.todos"),
@@ -94,32 +190,28 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       firstTodos,
     );
     await services.plugins.change("disable", "buzz.todos");
-    await services.plugins.change("enable", "buzz.channel-templates");
-    await vi.waitFor(() =>
-      assert.equal(services.channelTemplates.snapshot().length, 1),
-    );
-    const originalTemplates = services.channelTemplates.snapshot()[0];
-    assert.ok(
+    assert.deepEqual(
       services.settingsCards
         .snapshot()
-        .some((card) => card.pluginId === "buzz.channel-templates"),
+        .map((card) => card.pluginId)
+        .sort(),
+      [
+        "block.builderlab",
+        "block.hosted-communities",
+        "buzz.channels",
+        "buzz.channels",
+        "buzz.channels",
+        "buzz.emoji",
+        "buzz.pairing",
+      ],
     );
-    await services.plugins.change("disable", "buzz.channel-templates");
-    assert.deepEqual(services.channelTemplates.snapshot(), []);
-    assert.deepEqual(
-      services.settingsCards.snapshot().map((card) => card.pluginId),
-      ["buzz.channels", "block.hosted-communities", "buzz.emoji"],
-    );
-    await services.plugins.change("enable", "buzz.channel-templates");
-    await vi.waitFor(() =>
-      assert.equal(services.channelTemplates.snapshot().length, 1),
-    );
-    assert.notEqual(services.channelTemplates.snapshot()[0], originalTemplates);
-    await services.plugins.change("disable", "buzz.channel-templates");
 
     await vi.waitFor(() =>
-      assert.equal(services.conversation.tools.snapshot().length, 3),
+      assert.equal(services.conversation.tools.snapshot().length, 4),
     );
+    assert.equal(services.conversation.attachments.snapshot().length, 1);
+    await services.plugins.change("disable", "buzz.voice-notes");
+    assert.equal(services.conversation.attachments.snapshot().length, 0);
     assert.equal(services.conversation.inline.snapshot().length, 1);
     await vi.waitFor(() =>
       assert.equal(services.conversation.links.snapshot().length, 1),
@@ -170,12 +262,45 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       ),
     );
 
+    const usage = services.panels
+      .snapshot()
+      .find((panel) => panel.pluginId === "buzz.channel-usage");
+    assert.equal(usage.channelMenu.label, "View channel usage");
+    assert.equal(usage.matches("channel"), false);
+    await services.plugins.change("disable", "buzz.channel-usage");
+    assert.equal(services.panels.snapshot().includes(usage), false);
+    assert.ok(
+      services.pages
+        .snapshot()
+        .some((page) => page.pluginId === "buzz.channels"),
+    );
+    await services.plugins.change("enable", "buzz.channel-usage");
+    await vi.waitFor(() =>
+      assert.ok(
+        services.panels
+          .snapshot()
+          .some(
+            (panel) =>
+              panel.pluginId === "buzz.channel-usage" && panel !== usage,
+          ),
+      ),
+    );
+
     const activity = services.panels
       .snapshot()
       .find((panel) => panel.pluginId === "buzz.agent-activity");
     assert.equal(activity.title, "Agent Activity");
     assert.equal(activity.launcher, undefined);
-    assert.equal(services.conversation.accessories.snapshot().length, 1);
+    assert.equal(services.conversation.accessories.snapshot().length, 2);
+    assert.deepEqual(
+      services.conversation.accessories
+        .snapshot()
+        .map(({ id, placement }) => [id, placement]),
+      [
+        ["activity", "message"],
+        ["typing-presentation", undefined],
+      ],
+    );
     assert.equal(
       services.conversation.accessories.snapshot()[0].pluginId,
       "buzz.agent-activity",
@@ -201,16 +326,17 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       ),
     );
 
-    const firstBestie = services.panels
-      .snapshot()
-      .find((panel) => panel.pluginId === "buzz.bestie");
-    assert.equal(firstBestie.title, "Bestie");
-    assert.equal(firstBestie.launcher.icon, "/bestie.png");
-    assert.match(
-      renderToStaticMarkup(
-        createElement(firstBestie.component, { target: "", close() {} }),
+    await services.plugins.change("enable", "buzz.bestie");
+    await vi.waitFor(() =>
+      assert.ok(
+        services.pages.snapshot().some((p) => p.pluginId === "buzz.bestie"),
       ),
-      /isn’t connected yet/,
+    );
+    assert.equal(
+      services.panels
+        .snapshot()
+        .some((panel) => panel.pluginId === "buzz.bestie"),
+      false,
     );
     const bestiePage = services.pages
       .snapshot()
@@ -233,46 +359,41 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       services.pages.snapshot().some((page) => page.pluginId === "buzz.bestie"),
       false,
     );
-    assert.equal(services.pages.snapshot().length, 6);
+    assert.equal(services.pages.snapshot().length, 7);
     await services.plugins.change("enable", "buzz.bestie");
     // Management completion is not activation completion; Cordis still owns import/disposal barriers.
     await vi.waitFor(() =>
       assert.ok(
-        services.panels
+        services.pages
           .snapshot()
-          .some((panel) => panel.pluginId === "buzz.bestie"),
+          .some((page) => page.pluginId === "buzz.bestie"),
       ),
     );
-    const secondBestie = services.panels
+    const secondBestie = services.pages
       .snapshot()
-      .find((panel) => panel.pluginId === "buzz.bestie");
-    assert.notEqual(secondBestie, firstBestie);
-    assert.equal(secondBestie.revision, firstBestie.revision);
+      .find((page) => page.pluginId === "buzz.bestie");
+    assert.notEqual(secondBestie, bestiePage);
+    assert.equal(secondBestie.revision, bestiePage.revision);
+    assert.equal(
+      services.panels
+        .snapshot()
+        .some((panel) => panel.pluginId === "buzz.bestie"),
+      false,
+    );
     const page = services.pages.snapshot()[0];
     assert.match(
       renderToStaticMarkup(createElement(page.component)),
       /Your channels, one conversation/,
     );
-    const agents = services.pages
-      .snapshot()
-      .find((page) => page.pluginId === "buzz.agents");
-    assert.equal(agents.title, "Agents");
-    assert.match(
-      renderToStaticMarkup(createElement(agents.component)),
-      /Connect to a community/,
-    );
-    const agentMarkup = renderToStaticMarkup(createElement(agents.component));
-    assert.match(agentMarkup, /Local agent controls/);
-    assert.match(agentMarkup, /Local agent controls require the desktop app/);
-    const localControl = services.agentControl;
     const session = services.relay.snapshot().session;
     const sessionsPage = services.pages
       .snapshot()
       .find((page) => page.pluginId === "buzz.sessions");
-    assert.equal(sessionsPage.title, "Sessions");
+    assert.equal(sessionsPage.title, "Sessions (now in Me)");
+    assert.equal(sessionsPage.primary, false);
     assert.match(
       renderToStaticMarkup(createElement(sessionsPage.component)),
-      /Connect to a community/,
+      /Opening Me/,
     );
     await services.plugins.change("disable", "buzz.sessions");
     assert.equal(
@@ -295,28 +416,10 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
       );
     const qualified = named();
     assert.match(qualified, /^Alex · /);
-    await services.plugins.change("disable", "buzz.agents");
-    assert.equal(
-      services.pages.snapshot().some((page) => page.pluginId === "buzz.agents"),
-      false,
-    );
-    assert.equal(services.relay.snapshot().session, session);
-    assert.equal(named(), qualified, "Agents does not own naming policy");
     await services.plugins.change("disable", "buzz.identity-naming");
     assert.equal(named(), "Unknown");
     await services.plugins.change("enable", "buzz.identity-naming");
     await vi.waitFor(() => assert.equal(named(), qualified));
-    assert.equal(services.agentControl, localControl);
-    await services.plugins.change("enable", "buzz.agents");
-    await vi.waitFor(() =>
-      assert.ok(
-        services.pages
-          .snapshot()
-          .some((page) => page.pluginId === "buzz.agents"),
-      ),
-    );
-    assert.equal(services.agentControl, localControl);
-    await services.plugins.change("disable", "buzz.agents");
     assert.ok(session.agentLibrary);
     const workflows = services.pages
       .snapshot()
@@ -352,7 +455,7 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
     const projects = services.pages
       .snapshot()
       .find((page) => page.pluginId === "buzz.projects");
-    assert.equal(services.pages.snapshot().length, 4);
+    assert.equal(services.pages.snapshot().length, 6);
     assert.equal(projects.pluginId, "buzz.projects");
     assert.equal(projects.id, "projects");
     assert.equal(projects.title, "Projects");
@@ -385,7 +488,13 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
     // Bestie was re-enabled above, so it registered after Inbox.
     assert.deepEqual(
       services.pages.snapshot().map((page) => page.pluginId),
-      ["buzz.channels", "buzz.inbox", "buzz.bestie"],
+      [
+        "buzz.channels",
+        "buzz.reminders",
+        "buzz.agents",
+        "buzz.inbox",
+        "buzz.bestie",
+      ],
     );
     await services.plugins.change("enable", "buzz.projects");
     await vi.waitFor(() => {

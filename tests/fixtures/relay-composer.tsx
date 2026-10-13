@@ -3,7 +3,6 @@ import { useKeyboardFocusVisibility } from "../../src/shared/design-system/useKe
 import { createRoot } from "react-dom/client";
 import { ToastProvider } from "../../src/shared/design-system/ui/Toast";
 import { Context } from "@deepseek-ai/cordis";
-import { TemplateProvidersService } from "../../src/features/channel-templates/provider";
 import { ChannelWorkspaceFixture } from "./channel-workspace";
 import { provideNavigation } from "../../src/features/navigation/service";
 import { PanelsService } from "../../src/features/panels/service";
@@ -31,6 +30,7 @@ const rejected = new Set<string>();
 let saved: readonly OutgoingEvent[] = [];
 const attachmentSources = new Map<string, string>();
 const attachmentOrigin = "https://attachments.invalid";
+const params = new URLSearchParams(location.search);
 const root = new Context();
 root.provide("pluginStatus", {
   isActive: () => true,
@@ -42,9 +42,22 @@ const owner = createRelaySession(
     relayAuthor: relay.pubkey,
     scope: attachmentOrigin,
     media: (url) => attachmentSources.get(url),
-    ...(new URLSearchParams(location.search).has("attachments")
+    ...(params.has("attachments")
       ? {
           async uploadAttachment(file: File, signal: AbortSignal) {
+            if (params.has("uploadRequests")) {
+              const response = await fetch("/api/relay/upload", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                  "Content-Type": file.type || "application/octet-stream",
+                },
+                body: file,
+                signal,
+              });
+              await response.body?.cancel();
+              signal.throwIfAborted();
+            }
             const digest = await crypto.subtle.digest(
               "SHA-256",
               await file.arrayBuffer(),
@@ -77,13 +90,22 @@ const owner = createRelaySession(
         return [
           roster(relay, "general", [viewer.pubkey]),
           metadata(relay, "general", "General"),
+          ...(params.has("random")
+            ? [
+                roster(relay, "random", [viewer.pubkey]),
+                metadata(relay, "random", "Random"),
+              ]
+            : []),
         ];
       if (filter.kinds?.includes(0)) return [profile(viewer, { name: "You" })];
       if (filter.ids)
         return confirmed.filter((event) => filter.ids?.includes(event.id));
+      const channel = filter["#h"]?.[0] ?? "general";
       return [
-        ...confirmed,
-        bounds(relay, "general", "head", {
+        ...confirmed.filter((event) =>
+          event.tags.some((tag) => tag[0] === "h" && tag[1] === channel),
+        ),
+        bounds(relay, channel, "head", {
           has_more: false,
           next_cursor: null,
         }),
@@ -107,7 +129,7 @@ const owner = createRelaySession(
     },
   },
   {
-    outboxStorage: new URLSearchParams(location.search).has("durable")
+    outboxStorage: params.has("durable")
       ? browserOutboxStorage(`fixture:${crypto.randomUUID()}`)
       : {
           load: () => saved,
@@ -125,6 +147,11 @@ Object.assign(window, {
         kind: item.event.kind,
         content: item.event.content,
         delivery: item.delivery,
+      })),
+    published: () =>
+      confirmed.map((event) => ({
+        content: event.content,
+        channel: event.tags.find((tag) => tag[0] === "h")?.[1],
       })),
   },
 });
@@ -152,7 +179,6 @@ function Fixture() {
       <div style={{ height: "100vh" }}>
         <ChannelWorkspaceFixture
           host={navigationHost}
-          providers={new TemplateProvidersService(root)}
           relay={data}
           panels={new PanelsService(root)}
           pages={new PagesService(root)}

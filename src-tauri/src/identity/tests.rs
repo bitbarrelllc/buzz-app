@@ -25,6 +25,13 @@ impl Store for Arc<Memory> {
         *saved = Some(value.to_vec());
         Ok(())
     }
+    fn delete(&self) -> Result<()> {
+        if *self.write_denied.lock().unwrap() {
+            return Err("delete denied".into());
+        }
+        *self.saved.lock().unwrap() = None;
+        Ok(())
+    }
 }
 fn identity(store: &Arc<Memory>) -> Identity {
     Identity {
@@ -117,6 +124,78 @@ fn default_test_host_cannot_access_real_credentials() {
     assert!(IdentityHost::default().0.lock().unwrap().restore().is_err());
 }
 
+#[tokio::test]
+async fn authorize_agent_signs_for_agent_and_rejects_invalid_requests() {
+    use secp256k1::{schnorr::Signature, Secp256k1, XOnlyPublicKey};
+    let host = IdentityHost::fixture();
+    let owner = host.viewer().await.unwrap();
+    let agent = Key(Zeroizing::new([2; 32])).viewer().unwrap();
+    let tag = host
+        .authorize_agent(owner.clone(), agent.clone())
+        .await
+        .unwrap();
+    assert_eq!(&tag[..3], &["auth", owner.as_str(), ""]);
+    let signature: Signature = tag[3].parse().unwrap();
+    let pubkey: XOnlyPublicKey = owner.parse().unwrap();
+    let digest = Sha256::digest(format!("nostr:agent-auth:{agent}:"));
+    Secp256k1::verification_only()
+        .verify_schnorr(&signature, &digest, &pubkey)
+        .unwrap();
+    assert!(host
+        .authorize_agent(agent.clone(), owner.clone())
+        .await
+        .unwrap_err()
+        .contains("signed-in identity"));
+    for invalid in ["invalid".into(), "A".repeat(64), owner.clone()] {
+        assert!(host.authorize_agent(owner.clone(), invalid).await.is_err());
+    }
+    assert!(IdentityHost::default()
+        .authorize_agent(owner, agent)
+        .await
+        .is_err());
+}
+
+#[test]
+fn remote_agent_authorization_reaches_signer_through_production_ipc() {
+    use tauri::test::{get_ipc_response, mock_builder, INVOKE_KEY};
+    let app = mock_builder()
+        .manage(IdentityHost::fixture())
+        .invoke_handler(crate::commands())
+        .build(crate::app_context())
+        .unwrap();
+    let view = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let owner = fixture().viewer().unwrap();
+    let agent = Key(Zeroizing::new([2; 32])).viewer().unwrap();
+    let response = get_ipc_response(
+        &view,
+        tauri::webview::InvokeRequest {
+            cmd: "identity_prepare_remote_agent_authorization".into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: view.url().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                "owner": owner, "agentPubkey": agent
+            })),
+            headers: Default::default(),
+            invoke_key: INVOKE_KEY.into(),
+        },
+    )
+    .unwrap()
+    .deserialize::<Vec<String>>()
+    .unwrap();
+    assert_eq!(&response[..3], &["auth", owner.as_str(), ""]);
+    let digest = Sha256::digest(format!("nostr:agent-auth:{agent}:"));
+    secp256k1::Secp256k1::verification_only()
+        .verify_schnorr(
+            &response[3].parse().unwrap(),
+            &digest,
+            &owner.parse().unwrap(),
+        )
+        .unwrap();
+}
+
 #[test]
 fn uppercase_import_keeps_the_exact_key_and_mixed_case_is_rejected() {
     let store = Arc::new(Memory::default());
@@ -134,12 +213,271 @@ fn uppercase_import_keeps_the_exact_key_and_mixed_case_is_rejected() {
 #[test]
 fn development_and_release_items_are_separate() {
     assert_eq!(
-        SERVICE,
+        credentials::HUMAN_SERVICE,
         if cfg!(debug_assertions) {
             "dev.local.buzz.foundation.identity.debug"
         } else {
             "dev.local.buzz.foundation.identity"
         }
     );
-    assert!(!SERVICE.starts_with("buzz-desktop"));
+    assert_eq!(credentials::HUMAN_ACCOUNT, "human");
+    assert!(!credentials::HUMAN_SERVICE.starts_with("buzz-desktop"));
+}
+
+#[test]
+fn sidebar_registers_bind_legacy_projection_and_preserve_tombstones() {
+    use serde_json::json;
+    let reg = |value| json!([100, "1234567890abcdef", value]);
+    let tombstones: serde_json::Map<_, _> = (0..105)
+        .map(|i| (format!("section:{i}"), reg(serde_json::Value::Null)))
+        .collect();
+    let sort = json!({"version": 1, "groups": {}, "meta": {"v": 1, "g": tombstones}});
+    assert!(super::validate_sidebar_payload("channel-sort", &sort).is_ok());
+    let mut mismatch = sort.clone();
+    mismatch["meta"]["g"]["channels"] = reg(json!("recent"));
+    assert!(super::validate_sidebar_payload("channel-sort", &mismatch).is_err());
+    mismatch["groups"]["channels"] = json!("recent");
+    assert!(super::validate_sidebar_payload("channel-sort", &mismatch).is_ok());
+    let mut live = sort;
+    for i in 0..105 {
+        let key = format!("section:{i}");
+        live["meta"]["g"][&key] = reg(json!("recent"));
+        live["groups"][&key] = json!("recent");
+    }
+    assert!(super::validate_sidebar_payload("channel-sort", &live).is_err());
+    let sections = json!({"version":1, "sections":[{"id":"work","name":"Work","order":0}], "assignments":{"c":"work"},
+        "meta":{"v":1,"s":{"work":{"name":reg(json!("Work")),"order":reg(json!(40)),"live":reg(json!(true))},
+            "dead":{"live":reg(json!(false))}},"a":{"c":reg(json!("work")),"old":reg(serde_json::Value::Null)}}});
+    assert!(super::validate_sidebar_payload("channel-sections", &sections).is_ok());
+    let mut mismatch = sections.clone();
+    mismatch["sections"][0]["name"] = json!("Wrong");
+    assert!(super::validate_sidebar_payload("channel-sections", &mismatch).is_err());
+    for invalid in [
+        json!(null),
+        json!({"v":2}),
+        json!({"v":1,"g":null}),
+        json!({"v":1,"g":{"channels":[1,"bad","recent"]}}),
+        json!({"v":1,"g":{"channels":[9007199254740992_u64,"1234567890abcdef","recent"]}}),
+    ] {
+        assert!(super::validate_sidebar_payload(
+            "channel-sort",
+            &json!({"version":1,"groups":{},"meta":invalid})
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn sidebar_section_caps_apply_to_live_projection_not_retained_registers() {
+    use serde_json::{json, Value};
+    let reg = |value| json!([100, "1234567890abcdef", value]);
+    let dead_sections: serde_json::Map<_, _> = (0..101)
+        .map(|i| {
+            (
+                format!("s{i}"),
+                json!({"name": reg(json!("Old")), "live": reg(json!(false))}),
+            )
+        })
+        .collect();
+    let removed_assignments: serde_json::Map<_, _> = (0..1001)
+        .map(|i| (format!("c{i}"), reg(Value::Null)))
+        .collect();
+    let mut record = json!({"version": 1, "sections": [], "assignments": {},
+        "meta": {"v": 1, "s": dead_sections, "a": removed_assignments}});
+    assert!(serde_json::to_vec(&record).unwrap().len() < 128 * 1024);
+    assert!(super::validate_sidebar_payload("channel-sections", &record).is_ok());
+    for i in 0..101 {
+        record["meta"]["s"][format!("s{i}")]["live"] = reg(json!(true));
+    }
+    // An under-cap legacy projection must not hide an over-cap live register tree.
+    assert!(super::validate_sidebar_payload("channel-sections", &record).is_err());
+    record["sections"] =
+        super::project_sidebar_meta("channel-sections", &record["meta"])["sections"].clone();
+    assert!(super::validate_sidebar_payload("channel-sections", &record).is_err());
+    for i in 1..101 {
+        record["meta"]["s"][format!("s{i}")]["live"] = reg(json!(false));
+    }
+    record["sections"] = json!([{"id": "s0", "name": "Old", "order": 0}]);
+    assert!(super::validate_sidebar_payload("channel-sections", &record).is_ok());
+    for i in 0..1001 {
+        record["meta"]["a"][format!("c{i}")] = reg(json!("s0"));
+    }
+    assert!(super::validate_sidebar_payload("channel-sections", &record).is_err());
+    record["assignments"] =
+        super::project_sidebar_meta("channel-sections", &record["meta"])["assignments"].clone();
+    assert!(super::validate_sidebar_payload("channel-sections", &record).is_err());
+}
+
+#[tokio::test]
+async fn sidebar_signer_refuses_inconsistent_metadata() {
+    use serde_json::json;
+    let host = super::IdentityHost::fixture();
+    let mut payload = json!({"version":1, "groups":{},
+        "meta":{"v":1,"g":{"channels":[100,"1234567890abcdef","recent"]}}});
+    assert!(host
+        .sign_sidebar("channel-sort".into(), payload.clone(), 100)
+        .await
+        .is_err());
+    payload["groups"]["channels"] = json!("recent");
+    let event = host
+        .sign_sidebar("channel-sort".into(), payload, 100)
+        .await
+        .unwrap();
+    assert!(host.admit_sidebar(event).await.is_ok());
+}
+
+fn builderlab_challenge() -> serde_json::Value {
+    serde_json::json!({
+        "challenge_id": "550e8400-e29b-41d4-a716-446655440000",
+        "nonce": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi01234_-7",
+        "verification_code": "123456",
+        "origin": "https://app.builderlab.xyz",
+        "expires_at": "2999-01-01T00:00:00Z"
+    })
+}
+fn parse_challenge(value: serde_json::Value) -> BuilderlabChallenge {
+    serde_json::from_value(value).unwrap()
+}
+
+#[test]
+fn builderlab_binding_signs_the_reference_kind_24243_shape() {
+    let template = parse_challenge(builderlab_challenge())
+        .template(1_700_000_000)
+        .unwrap();
+    let event: Event = serde_json::from_value(fixture().sign(template).unwrap()).unwrap();
+    event.verify().unwrap();
+    assert_eq!(event.kind.as_u16(), 24243);
+    assert_eq!(event.content, "");
+    assert_eq!(event.created_at.as_secs(), 1_700_000_000);
+    assert_eq!(event.pubkey.to_hex(), fixture().viewer().unwrap());
+    let tags: Vec<Vec<String>> = event.tags.iter().map(|tag| tag.clone().to_vec()).collect();
+    let expected = [
+        ["challenge_id", "550e8400-e29b-41d4-a716-446655440000"],
+        ["nonce", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi01234_-7"],
+        ["verification_code", "123456"],
+        ["audience", "buzz:nostr-identity"],
+        ["action", "bind_nostr_identity"],
+        ["protocol", "buzz-nostr-identity"],
+        ["version", "1"],
+        ["origin", "https://app.builderlab.xyz"],
+        ["expires_at", "2999-01-01T00:00:00Z"],
+    ]
+    .map(|tag| tag.map(str::to_owned).to_vec());
+    assert_eq!(tags, expected);
+}
+
+#[test]
+fn builderlab_binding_rejects_invalid_or_foreign_challenges() {
+    let now = 1_700_000_000;
+    for (field, value) in [
+        ("challenge_id", "{550e8400-e29b-41d4-a716-446655440000}"),
+        ("challenge_id", "550e8400e29b41d4a716446655440000"),
+        ("nonce", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi01234_-"),
+        ("nonce", "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi01234_+7"),
+        ("verification_code", "12345a"),
+        ("verification_code", "1234567"),
+        ("origin", "https://example.com"),
+        ("origin", "https://app.builderlab.xyz/"),
+        ("expires_at", "2023-11-14T22:13:20Z"),
+        ("expires_at", "not a time"),
+    ] {
+        let mut challenge = builderlab_challenge();
+        challenge[field] = value.into();
+        assert_eq!(
+            parse_challenge(challenge).template(now).err().as_deref(),
+            Some("Invalid Nostr identity challenge"),
+            "{field}={value}"
+        );
+    }
+    let mut extra = builderlab_challenge();
+    extra["kind"] = 1.into();
+    assert!(serde_json::from_value::<BuilderlabChallenge>(extra).is_err());
+}
+
+#[test]
+fn builderlab_binding_reaches_signer_through_production_ipc() {
+    use tauri::test::{get_ipc_response, mock_builder, INVOKE_KEY};
+    let app = mock_builder()
+        .manage(IdentityHost::fixture())
+        .invoke_handler(crate::commands())
+        .build(crate::app_context())
+        .unwrap();
+    let view = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let invoke = |challenge: serde_json::Value| {
+        get_ipc_response(
+            &view,
+            tauri::webview::InvokeRequest {
+                cmd: "identity_sign_builderlab_binding".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: view.url().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(serde_json::json!({ "challenge": challenge })),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.into(),
+            },
+        )
+    };
+    let event: Event = invoke(builderlab_challenge())
+        .unwrap()
+        .deserialize()
+        .unwrap();
+    event.verify().unwrap();
+    assert_eq!(event.kind.as_u16(), 24243);
+    assert_eq!(event.pubkey.to_hex(), fixture().viewer().unwrap());
+    let mut foreign = builderlab_challenge();
+    foreign["origin"] = "https://example.com".into();
+    assert!(invoke(foreign).is_err());
+}
+
+#[test]
+fn remove_key_deletes_then_confirms_absence() {
+    let store = Arc::new(Memory::default());
+    identity(&store).save(None).unwrap();
+    remove_key(&store).unwrap();
+    assert_eq!(identity(&store).restore().unwrap(), None);
+    // Absent is already signed out.
+    remove_key(&store).unwrap();
+    identity(&store).save(None).unwrap();
+    *store.write_denied.lock().unwrap() = true;
+    assert!(remove_key(&store).is_err());
+    assert!(store.saved.lock().unwrap().is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_refuses_every_key_operation_including_a_sign_started_before_it() {
+    let host = IdentityHost::fixture();
+    let owner = host.viewer().await.unwrap();
+    let agent = Key(Zeroizing::new([2; 32])).viewer().unwrap();
+    let template = || {
+        serde_json::from_value(serde_json::json!({
+            "kind": 1, "content": "", "tags": [], "created_at": 0
+        }))
+        .unwrap()
+    };
+    // Started while another operation holds the identity, run after it closes.
+    let started = {
+        let mut running = host.0.lock().unwrap();
+        let task = host.clone();
+        let started = tokio::spawn(async move { task.sign(template()).await });
+        // The test's handle, the task's, and the one `sign` clones once it starts.
+        while Arc::strong_count(&host.0) < 3 {
+            std::thread::yield_now();
+        }
+        running.close();
+        started
+    };
+    assert!(started.await.unwrap().is_err());
+    host.close();
+    assert!(host.sign(template()).await.is_err());
+    assert!(host.viewer().await.is_err());
+    assert!(host.authorize_agent(owner, agent).await.is_err());
+    assert!(host.with_key(|_, _| Ok(())).await.is_err());
+    assert!(with_identity(host.clone(), |identity| identity.export())
+        .await
+        .is_err());
+    assert!(with_identity(host, |identity| identity.save(None))
+        .await
+        .is_err());
 }

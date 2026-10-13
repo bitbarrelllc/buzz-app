@@ -1,4 +1,6 @@
 import { communityFromScope, relayGifRequests } from "../relay/gifs";
+import { sentMentionFollowup } from "../messages/mention-followup";
+import { mentionDraft } from "../messages/mention-draft";
 import { readView, writeView } from "../../shared/view-state";
 import type { RelaySession } from "../relay/session";
 import { canAddMembers } from "../channel-members/members";
@@ -174,7 +176,15 @@ export function createHuddleComposerOwner(
         const scope = session.scope;
         const key = `draft:${room}`;
         if (JSON.stringify(readView(scope, key, null)) === draft)
-          writeView(scope, key, "");
+          writeView(
+            scope,
+            key,
+            sentMentionFollowup(
+              session,
+              mentionDraft(readView(scope, key, "")),
+              mentions,
+            ),
+          );
         for (const file of files) release(file);
         return id;
       }
@@ -260,9 +270,7 @@ export function createHuddleComposerOwner(
           !/^[0-9a-f]{64}$/.test(request.args)
         )
           throw new Error("Cannot add this person.");
-        return session.memberAdditions.add(room, request.args, undefined, {
-          startAgent: false,
-        });
+        return session.memberAdditions.add(room, request.args);
       case "projectsHome":
         return session.projects.home(room, signal);
       case "projectsLoad":

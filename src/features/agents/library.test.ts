@@ -46,27 +46,6 @@ it("lazy fresh reads replace, fail visibly, retry, and fence late results", asyn
   owner.dispose();
   expect(owner.queries.snapshot().identities).toEqual([]);
 });
-it("actual session retains host library alongside relay reads and clears/disposes both", async () => {
-  const read = vi.fn().mockResolvedValue(library);
-  const query = vi.fn().mockResolvedValue([]);
-  const owner = createRelaySession({
-    viewer: keypair().pubkey,
-    relayAuthor: keypair().pubkey,
-    media: () => undefined,
-    query,
-    readAgentLibrary: read,
-  });
-  await owner.session.agentLibrary.refresh();
-  expect(read).toHaveBeenCalledOnce();
-  expect(query).toHaveBeenCalledOnce();
-  expect(owner.session.agentLibrary.snapshot().definitions).toHaveLength(2);
-  await owner.clearCache();
-  expect(owner.session.agentLibrary.snapshot().definitions).toEqual([]);
-  await owner.session.agentLibrary.refresh();
-  owner.dispose();
-  expect(owner.session.agentLibrary.snapshot().status).toBe("unavailable");
-});
-
 it.each([false, true])(
   "session establishment reuses inventory with a pending read=%s and refreshes after disconnect",
   async (pendingRead) => {
@@ -167,4 +146,26 @@ it("establishment retries a failed retained read without turning idle inventory 
   expect(owner.queries.snapshot().status).toBe("ready");
   stop();
   owner.dispose();
+});
+
+it("every library snapshot carries definition art to identities without their own", async () => {
+  const owner = createAgentLibrary(async () => ({
+    definitions: [{ id: "local:brain", name: "Brain", avatar: "art" }],
+    identities: [
+      { pubkey: "a".repeat(64), name: "One", definitionId: "local:brain" },
+      {
+        pubkey: "b".repeat(64),
+        name: "Two",
+        definitionId: "local:brain",
+        avatar: "own",
+      },
+      { pubkey: "c".repeat(64), name: "Custom" },
+    ],
+  }));
+  await owner.queries.refresh();
+  expect(owner.queries.snapshot().identities.map((row) => row.avatar)).toEqual([
+    "art",
+    "own",
+    undefined,
+  ]);
 });

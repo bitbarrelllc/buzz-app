@@ -109,7 +109,7 @@ function HuddleCapsuleContent({
         aria-label="Huddle request"
       >
         <Button
-          size="xs"
+          size="sm"
           variant="ghost"
           aria-label="Open Huddle request"
           style={{ padding: "var(--space-1)" }}
@@ -128,7 +128,7 @@ function HuddleCapsuleContent({
         </Button>
         <span className={styles.requestCompactActions}>
           <Button
-            size="xs"
+            size="sm"
             variant="subtle"
             data-huddle-join=""
             disabled={call.phase === "connecting"}
@@ -140,7 +140,7 @@ function HuddleCapsuleContent({
             Join
           </Button>
           <Button
-            size="xs"
+            size="sm"
             variant="destructive"
             ref={focus.cancel}
             onClick={() => {
@@ -172,7 +172,7 @@ function HuddleCapsuleContent({
       >
         <Button
           variant="ghost"
-          size="xs"
+          size="sm"
           style={{ padding: "var(--space-1)", paddingLeft: "var(--space-2)" }}
           aria-label={`Open Huddle window for ${call.destination?.channelName ?? "conversation"}`}
           title="Open Huddle window"
@@ -214,7 +214,7 @@ function HuddleCapsuleContent({
         />
         <span className={styles.capsuleDivider} aria-hidden="true" />
         <Button
-          size="xs"
+          size="sm"
           variant="destructive"
           data-huddle-leave=""
           style={{ alignSelf: "stretch" }}

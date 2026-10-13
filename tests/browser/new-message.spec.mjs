@@ -3,7 +3,7 @@ import { upper, settle } from "./timeline.mjs";
 import { test as base, expect } from "@playwright/test";
 import { preview } from "vite";
 import { finalizeEvent, generateSecretKey, getPublicKey } from "nostr-tools";
-import { relayBrokerPlugin } from "../../dev/relay-broker.mjs";
+import { relayBrokerPlugin } from "../../browser-host/relay-broker.mjs";
 import { brokerSocket } from "../broker-socket.mjs";
 import { fixtureAliases, fixtureRelayUrl } from "../relay-config.ts";
 import { buildApp } from "./build.mjs";
@@ -15,6 +15,8 @@ const test = base.extend({
   developmentReact: [false, { scope: "worker" }],
   pluginFixtures: [false, { scope: "worker" }],
   companionFixture: [false, { scope: "worker" }],
+  pairingFixture: [false, { scope: "worker" }],
+  localAgentActivity: [false, { scope: "worker" }],
   compiledApp: [buildApp, { scope: "worker" }],
   app: async ({ compiledApp, page, context }, use) => {
     const key = generateSecretKey(),
@@ -73,6 +75,7 @@ const test = base.extend({
     };
     const socket = brokerSocket(publish);
     const broker = relayBrokerPlugin({
+      archiveFile: ":memory:",
       relayUrl: fixtureRelayUrl,
       communityAliases: fixtureAliases,
       identity: () => key,
@@ -385,7 +388,7 @@ test("empty compose, keyboard selection, pagination, removal effects, retry, the
       .getByRole("textbox", { name: "New message", exact: true })
       .locator("[data-placeholder]"),
   ).toHaveAttribute("data-placeholder", "");
-  for (const name of ["Mention a member", "Insert emoji"]) {
+  for (const name of ["Mention a member", "Emoji and GIFS"]) {
     const tool = page.getByRole("button", { name, exact: true });
     await expect(tool).toBeDisabled();
     await expect(tool).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
@@ -419,7 +422,17 @@ test("empty compose, keyboard selection, pagination, removal effects, retry, the
       16;
     return list.scrollTop;
   });
-  await partial.dispatchEvent("pointermove", { pointerType: "mouse" });
+  // Only a real pointer move highlights a row, so move between two points.
+  await partial.dispatchEvent("pointermove", {
+    pointerType: "mouse",
+    clientX: 20,
+    clientY: 20,
+  });
+  await partial.dispatchEvent("pointermove", {
+    pointerType: "mouse",
+    clientX: 21,
+    clientY: 20,
+  });
   await expect(partial).toHaveAttribute("aria-selected", "true");
   await expect
     .poll(() => picker.evaluate((element) => element.scrollTop))
@@ -611,15 +624,14 @@ test("empty compose, keyboard selection, pagination, removal effects, retry, the
   await expect(message).toHaveCount(1);
   await expect(message).toBeVisible();
   await expect(message.locator("time")).toBeVisible();
-  const visibleDate = await message.locator("time").evaluate((time) =>
-    new Date(time.dateTime).toLocaleDateString(undefined, {
-      year: "numeric",
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-    }),
-  );
-  await expect(message.getByText(visibleDate, { exact: true })).toBeVisible();
+  // The first message opens its day with a divider.
+  const visibleDay = await message.locator("time").evaluate((time) => {
+    const date = new Date(time.dateTime);
+    return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+      .map((part) => String(part).padStart(2, "0"))
+      .join("-");
+  });
+  await expect(message.locator(`[data-day="${visibleDay}"]`)).toBeVisible();
   await expect(
     page.getByRole("textbox", { name: "Message #Avery Chen" }),
   ).toBeVisible();

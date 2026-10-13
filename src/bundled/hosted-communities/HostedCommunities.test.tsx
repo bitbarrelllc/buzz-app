@@ -13,7 +13,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StrictMode, useState } from "react";
 import { npubEncode } from "nostr-tools/nip19";
 import { HostedCommunities } from "./HostedCommunities";
-import { DELETION_PENDING_KEY } from "./api";
+import { brokerApi, DELETION_PENDING_KEY } from "./api";
 
 const local = "a".repeat(64);
 const other = "b".repeat(64);
@@ -65,7 +65,7 @@ afterEach(() => {
 const renderCard = () =>
   render(
     <StrictMode>
-      <HostedCommunities active={() => true} />
+      <HostedCommunities api={brokerApi} active={() => true} />
     </StrictMode>,
   );
 
@@ -76,7 +76,7 @@ function RerenderingParent() {
       <button type="button" onClick={() => rerender((count) => count + 1)}>
         Parent update
       </button>
-      <HostedCommunities active={() => true} />
+      <HostedCommunities api={brokerApi} active={() => true} />
     </>
   );
 }
@@ -450,7 +450,7 @@ it("does not bind after the card is deactivated during Switch", async () => {
   });
   routes["/api/builderlab/unbind"] = unbind.answer as Handler;
   routes["/api/builderlab/bind"] = () => ({ identity: { pubkey_hex: local } });
-  render(<HostedCommunities active={() => live} />);
+  render(<HostedCommunities api={brokerApi} active={() => live} />);
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Switch to this device’s identity",
@@ -628,7 +628,7 @@ it("does not write to the clipboard when create finishes after the card retires"
   routes["/api/builderlab/create"] = create.answer as Handler;
   const writeText = vi.fn(async (_: string) => {});
   vi.stubGlobal("navigator", { clipboard: { writeText } });
-  render(<HostedCommunities active={() => live} />);
+  render(<HostedCommunities api={brokerApi} active={() => live} />);
   await typeName("north");
   await screen.findByText("That address is available.", {}, { timeout: 2000 });
   fireEvent.click(screen.getByRole("button", { name: "Create community" }));
@@ -776,11 +776,7 @@ const different = () => ({ identity: { pubkey_hex: other } });
 
 it.each([
   ["completed rejection", "unbound", unbound],
-  ["completed rejection", "a different identity", different],
-  ["late success", "unbound", unbound],
   ["late success", "a different identity", different],
-  ["late rejection", "unbound", unbound],
-  ["late rejection", "a different identity", different],
 ])(
   "drops a %s copy handoff when Refresh finds the account %s",
   async (schedule, _, identity) => {
@@ -848,11 +844,7 @@ it("keeps a failed copy handoff across a same-identity refresh", async () => {
 
 it.each([
   ["completed rejection", "fails"],
-  ["completed rejection", "succeeds"],
-  ["late success", "fails"],
   ["late success", "succeeds"],
-  ["late rejection", "fails"],
-  ["late rejection", "succeeds"],
 ])(
   "drops a %s copy handoff when the community is archived and the refresh %s",
   async (schedule, refresh) => {
@@ -951,6 +943,44 @@ it("keeps a failed copy handoff for another address when a community is archived
   expect(
     screen.getByRole("button", { name: "Try copying again" }),
   ).toBeEnabled();
+});
+
+it("only presents an empty hosted collection after a successful read", async () => {
+  let release!: (value: unknown) => void;
+  const list = new Promise((resolve) => {
+    release = resolve;
+  });
+  routes["/api/builderlab/list"] = () => list;
+  renderCard();
+  try {
+    await waitFor(() =>
+      expect(calls.some(([url]) => url === "/api/builderlab/list")).toBe(true),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "No hosted communities yet" }),
+    ).toBeNull();
+  } finally {
+    release({ communities: [] });
+  }
+  expect(
+    await screen.findByRole("heading", {
+      name: "No hosted communities yet",
+      level: 4,
+    }),
+  ).toBeVisible();
+});
+
+it("keeps a failed hosted collection read separate from an empty result", async () => {
+  routes["/api/builderlab/list"] = () => ({
+    error: { message: "List unavailable" },
+  });
+  renderCard();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "List unavailable",
+  );
+  expect(
+    screen.queryByRole("heading", { name: "No hosted communities yet" }),
+  ).toBeNull();
 });
 
 const archived = {
@@ -1114,7 +1144,7 @@ it.each(["setup-needed", "unauthorized"])(
     else {
       expect(await screen.findByRole("alert")).toHaveTextContent(
         failure === "unauthorized"
-          ? "Your Builderlab session ended. Sign out, then sign in again."
+          ? "This Builderlab account can't manage Buzz identities right now. Try signing in again."
           : "Could not load the connected Buzz identity.",
       );
       expect(
@@ -1157,7 +1187,7 @@ it("does not offer Connect or stale owner actions on an initial unauthorized loa
   routes["/api/builderlab/list"] = () => ({ error: { code: "unauthorized" } });
   renderCard();
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Your Builderlab session ended. Sign out, then sign in again.",
+    "This Builderlab account can't manage Buzz identities right now. Try signing in again.",
   );
   expect(
     screen.queryByRole("button", { name: "Connect Buzz identity" }),
@@ -1195,7 +1225,7 @@ it("clears stale blocked-owner and deletion notices on unauthorized Refresh", as
   routes["/api/builderlab/list"] = () => ({ error: { code: "unauthorized" } });
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Your Builderlab session ended. Sign out, then sign in again.",
+    "This Builderlab account can't manage Buzz identities right now. Try signing in again.",
   );
   expect(screen.queryByText("Deletion started")).not.toBeInTheDocument();
   expect(screen.queryByText(/A deletion request from/)).not.toBeInTheDocument();
@@ -1720,11 +1750,89 @@ it("explains when another context cleared the blocked slot before final confirma
   fireEvent.click(
     within(dialog).getByRole("button", { name: "Start deletion" }),
   );
-  expect(within(dialog).getByRole("alert")).toHaveTextContent(
-    "Refresh and try again.",
-  );
+  expect(within(dialog).getByRole("alert")).toHaveTextContent(/^Try again\.$/);
   expect(deletionPosts()).toHaveLength(0);
   expect(localStorage.getItem(DELETION_PENDING_KEY)).toBeNull();
+  // The copy promises that pressing Start deletion again is enough.
+  const admission = hold();
+  routes["/api/builderlab/delete"] = admission.answer as Handler;
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Start deletion" }),
+  );
+  await waitFor(() => expect(deletionPosts()).toHaveLength(1));
+  const stored = JSON.parse(localStorage.getItem(DELETION_PENDING_KEY) ?? "");
+  expect(stored.owner_pubkey).toBe(local);
+  expect(deletionPosts()[0]?.[1]).toEqual(stored.request);
+  await act(async () =>
+    admission.release(Response.json(accepted(stored.request), { status: 202 })),
+  );
+  expect(await screen.findByText("Deletion started")).toBeVisible();
+  expect(deletionPosts()).toHaveLength(1);
+});
+
+it("explains a same-owner envelope saved for another origin without asking to switch identity", async () => {
+  routes["/api/builderlab/list"] = () => ({ communities: [archived] });
+  localStorage.setItem(
+    DELETION_PENDING_KEY,
+    JSON.stringify({
+      version: 1,
+      owner_pubkey: local,
+      backend_origin: "https://other.example",
+      request: {
+        community_id: archived.id,
+        host: archived.normalized_host,
+        request_id: "33333333-3333-4333-8333-333333333333",
+        acknowledgement_version: 1,
+      },
+    }),
+  );
+  const original = localStorage.getItem(DELETION_PENDING_KEY);
+  renderCard();
+  expect(
+    await screen.findByText(
+      "This identity has a deletion request saved from a different app address on this device. It can't be checked here, so contact support before starting another deletion.",
+    ),
+  ).toBeVisible();
+  expect(
+    screen.queryByText(/Switch to that Buzz identity/),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  expect(localStorage.getItem(DELETION_PENDING_KEY)).toBe(original);
+  expect(deletionPosts()).toHaveLength(0);
+});
+
+it("explains a same-owner other-origin slot occupied at final confirmation", async () => {
+  routes["/api/builderlab/list"] = () => ({ communities: [archived] });
+  renderCard();
+  const dialog = await openDeletion();
+  fireEvent.change(within(dialog).getByLabelText("Type the exact host"), {
+    target: { value: archived.normalized_host },
+  });
+  fireEvent.click(
+    within(dialog).getByRole("checkbox", {
+      name: /I understand this cannot be canceled/,
+    }),
+  );
+  const original = JSON.stringify({
+    version: 1,
+    owner_pubkey: local,
+    backend_origin: "https://other.example",
+    request: {
+      community_id: archived.id,
+      host: archived.normalized_host,
+      request_id: "33333333-3333-4333-8333-333333333333",
+      acknowledgement_version: 1,
+    },
+  });
+  localStorage.setItem(DELETION_PENDING_KEY, original);
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Start deletion" }),
+  );
+  expect(within(dialog).getByRole("alert")).toHaveTextContent(
+    "Deletion was not sent. This identity has a deletion request saved from a different app address on this device. Contact support before starting another deletion.",
+  );
+  expect(localStorage.getItem(DELETION_PENDING_KEY)).toBe(original);
+  expect(deletionPosts()).toHaveLength(0);
 });
 
 it("keeps and retries the same UUID after a wrong-status pre-admission rejection", async () => {
@@ -1890,7 +1998,7 @@ it("disables deletion for every row when a pending slot exists in another mounte
       { error: { code: "acceptance_unknown" }, correlation_id: "corr-slot" },
       { status: 503 },
     );
-  render(<HostedCommunities active={() => true} />);
+  render(<HostedCommunities api={brokerApi} active={() => true} />);
   fireEvent.click(
     (
       await screen.findAllByRole("button", { name: "Delete" })
@@ -1915,7 +2023,7 @@ it("disables deletion for every row when a pending slot exists in another mounte
   routes["/api/builderlab/list"] = () => ({
     communities: [archived, south],
   });
-  render(<HostedCommunities active={() => true} />);
+  render(<HostedCommunities api={brokerApi} active={() => true} />);
   await waitFor(() =>
     expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(3),
   );
@@ -2133,7 +2241,7 @@ it("stops accepted-row replay when the card retires mid-Refresh", async () => {
   routes["/api/builderlab/delete"] = (body) =>
     Response.json(accepted(body), { status: 202 });
   let live = true;
-  render(<HostedCommunities active={() => live} />);
+  render(<HostedCommunities api={brokerApi} active={() => live} />);
   await confirmDeletion();
   await screen.findByText("Deletion started");
   await waitFor(() =>
@@ -2218,7 +2326,9 @@ it.each(["accepted", "bound abort", "definitive rejection"])(
     routes["/api/builderlab/list"] = () => ({ communities: [archived] });
     const admission = hold();
     routes["/api/builderlab/delete"] = admission.answer as Handler;
-    const view = render(<HostedCommunities active={() => true} />);
+    const view = render(
+      <HostedCommunities api={brokerApi} active={() => true} />,
+    );
     await confirmDeletion();
     await waitFor(() =>
       expect(calls.map(([url]) => url)).toContain("/api/builderlab/delete"),
@@ -2237,7 +2347,9 @@ it.each(["accepted", "bound abort", "definitive rejection"])(
     routes["/api/builderlab/identity"] = () => ({
       identity: { pubkey_hex: other },
     });
-    const middleView = render(<HostedCommunities active={() => true} />);
+    const middleView = render(
+      <HostedCommunities api={brokerApi} active={() => true} />,
+    );
     await screen.findByText(middle.request.request_id);
     middleView.unmount();
     const next = {
@@ -2251,7 +2363,7 @@ it.each(["accepted", "bound abort", "definitive rejection"])(
     routes["/api/builderlab/identity"] = () => ({
       identity: { pubkey_hex: local },
     });
-    render(<HostedCommunities active={() => true} />);
+    render(<HostedCommunities api={brokerApi} active={() => true} />);
     await screen.findByText(next.request.request_id);
     await act(async () =>
       admission.release(

@@ -8,17 +8,27 @@ import {
   type MessageComposerProps,
 } from "../messages/MessageComposer";
 import { MessageRow, type MessageRowProps } from "../messages/MessageRow";
+import {
+  formatDayGroupLabel,
+  formatFullTimestamp,
+  formatItemTimestamp,
+} from "../../shared/datetime";
+import { relativeTimestamp } from "../../shared/relative-timestamp";
 import type {
+  AttachmentRenderer,
   ComposerTool,
   ComposerAccessory,
   ComposerCompletion,
   InlineRenderer,
   LinkRenderer,
   MessageRenderer,
+  MessageAction,
   ContributionReader,
 } from "./contracts";
 
 export type Conversation = {
+  attachments: ContributionReader<AttachmentRenderer>;
+  registerAttachment(renderer: AttachmentRenderer): void;
   messages: ContributionReader<MessageRenderer>;
   registerMessage(renderer: MessageRenderer): void;
   accessories: ContributionReader<ComposerAccessory>;
@@ -31,10 +41,25 @@ export type Conversation = {
   registerInline(renderer: InlineRenderer): void;
   links: ContributionReader<LinkRenderer>;
   registerLink(renderer: LinkRenderer): void;
+  actions: ContributionReader<MessageAction>;
+  registerMessageAction(action: MessageAction): void;
   ui: {
     Thread: (props: EmbeddedThreadProps) => ReactNode;
     Composer: (props: Omit<MessageComposerProps, "extensions">) => ReactNode;
     Message: (props: Omit<MessageRowProps, "extensions">) => ReactNode;
+  };
+  /** The host's date labels, so plugin text reads like the message rows. */
+  format: {
+    /** "9:05 AM", "Yesterday", "Monday", "Sat, Jun 20", "Jun 20, 2025";
+     * `withTime` appends " at 9:05 AM" outside today. */
+    itemTimestamp: typeof formatItemTimestamp;
+    /** The day divider: "Today", "Yesterday", "Monday", "Saturday, June 20",
+     * "June 20, 2025". */
+    dayGroupLabel: typeof formatDayGroupLabel;
+    /** The hover text on a byline: "Friday, October 2, 2026 at 3:05:09 PM EDT". */
+    fullTimestamp: typeof formatFullTimestamp;
+    /** Link previews: "just now", "5 minutes ago", "3 days ago", "on Jun 20". */
+    relativeTimestamp: typeof relativeTimestamp;
   };
 };
 declare module "@deepseek-ai/cordis" {
@@ -44,12 +69,14 @@ declare module "@deepseek-ai/cordis" {
 }
 function validate(
   value:
+    | AttachmentRenderer
     | ComposerTool
     | InlineRenderer
     | ComposerCompletion
     | ComposerAccessory
     | LinkRenderer
-    | MessageRenderer,
+    | MessageRenderer
+    | MessageAction,
 ) {
   if (
     !value ||
@@ -63,6 +90,8 @@ function validate(
     );
 }
 export class ConversationService extends Service implements Conversation {
+  readonly attachments;
+  private readonly attachmentEntries;
   readonly messages;
   private readonly messageEntries;
   readonly tools;
@@ -75,8 +104,16 @@ export class ConversationService extends Service implements Conversation {
   private readonly inlineEntries;
   readonly links;
   private readonly linkEntries;
+  readonly actions;
+  private readonly actionEntries;
   constructor(ctx: Context) {
     super(ctx, "conversation");
+    const attachments = createContributions<AttachmentRenderer>(ctx);
+    this.attachmentEntries = attachments;
+    this.attachments = {
+      snapshot: attachments.snapshot,
+      subscribe: attachments.subscribe,
+    };
     const messages = createContributions<MessageRenderer>(ctx);
     this.messageEntries = messages;
     this.messages = {
@@ -104,6 +141,25 @@ export class ConversationService extends Service implements Conversation {
     const links = createContributions<LinkRenderer>(ctx);
     this.linkEntries = links;
     this.links = { snapshot: links.snapshot, subscribe: links.subscribe };
+    const actions = createContributions<MessageAction>(ctx);
+    this.actionEntries = actions;
+    this.actions = { snapshot: actions.snapshot, subscribe: actions.subscribe };
+  }
+  registerMessageAction(value: MessageAction) {
+    validate(value);
+    if (
+      typeof value.matches !== "function" ||
+      (value.icon !== undefined && typeof value.icon !== "function") ||
+      (value.marker !== undefined && typeof value.marker !== "function")
+    )
+      throw new Error("A message action needs a matcher");
+    this.actionEntries.register(this.ctx, value);
+  }
+  registerAttachment(value: AttachmentRenderer) {
+    validate(value);
+    if (typeof value.matches !== "function")
+      throw new Error("An attachment renderer needs a matcher");
+    this.attachmentEntries.register(this.ctx, value);
   }
   registerMessage(value: MessageRenderer) {
     validate(value);
@@ -113,6 +169,11 @@ export class ConversationService extends Service implements Conversation {
   }
   registerAccessory(value: ComposerAccessory) {
     validate(value);
+    if (
+      value.placement !== undefined &&
+      !["composer", "message"].includes(value.placement)
+    )
+      throw new Error("Invalid accessory placement");
     this.accessoryEntries.register(this.ctx, value);
   }
   registerTool(value: ComposerTool) {
@@ -135,10 +196,22 @@ export class ConversationService extends Service implements Conversation {
     validate(value);
     if (typeof value.matches !== "function")
       throw new Error("A link renderer needs a matcher");
+    if (
+      value.order !== undefined &&
+      typeof value.order !== "number" &&
+      typeof value.order !== "function"
+    )
+      throw new Error("A link renderer order must be a number or function");
     if (value.className !== undefined && typeof value.className !== "string")
       throw new Error("A link renderer class must be a string");
     this.linkEntries.register(this.ctx, value);
   }
+  readonly format = Object.freeze({
+    itemTimestamp: formatItemTimestamp,
+    dayGroupLabel: formatDayGroupLabel,
+    fullTimestamp: formatFullTimestamp,
+    relativeTimestamp,
+  });
   readonly ui = {
     Thread: (props: EmbeddedThreadProps) => (
       <EmbeddedThread {...props} host={this.ctx} extensions={this} />

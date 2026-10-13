@@ -1,3 +1,14 @@
+import { projectSidebarRecord } from "./sidebar-registers";
+import {
+  editSidebarAssignment,
+  editSidebarSectionRemoval,
+  validSidebarSectionRemoval,
+  editSidebarSort,
+  editSidebarToggle,
+  validSidebarAssignment,
+  validSidebarChannelId,
+  validSidebarSort,
+} from "./sidebar-edits";
 import { invoke } from "@tauri-apps/api/core";
 import { eventDto, type RelayEvent } from "./events";
 import {
@@ -73,7 +84,13 @@ export function nativeSidebar(transport: ReadTransport) {
     // The Rust decoder checks signature, author, coordinate and plaintext budget.
     const value = payload as Record<string, unknown>;
     project(coordinate, value);
-    return { payload: value, createdAt: events[0]?.created_at ?? 0 };
+    return {
+      payload:
+        coordinate === "channel-sections" || coordinate === "channel-sort"
+          ? projectSidebarRecord(coordinate, value)
+          : value,
+      createdAt: events[0]?.created_at ?? 0,
+    };
   }
   function project(
     coordinate: Coordinate,
@@ -91,7 +108,10 @@ export function nativeSidebar(transport: ReadTransport) {
   async function mutate<T>(
     coordinate: Coordinate,
     signal: AbortSignal,
-    prepare: (current: Record<string, unknown>) => {
+    prepare: (
+      current: Record<string, unknown>,
+      createdAt: number,
+    ) => {
       next: Record<string, unknown>;
       result: T;
     },
@@ -99,7 +119,7 @@ export function nativeSidebar(transport: ReadTransport) {
     conflict: string,
   ): Promise<T> {
     const current = await head(coordinate, signal);
-    const draft = prepare(current.payload);
+    const draft = prepare(current.payload, current.createdAt);
     if (same(current.payload, draft.next)) return draft.result;
     // Reject unsupported/over-budget writes at the existing projection boundary.
     project(coordinate, draft.next);
@@ -123,56 +143,45 @@ export function nativeSidebar(transport: ReadTransport) {
     await writer.publish(event, signal);
     const confirmed = await head(coordinate, signal);
     if (!confirms(confirmed.payload)) throw new Error(conflict);
-    return prepare(confirmed.payload).result;
+    return prepare(confirmed.payload, confirmed.createdAt).result;
   }
   return {
     decodeSidebarPreferences: decode,
+    async removeSidebarSection(
+      sectionId: string,
+      signal: AbortSignal,
+    ): Promise<SidebarGroups> {
+      if (!validSidebarSectionRemoval(sectionId))
+        throw new Error("Invalid sidebar section removal intent");
+      const prepare = (current: Record<string, unknown>, createdAt: number) => {
+        const next = editSidebarSectionRemoval(current, createdAt, sectionId);
+        const { sections, assignments } = project("channel-sections", next);
+        return { next, result: { sections, assignments } };
+      };
+      return mutate(
+        "channel-sections",
+        signal,
+        prepare,
+        (value) => {
+          const { sections, assignments } = project("channel-sections", value);
+          return (
+            !sections.some(({ id }) => id === sectionId) &&
+            !Object.values(assignments).includes(sectionId)
+          );
+        },
+        "Sidebar groups changed on another device; reload and try again",
+      );
+    },
     async writeSidebarAssignment(
       intent: SidebarAssignmentIntent,
       signal: AbortSignal,
     ): Promise<SidebarGroups> {
       const { channelId, sectionId, createSection } = intent;
-      if (
-        !channelId.trim() ||
-        channelId.length > 256 ||
-        (sectionId !== undefined &&
-          (!sectionId.trim() || sectionId.length > 256)) ||
-        (createSection &&
-          (sectionId !== undefined ||
-            !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(
-              createSection.id,
-            ) ||
-            !createSection.name.trim() ||
-            createSection.name.length > 256))
-      )
+      if (!validSidebarAssignment(intent))
         throw new Error("Invalid sidebar assignment intent");
       const section = createSection?.id ?? sectionId;
-      const prepare = (current: Record<string, unknown>) => {
-        const existing = current.sections as SidebarGroups["sections"];
-        const sections = [...existing];
-        if (createSection) {
-          const name = createSection.name.trim();
-          const found = sections.find((entry) => entry.id === section);
-          if (found && found.name !== name)
-            throw new Error("The new section changed; reload and try again");
-          if (!found)
-            sections.push({
-              id: createSection.id,
-              name,
-              order: Math.max(-1, ...sections.map((entry) => entry.order)) + 1,
-            });
-        }
-        if (
-          section !== undefined &&
-          !sections.some((entry) => entry.id === section)
-        )
-          throw new Error("Sidebar group no longer exists");
-        const assignments = {
-          ...(current.assignments as Record<string, string>),
-        };
-        if (section === undefined) delete assignments[channelId];
-        else assignments[channelId] = section;
-        const next = { ...current, sections, assignments };
+      const prepare = (current: Record<string, unknown>, createdAt: number) => {
+        const next = editSidebarAssignment(current, createdAt, intent);
         const { sections: projected, assignments: mapped } = project(
           "channel-sections",
           next,
@@ -228,24 +237,10 @@ export function nativeSidebar(transport: ReadTransport) {
       sectionIds: readonly string[],
       signal: AbortSignal,
     ) {
-      if (
-        group.length > 264 ||
-        !["alpha", "recent"].includes(mode) ||
-        sectionIds.length > 100 ||
-        sectionIds.some((id) => !id.trim() || id.length > 256) ||
-        (!["starred", "channels", "forums", "dms"].includes(group) &&
-          !(
-            group.startsWith("section:") && sectionIds.includes(group.slice(8))
-          ))
-      )
+      if (!validSidebarSort(group, mode, sectionIds))
         throw new Error("Invalid sidebar sort intent");
-      const prepare = (current: Record<string, unknown>) => {
-        const groups = {
-          ...(current.groups as Record<string, SidebarSortMode>),
-        };
-        if (mode === "alpha") delete groups[group];
-        else groups[group] = mode;
-        const next = { ...current, groups };
+      const prepare = (current: Record<string, unknown>, createdAt: number) => {
+        const next = editSidebarSort(current, createdAt, group, mode);
         return {
           next,
           result: project("channel-sort", next, sectionIds).sort ?? {},
@@ -270,44 +265,12 @@ export function nativeSidebar(transport: ReadTransport) {
   ) {
     const { channelId } = intent;
     const enabled = intent[field];
-    if (
-      !channelId.trim() ||
-      channelId.length > 256 ||
-      typeof enabled !== "boolean"
-    )
+    if (!validSidebarChannelId(channelId) || typeof enabled !== "boolean")
       throw new Error(
         `Invalid sidebar ${field === "starred" ? "star" : "mute"} intent`,
       );
     const prepare = (current: Record<string, unknown>) => {
-      const channels = current.channels as Record<
-        string,
-        Record<string, unknown>
-      >;
-      const previous = Object.hasOwn(channels, channelId)
-        ? channels[channelId]
-        : undefined;
-      if (
-        previous?.[field] === enabled ||
-        (!previous && !enabled && field === "starred")
-      )
-        return {
-          next: current,
-          result: project(coordinate, current)[
-            field === "starred" ? "starred" : "muted"
-          ],
-        };
-      const now = Date.now();
-      const next = {
-        ...current,
-        channels: {
-          ...channels,
-          [channelId]: {
-            ...previous,
-            [field]: enabled,
-            updatedAt: Math.max(now, Number(previous?.updatedAt ?? 0) + 1),
-          },
-        },
-      };
+      const next = editSidebarToggle(current, channelId, field, enabled);
       return {
         next,
         result: project(coordinate, next)[

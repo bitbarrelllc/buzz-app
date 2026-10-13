@@ -10,8 +10,11 @@ import type { AppServices } from "./services";
 import { communityDestination } from "../features/communities/destination";
 import type { OpenTarget } from "../features/navigation/targets";
 import type { PageNavigation } from "../features/navigation/service";
-import type { OpenFailure } from "../features/navigation/controller";
-import { developerMode } from "./Settings";
+import type {
+  OpenFailure,
+  NavigationOpenOptions,
+} from "../features/navigation/controller";
+import { isBuiltInSettingsSection } from "./settings-sections";
 
 const channelsKey = "buzz.channels/channels";
 export function useAppNavigation(services: AppServices) {
@@ -109,16 +112,7 @@ export function useAppNavigation(services: AppServices) {
     !failure &&
     !waiting &&
     target.section &&
-    ![
-      "profile",
-      "plugins",
-      "appearance",
-      "shortcuts",
-      "agents",
-      "notifications",
-      "updates",
-    ].includes(target.section) &&
-    !(developerMode && target.section === "developer")
+    !isBuiltInSettingsSection(target.section)
   ) {
     // Plugin cards are addressed by contribution key.
     const section = target.section;
@@ -229,7 +223,10 @@ export function useAppNavigation(services: AppServices) {
       services.communities.select(membership.id);
     }
   }, [services, state.attempt, failure, scope, client, membership]);
-  const select = (key: string) => {
+  const select = (
+    key: string,
+    options?: Pick<NavigationOpenOptions, "focus">,
+  ) => {
     const selectedClient = services.communities.snapshot();
     let destination: OpenTarget;
     if (key === "settings")
@@ -265,7 +262,7 @@ export function useAppNavigation(services: AppServices) {
           : { scope: null }),
       };
     }
-    void navigation.open(destination);
+    void navigation.open(destination, options);
   };
   return {
     state,

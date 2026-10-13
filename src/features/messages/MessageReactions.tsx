@@ -1,3 +1,4 @@
+import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import {
   useLayoutEffect,
   useMemo,
@@ -35,15 +36,22 @@ type Props = {
   tools: ContributionReader<ComposerTool>;
   inline: ContributionReader<InlineRenderer>;
 };
+/**
+ * Who reacted is the pill's primary answer and people scan several pills in a
+ * row, so the first hover opens quickly (as Slack does); once a preview is
+ * open, moving along the row switches previews immediately.
+ */
+export const REACTION_PREVIEW_DELAY_MS = 100;
 const noSubscribe = () => () => {};
 const noOperations = Object.freeze([]);
 const empty = () => noOperations;
 
 function useReactionAction({ row, session, scope, disabled }: Props) {
+  const presented = useConversationPresentation();
   const [error, setError] = useState<string>();
   const active = useRef(false);
   useLayoutEffect(() => {
-    active.current = !disabled;
+    active.current = !disabled && presented;
   });
   useLayoutEffect(
     () => () => {
@@ -157,17 +165,18 @@ export function MessageReactionControls(props: Props) {
               aria-pressed={mine}
               onClick={() => select(content)}
               icon={
-                <span className={styles.quickReactionGlyph}>
-                  <ReactionLabel
-                    row={row}
-                    inline={inline}
-                    session={session}
-                    reaction={{
-                      content,
-                      ...(emoji ? { emoji } : {}),
-                      events: [],
-                    }}
-                  />
+                <span
+                  className={styles.quickReactionGlyph}
+                  data-emoji={emoji ? undefined : content}
+                >
+                  {emoji && (
+                    <ReactionLabel
+                      row={row}
+                      inline={inline}
+                      session={session}
+                      reaction={{ content, emoji, events: [] }}
+                    />
+                  )}
                 </span>
               }
             />
@@ -333,7 +342,9 @@ export function MessageReactions(
     profiles?: ReadonlyMap<string, Profile>;
   },
 ) {
+  const active = useConversationPresentation();
   const { row, session, scope, tools } = props;
+  const reactions = row.reactions;
   const action = useReactionAction(props);
   const catalog = useSyncExternalStore(
     session.emoji.subscribe,
@@ -346,6 +357,8 @@ export function MessageReactions(
     index: number;
     fromIndex: number | undefined;
   }>();
+  if (!active && preview) setPreview(undefined);
+  if (!active && pointerInRow) setPointerInRow(false);
   const select = (content: string) => {
     return action.toggle(content, catalogEmoji(catalog.entries, content));
   };
@@ -362,49 +375,52 @@ export function MessageReactions(
         setPreview(undefined);
       }}
     >
-      {row.reactions.map((reaction, index) => {
-        const key = JSON.stringify([reaction.content, reaction.emoji?.url]);
-        const slideFrom =
-          preview?.key === key ? preview.fromIndex : preview?.index;
-        const previewSlide =
-          pointerInRow && slideFrom !== undefined && slideFrom !== index
-            ? index > slideFrom
-              ? "right"
-              : "left"
-            : undefined;
-        return (
-          <ReactionPill
-            key={key}
-            reaction={reaction}
-            session={session}
-            profiles={props.profiles}
-            disabled={props.disabled}
-            unavailable={action.disabled}
-            toggle={action.toggle}
-            onFocusedRemoval={props.onFocusedRemoval}
-            previewDelay={pointerInRow && preview ? 0 : 1200}
-            previewOpen={preview?.key === key}
-            previewSlide={previewSlide}
-            onPreviewChange={(open) =>
-              setPreview((current) =>
-                open
-                  ? {
-                      key,
-                      index,
-                      fromIndex:
-                        current?.key === key
-                          ? current.fromIndex
-                          : current?.index,
-                    }
-                  : current?.key === key
-                    ? { ...current, key: null }
-                    : current,
-              )
-            }
-          />
-        );
-      })}
-      {row.reactions.length > 0 && !props.disabled && (
+      {active &&
+        reactions.map((reaction, index) => {
+          const key = JSON.stringify([reaction.content, reaction.emoji?.url]);
+          const slideFrom =
+            preview?.key === key ? preview.fromIndex : preview?.index;
+          const previewSlide =
+            pointerInRow && slideFrom !== undefined && slideFrom !== index
+              ? index > slideFrom
+                ? "right"
+                : "left"
+              : undefined;
+          return (
+            <ReactionPill
+              key={key}
+              reaction={reaction}
+              session={session}
+              profiles={props.profiles}
+              disabled={props.disabled}
+              unavailable={action.disabled}
+              toggle={action.toggle}
+              onFocusedRemoval={props.onFocusedRemoval}
+              previewDelay={
+                pointerInRow && preview ? 0 : REACTION_PREVIEW_DELAY_MS
+              }
+              previewOpen={preview?.key === key}
+              previewSlide={previewSlide}
+              onPreviewChange={(open) =>
+                setPreview((current) =>
+                  open
+                    ? {
+                        key,
+                        index,
+                        fromIndex:
+                          current?.key === key
+                            ? current.fromIndex
+                            : current?.index,
+                      }
+                    : current?.key === key
+                      ? { ...current, key: null }
+                      : current,
+                )
+              }
+            />
+          );
+        })}
+      {active && reactions.length > 0 && !props.disabled && (
         <span
           className={styles.inlineReactionTool}
           data-testid="inline-add-reaction"

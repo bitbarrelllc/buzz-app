@@ -11,7 +11,13 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 // Playwright owns this worker-scoped build. Only compiled assets are shared;
 // each test still owns its server, identities, relay state and browser storage.
 export async function buildApp(
-  { developmentReact, pluginFixtures, companionFixture },
+  {
+    developmentReact,
+    pluginFixtures,
+    companionFixture,
+    localAgentActivity,
+    pairingFixture,
+  },
   use,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "buzz-browser-build-"));
@@ -24,6 +30,21 @@ export async function buildApp(
       logLevel: "error",
       plugins: [
         react(),
+        ...(pairingFixture
+          ? [
+              {
+                name: "pairing-fixture",
+                transform(code, id) {
+                  if (id !== join(root, "src/bundled/pairing/index.tsx"))
+                    return;
+                  return code.replace(
+                    'import { PairingSettings } from "./PairingSettings";',
+                    `import { PairingFixture as PairingSettings } from ${JSON.stringify(join(root, "tests/browser/pairing-fixture.tsx"))};`,
+                  );
+                },
+              },
+            ]
+          : []),
         ...(pluginFixtures || companionFixture
           ? [
               {
@@ -58,6 +79,28 @@ export async function buildApp(
       },
       build: { outDir: join(directory, "dist"), emptyOutDir: true },
     };
+    if (localAgentActivity)
+      config.plugins.push({
+        name: "fixture-local-agent",
+        transform(code, id) {
+          const fixture = JSON.stringify(
+            join(root, "tests/browser/local-agents-fixture.ts"),
+          );
+          if (id === join(root, "src/features/agents/native.ts")) {
+            const start = code.indexOf("export const nativeAgents =");
+            if (start < 0) throw new Error("Missing native Agents seam");
+            return (
+              code.slice(0, start) +
+              `import { localAgentsNative } from ${fixture};\nexport const nativeAgents = localAgentsNative;`
+            );
+          }
+          if (id === join(root, "src/bundled/index.ts"))
+            return (
+              `import { localAgentPlugin } from ${fixture};\n` +
+              code.replace("= [", "= [localAgentPlugin,")
+            );
+        },
+      });
     const start = performance.now();
     await build(config);
     await use({ config, durationMs: performance.now() - start });
