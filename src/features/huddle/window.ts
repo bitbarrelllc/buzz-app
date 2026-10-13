@@ -138,7 +138,7 @@ export function createHuddleWindow(
     const profiles = session.profiles.snapshot();
     return {
       id: call.id,
-      title: call.destination.channelName,
+      title: Array.from(call.destination.channelName).slice(0, 1000).join(""),
       phase: call.phase as HuddleView["phase"],
       muted: call.muted,
       error: call.error

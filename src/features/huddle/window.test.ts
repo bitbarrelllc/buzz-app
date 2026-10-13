@@ -461,11 +461,21 @@ it("bounds multibyte participant names on open and update and routes only curren
   const profiles = h.profiles;
   profiles.set("peer", { name: "界😀".repeat(3000) });
   try {
-    h.set({ ...h.call.snapshot(), participants: ["peer"] });
+    h.set({
+      ...h.call.snapshot(),
+      destination: {
+        ...h.call.snapshot().destination!,
+        channelName: "😀".repeat(3000),
+      },
+      participants: ["peer"],
+    });
     h.release();
     await h.companion.open();
     const first = vi.mocked(h.bridge.open).mock.calls[0]?.[0];
     assert(first?.participants[0]);
+    expect(new TextEncoder().encode(first.title).length).toBeLessThanOrEqual(
+      4096,
+    );
     expect(
       new TextEncoder().encode(first.participants[0].name).length,
     ).toBeLessThanOrEqual(4096);

@@ -32,7 +32,11 @@ export function HuddleWindowView(props: WindowProps) {
   );
 }
 function HuddleWindowContent({ view, act, error }: WindowProps) {
-  const focus = useHuddleRequestFocus(view.phase === "connected", view.error);
+  const focus = useHuddleRequestFocus(
+    view.phase === "connected",
+    view.error,
+    true,
+  );
   const incoming = useRef(false);
   if (view.phase === "incoming") incoming.current = true;
   else if (view.phase !== "connecting") incoming.current = false;

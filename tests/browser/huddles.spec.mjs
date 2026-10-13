@@ -1407,6 +1407,33 @@ test("window Join and compact Decline operate on the same incoming request", asy
       }
     }
   }
+  // A pending request no longer owns keyboard focus after the user moves away.
+  await page.goto(
+    `${origin}/tests/fixtures/huddles.html?chrome&deferConnection`,
+  );
+  await trigger.click();
+  await request
+    .getByRole("button", { name: "Minimize Huddle request" })
+    .click();
+  await capsule
+    .getByRole("button", { name: "Join", exact: true })
+    .press("Enter");
+  await expect
+    .poll(() => page.evaluate(() => window.huddleFixture.stats.opens))
+    .toBe(1);
+  const elsewhere = page.getByRole("button", {
+    name: "Search Buzz",
+    exact: true,
+  });
+  await elsewhere.focus();
+  await page.evaluate(() =>
+    window.huddleFixture.disconnect("Microphone disconnected"),
+  );
+  await expect(capsule.getByRole("alert")).toHaveText(
+    "Microphone disconnected",
+  );
+  await expect(elsewhere).toBeFocused();
+  await expect(request).toHaveCount(0);
 });
 
 // Real media decoding and autoplay need a browser; fake-clock unit tests cover the exact gap.
