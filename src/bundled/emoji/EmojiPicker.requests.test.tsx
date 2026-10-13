@@ -49,7 +49,7 @@ it("uses the supplied window owner for GIF discovery, search, retry and selectio
         gifRequests={{ supports, search }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Insert emoji" }));
+    fireEvent.click(screen.getByRole("button", { name: "Emoji and GIFS" }));
     fireEvent.click(await screen.findByRole("tab", { name: "GIF" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Search offline",
