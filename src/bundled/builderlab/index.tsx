@@ -9,6 +9,7 @@ import { createOAuthSession } from "./oauth/session";
 import { createAgentClient } from "./agents/client";
 import { RemoteAgents } from "./agents/RemoteAgents";
 import { builderlabType } from "./adapter-type";
+import type {} from "./service";
 
 export const inject = ["host", "settingsCards", "agents"];
 export const apply: PluginModule["apply"] = (ctx) => {
@@ -28,7 +29,10 @@ export const apply: PluginModule["apply"] = (ctx) => {
   });
   ctx.effect(() => () => session.dispose());
   const agents = createAgentClient(ctx.host, session);
-  if (!unavailable) ctx.agents.register(builderlabType(agents, session));
+  if (!unavailable) {
+    ctx.agents.register(builderlabType(agents, session));
+    ctx.provide("builderlab", { session, agents });
+  }
   ctx.settingsCards.register({
     id: "login",
     title: "Builderlab",

@@ -18,6 +18,9 @@ saves changes directly to the provider. Loading and saving use the same login;
 failed saves keep the draft, and switching accounts requires the original
 account before saving. Empty instructions can be saved to clear them.
 Profile updates remain TODO and report an unsupported-operation error.
+While the hosted type is registered, the plugin also provides `ctx.builderlab`
+(`session`, `agents`) so bundled consumers such as Bestie can set a hosted
+agent's instructions with the same login.
 
 The adapter retains the provider agent ID, server, verified account subject and
 provisioning replay reference in `buzz.builderlab.adapter-identity.v1:` records.
