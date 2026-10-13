@@ -515,16 +515,25 @@ export function groupReactions(
   );
 }
 
-/** Keep a start card stable while it observes its end; preserve a lone end fallback. */
+/** Keep the start ID stable without discarding its retained authoritative end. */
 export function collapseHuddleCards(rows: ChannelMessage[]): ChannelMessage[] {
-  const startedRooms = new Set(
-    rows
-      .filter((row) => row.huddle?.state === "started")
-      .map((row) => row.huddle?.room),
+  const key = (row: ChannelMessage) => `${row.channelId}:${row.huddle?.room}`;
+  const starts = new Set(
+    rows.filter((row) => row.huddle?.state === "started").map(key),
   );
-  if (!startedRooms.size) return rows;
-  return rows.filter(
-    (row) =>
-      row.huddle?.state !== "ended" || !startedRooms.has(row.huddle.room),
-  );
+  if (!starts.size) return rows;
+  const ends = new Map<string, number>();
+  for (const row of rows) {
+    if (row.huddle?.state === "ended")
+      ends.set(key(row), Math.max(ends.get(key(row)) ?? 0, row.createdAt));
+  }
+  return rows.flatMap((row) => {
+    if (row.huddle?.state === "ended" && starts.has(key(row))) return [];
+    const endedAt = ends.get(key(row));
+    return row.huddle?.state === "started" &&
+      endedAt !== undefined &&
+      endedAt >= row.createdAt
+      ? [Object.freeze({ ...row, huddle: { ...row.huddle, endedAt } })]
+      : [row];
+  });
 }

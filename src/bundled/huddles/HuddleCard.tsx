@@ -89,8 +89,8 @@ export function HuddleCard({
       view.dispose();
     };
   }, [connection.session, message.channelId, room]);
-  const ended =
-    message.huddle?.state === "ended" || history.endedAt !== undefined;
+  const endedAt = message.huddle?.endedAt ?? history.endedAt;
+  const ended = message.huddle?.state === "ended" || endedAt !== undefined;
   const start = history.startedAt ?? message.createdAt;
   const active =
     !ended && start <= now && (current || (loaded && now - start < 3600));
@@ -131,10 +131,8 @@ export function HuddleCard({
           {finished ? "Huddle ended" : active ? "Huddle in progress" : "Huddle"}
         </strong>
         <div className={`${styles.summary} text-secondary`}>
-          {(active || history.endedAt) && (
-            <time>
-              {duration(Math.max(0, (history.endedAt ?? now) - start))}
-            </time>
+          {(active || endedAt !== undefined) && (
+            <time>{duration(Math.max(0, (endedAt ?? now) - start))}</time>
           )}
           {people.length > 0 && (
             <HuddleAvatarStack participants={people} relay={relay} />

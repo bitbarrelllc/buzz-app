@@ -89,6 +89,8 @@ struct DiscussionAttachment {
     size: Option<u64>,
     name: Option<String>,
     duration: Option<f64>,
+    voice_note: Option<bool>,
+    waveform: Option<Vec<u8>>,
     dimensions: Option<AttachmentDimensions>,
     blurhash: Option<String>,
     preview_url: Option<String>,
@@ -114,6 +116,9 @@ impl DiscussionAttachment {
                 .blurhash
                 .as_ref()
                 .map_or(true, |hash| hash.len() <= 256)
+            && self.waveform.as_ref().map_or(true, |waveform| {
+                !waveform.is_empty() && waveform.len() <= 100 && waveform.iter().all(|n| *n <= 100)
+            })
             && self.duration.map_or(true, |duration| {
                 duration.is_finite() && (0.0..=86400.0).contains(&duration)
             })
@@ -565,6 +570,25 @@ mod tests {
         assert!(serde_json::from_value::<View>(encoded).is_ok());
         presentation.audio_settings.as_mut().unwrap().inputs[0].id = "x".repeat(4097);
         assert!(validate(&presentation).is_err());
+    }
+    #[test]
+    fn voice_note_metadata_round_trips_and_bounds_waveform() {
+        let value = serde_json::json!({
+            "url": "https://relay.example/voice-note.m4a", "kind": "audio",
+            "mime": "audio/mp4", "voiceNote": true, "duration": 1.5,
+            "waveform": [0, 25, 100]
+        });
+        let attachment: DiscussionAttachment = serde_json::from_value(value).unwrap();
+        assert!(attachment.valid());
+        let encoded = serde_json::to_value(&attachment).unwrap();
+        assert_eq!(encoded["voiceNote"], true);
+        assert_eq!(encoded["waveform"], serde_json::json!([0, 25, 100]));
+        let mut decoded: DiscussionAttachment = serde_json::from_value(encoded).unwrap();
+        assert!(decoded.valid());
+        decoded.waveform = Some(vec![101]);
+        assert!(!decoded.valid());
+        decoded.waveform = Some(vec![1; 101]);
+        assert!(!decoded.valid());
     }
     #[test]
     fn discussion_delivery_and_attachments_survive_the_native_dto() {

@@ -114,7 +114,11 @@ export type ChannelMessage = Readonly<{
     truncated: boolean;
   }>;
   membership?: MembershipChange;
-  huddle?: Readonly<{ room: string; state: "started" | "ended" }>;
+  huddle?: Readonly<{
+    room: string;
+    state: "started" | "ended";
+    endedAt?: number;
+  }>;
   /** Current body came from a replacement edit; original recipients do not bind its prose. */
   edited?: true;
   /** Offsets in `content` where attachment removal joined once-separate text; a

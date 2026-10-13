@@ -17,12 +17,18 @@ function Request({
   const focus = useHuddleRequestFocus(false, error, initial);
   return (
     <>
-      <button aria-label="Search Buzz">Search</button>
+      <button type="button" aria-label="Search Buzz">
+        Search
+      </button>
       <textarea aria-label="Message" />
       {shown && (
         <section ref={focus.requestRef}>
-          <button data-huddle-join="">Join</button>
-          <button ref={focus.cancel}>Cancel</button>
+          <button type="button" data-huddle-join="">
+            Join
+          </button>
+          <button type="button" ref={focus.cancel}>
+            Cancel
+          </button>
         </section>
       )}
     </>

@@ -352,8 +352,9 @@ it("preserves sent attachment metadata and resolved media in the window presenta
     await vi.waitFor(() => expect(h.discussion.snapshot().writable).toBe(true));
     const files = [
       {
-        name: "notes.txt",
-        type: "text/plain",
+        name: "voice-note-test.m4a",
+        type: "audio/mp4",
+        voice: { duration: 1.5, waveform: [0, 25, 100] },
         size: 23,
         sha256: "a".repeat(64),
         url: `https://fixture.example/media/${"a".repeat(64)}`,
@@ -397,8 +398,37 @@ it("preserves sent attachment metadata and resolved media in the window presenta
         previewSource: null,
       })),
     );
+    expect(row.attachments[0]).toMatchObject({
+      voiceNote: true,
+      waveform: [0, 25, 100],
+      duration: 1.5,
+    });
+    h.rows([
+      {
+        ...folded,
+        attachments: [
+          { url: `https://example.test/${"a".repeat(8192)}`, kind: "file" },
+          {
+            url: "https://example.test/file",
+            kind: "file",
+            mime: "界".repeat(100),
+            name: "😀".repeat(1100),
+            previewUrl: `https://example.test/${"a".repeat(8192)}`,
+          },
+          ...folded.attachments,
+        ],
+      },
+    ]);
+    const projected = h.discussion.snapshot().rows[0];
+    expect(projected?.attachments).toHaveLength(3);
+    expect(projected?.attachments[0]).toEqual({
+      url: "https://example.test/file",
+      kind: "file",
+      source: "http://buzz-media.localhost/https%3A%2F%2Fexample.test%2Ffile",
+      previewSource: null,
+    });
     expect(row.attachments.map((attachment) => attachment.kind)).toEqual([
-      "file",
+      "audio",
       "image",
     ]);
   } finally {
@@ -481,7 +511,7 @@ it("preserves signed mention evidence and edit boundaries while bounding discuss
     ]);
     h.profiles.set("ab".repeat(32), {
       name: "Author",
-      picture: "data:image/png;base64," + "a".repeat(9000),
+      picture: `data:image/png;base64,${"a".repeat(9000)}`,
     });
     expect(h.discussion.snapshot().rows[0]?.picture).toBeNull();
     h.profiles.set("ab".repeat(32), {

@@ -159,13 +159,50 @@ export function createHuddleDiscussion(
             id: r.id,
             authorId: r.authorId,
             channelId: room,
-            attachments: r.attachments.map((attachment) => ({
-              ...attachment,
-              source: session.media(attachment.url) ?? null,
-              previewSource: attachment.previewUrl
-                ? (session.media(attachment.previewUrl) ?? null)
-                : null,
-            })),
+            attachments: r.attachments.flatMap((attachment) => {
+              // Keep one malformed metadata value from rejecting the entire native view.
+              // URLs are omitted, never truncated into a different resource.
+              const bounded = (value: string | undefined, bytes: number) =>
+                value !== undefined &&
+                new TextEncoder().encode(value).length <= bytes
+                  ? value
+                  : undefined;
+              const url = bounded(attachment.url, 8192);
+              if (!url) return [];
+              const mime = bounded(attachment.mime, 256);
+              const name = bounded(attachment.name, 4096);
+              const blurhash = bounded(attachment.blurhash, 256);
+              const previewUrl = bounded(attachment.previewUrl, 8192);
+              return [
+                {
+                  url,
+                  kind: attachment.kind,
+                  ...(mime !== undefined ? { mime } : {}),
+                  ...(name !== undefined ? { name } : {}),
+                  ...(blurhash !== undefined ? { blurhash } : {}),
+                  ...(previewUrl !== undefined ? { previewUrl } : {}),
+                  ...(attachment.size !== undefined
+                    ? { size: attachment.size }
+                    : {}),
+                  ...(attachment.duration !== undefined
+                    ? { duration: attachment.duration }
+                    : {}),
+                  ...(attachment.dimensions
+                    ? { dimensions: attachment.dimensions }
+                    : {}),
+                  ...(attachment.voiceNote
+                    ? { voiceNote: attachment.voiceNote }
+                    : {}),
+                  ...(attachment.waveform
+                    ? { waveform: attachment.waveform }
+                    : {}),
+                  source: bounded(session.media(url), 8192) ?? null,
+                  previewSource: previewUrl
+                    ? (bounded(session.media(previewUrl), 8192) ?? null)
+                    : null,
+                },
+              ];
+            }),
             author: (
               profile?.name ||
               formatPublicKey(r.authorId) ||

@@ -1,3 +1,5 @@
+import { MessageProjection } from "../relay/message-projection";
+import { createRelayProfiler } from "../relay/profiling";
 import { foldMessages } from "../relay/fold";
 import { expect, it } from "vitest";
 import {
@@ -61,7 +63,7 @@ it("projects actual Huddle history cards and marked room metadata through the re
     await flush();
     expect(
       owner.session.channels.window(parent).rows.map((row) => row.huddle),
-    ).toEqual([{ room, state: "started" }]);
+    ).toEqual([{ room, state: "started", endedAt: 30 }]);
   } finally {
     owner.dispose();
   }
@@ -122,4 +124,21 @@ it("keeps one stable card for a retained start/end pair and an end-only fallback
   expect(
     foldMessages(parent, relay.pubkey, [start, end, deleted]),
   ).toMatchObject([{ id: end.id }]);
+});
+
+it("updates an already-visible start when its authoritative end arrives", () => {
+  const start = event(48100, author, 10);
+  const end = event(48103, relay, 20);
+  const projection = new MessageProjection(
+    parent,
+    relay.pubkey,
+    createRelayProfiler(),
+  );
+  const previous = projection.reconcile([start], []);
+  const next = projection.reconcile([start, end], []);
+  expect(next).toHaveLength(1);
+  expect(next[0]?.id).toBe(previous[0]?.id);
+  expect(next[0]).not.toBe(previous[0]);
+  expect(next[0]?.huddle?.endedAt).toBe(20);
+  expect(projection.reconcile([start, end], [])).toBe(next);
 });

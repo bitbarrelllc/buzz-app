@@ -8,8 +8,8 @@ import { createHuddles } from "../../features/huddle/service";
 import { HuddleCard, huddleTarget } from "./HuddleCard";
 
 afterEach(cleanup);
-it.each([-3601, 86400])(
-  "keeps View without Join for an expired or future start (%s) after the lifecycle read fails",
+it.each([-3601, 86400, -30])(
+  "keeps View without Join for expired, future, or retained ended starts (%s) after the lifecycle read fails",
   async (offset) => {
     const parent = "00000000-0000-4000-8000-000000000001";
     const room = "00000000-0000-4000-8000-000000000002";
@@ -71,6 +71,18 @@ it.each([-3601, 86400])(
         tags: [["h", parent]],
         content: JSON.stringify({ ephemeral_channel_id: room }),
       },
+      ...(offset === -30
+        ? [
+            {
+              id: "2".repeat(64),
+              pubkey: viewer,
+              kind: 48103,
+              created_at: Math.floor(Date.now() / 1000) - 10,
+              tags: [["h", parent]],
+              content: JSON.stringify({ ephemeral_channel_id: room }),
+            },
+          ]
+        : []),
     ]);
     assert.exists(message);
     const open = vi.fn(() => true);
