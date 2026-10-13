@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 
 /** Only transfer focus when it belonged to the request being replaced. */
-export function useHuddleRequestFocus(connected: boolean) {
+export function useHuddleRequestFocus(connected: boolean, retryError?: string) {
   const request = useRef<HTMLElement | null>(null);
   const restore = useRef(false);
   const cancel = useRef<HTMLButtonElement>(null);
@@ -24,5 +24,8 @@ export function useHuddleRequestFocus(connected: boolean) {
       restore.current = false;
     }
   }, [connected]);
+  useLayoutEffect(() => {
+    if (retryError) request.current?.querySelector<HTMLButtonElement>("[data-huddle-join]")?.focus({ preventScroll: true });
+  }, [retryError]);
   return { requestRef, cancel, mute };
 }

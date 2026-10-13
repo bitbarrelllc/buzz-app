@@ -12,6 +12,7 @@ export type HuddleView = {
   id: string;
   title: string;
   phase: "incoming" | "connecting" | "connected" | "leaving";
+  error?: string | undefined;
   muted: boolean;
   level: number;
   dark: boolean;
@@ -140,6 +141,7 @@ export function createHuddleWindow(
       title: call.destination.channelName,
       phase: call.phase as HuddleView["phase"],
       muted: call.muted,
+      error: call.error ? Array.from(call.error).slice(0, 2000).join("") : undefined,
       audioSettings: call.audioSettings,
       level: call.level ?? 0,
       dark: document.documentElement.classList.contains("dark"),
@@ -148,6 +150,7 @@ export function createHuddleWindow(
         : undefined,
       participants: call.participants.map((key) => {
         const profile = profiles.get(key);
+        const picture = profile?.picture ? session.media(profile.picture) : undefined;
         return {
           key,
           name: Array.from(
@@ -155,9 +158,7 @@ export function createHuddleWindow(
           )
             .slice(0, 1000)
             .join(""),
-          picture: profile?.picture
-            ? (session.media(profile.picture) ?? null)
-            : null,
+          picture: picture && new TextEncoder().encode(picture).length <= 8192 ? picture : null,
           own: key === call.destination?.viewer,
           level: call.speakers?.[key] ?? 0,
         };
@@ -203,6 +204,9 @@ export function createHuddleWindow(
         );
     });
     if (!live) {
+      // Ending an attempt may restore the same invitation after a failure.
+      // Explicit minimize uses its own path and keeps auto-open suppressed.
+      if (attempted === id) attempted = undefined;
       closeDiscussion();
       publish(false);
       opened = undefined;

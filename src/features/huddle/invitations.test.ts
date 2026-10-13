@@ -13,6 +13,7 @@ import { createHuddleDiscussion } from "./discussion";
 import { huddleDescription } from "./lifecycle";
 
 it("adds a room member, recovers the signed invitation after discovery, and keeps the original DM private", async () => {
+  const now = vi.spyOn(Date, "now").mockReturnValue(Date.now());
   const inviter = keypair(),
     guest = keypair(),
     authority = keypair();
@@ -158,10 +159,13 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
     openAudio.mockRejectedValueOnce(new Error("Microphone denied"));
     await calls.join(destination, room);
     await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+    expect(calls.snapshot().error).toBe("Microphone denied");
     vi.mocked(bridge.open).mockRejectedValueOnce(new Error("Admission failed"));
     await calls.join(destination, room);
     await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+    expect(calls.snapshot().error).toBe("Admission failed");
     await calls.join(destination, room);
+    expect(calls.snapshot().error).toBeUndefined();
     receive({
       type: "connected",
       room,
@@ -169,6 +173,26 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
     });
     expect(calls.snapshot().phase).toBe("connected");
     await calls.leave();
+    expect(calls.snapshot().phase).toBe("idle");
+    // A new local owner sees the still-live remote room. Cancelling admission
+    // must dismiss it even though bridge.close does not end the caller's room.
+    await calls.dispose();
+    calls = createHuddles(relay, bridge, openAudio);
+    await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+    await calls.join(destination, room);
+    expect(calls.snapshot().phase).toBe("connecting");
+    await calls.leave();
+    expect(calls.snapshot().phase).toBe("idle");
+    expect(recipient.session.channels.get?.(room)?.archived).not.toBe(true);
+    await calls.dispose();
+    calls = createHuddles(relay, bridge, openAudio);
+    await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+    let releaseAudio!: (value: typeof audio) => void;
+    openAudio.mockImplementationOnce(() => new Promise((resolve) => { releaseAudio = resolve; }));
+    const joining = calls.join(destination, room);
+    await calls.leave();
+    releaseAudio(audio);
+    await joining;
     expect(calls.snapshot().phase).toBe("idle");
     discussion = createHuddleDiscussion(
       recipient.session,
@@ -187,5 +211,6 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
     requests.dispose();
     recipient.dispose();
     sender.dispose();
+    now.mockRestore();
   }
 });

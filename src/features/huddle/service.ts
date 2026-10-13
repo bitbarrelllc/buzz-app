@@ -121,6 +121,9 @@ export function createHuddles(
       requests?.dismiss(snapshot.room);
       return;
     }
+    if (!error && snapshot.phase === "connecting" && snapshot.room)
+      requests?.dismiss(snapshot.room);
+    const failedRoom = snapshot.room;
     const previous = current;
     current = undefined;
     resetActivity();
@@ -130,7 +133,7 @@ export function createHuddles(
     clearInterval(previous?.heartbeat);
     previous?.stopAccess?.();
     if (!previous) {
-      update(error ? { ...idle, phase: "error", error } : idle);
+      update(error ? { ...idle, phase: "error", error, ...(failedRoom ? { room: failedRoom } : {}) } : idle);
       return;
     }
     update({
@@ -146,7 +149,7 @@ export function createHuddles(
           await previous.opening.catch(() => {});
           await bridge.close(previous.id);
         }
-        update(error ? { ...idle, phase: "error", error } : idle);
+        update(error ? { ...idle, phase: "error", error, ...(failedRoom ? { room: failedRoom } : {}) } : idle);
       } catch (failure) {
         update({ ...idle, phase: "error", error: message(failure) });
       } finally {
@@ -375,6 +378,7 @@ export function createHuddles(
         if (request)
           update({
             ...idle,
+            ...(snapshot.room === request.room && snapshot.error ? { error: snapshot.error } : {}),
             phase: "incoming",
             id: request.room,
             room: request.room,

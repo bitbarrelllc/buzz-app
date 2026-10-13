@@ -92,7 +92,7 @@ export function HuddleCard({
   const ended =
     message.huddle?.state === "ended" || history.endedAt !== undefined;
   const start = history.startedAt ?? message.createdAt;
-  const active = !ended && (current || (loaded && now - start < 3600));
+  const active = !ended && start <= now && (current || (loaded && now - start < 3600));
   const finished = ended || (loaded && !active);
   useEffect(() => {
     if (!active) return;

@@ -68,7 +68,7 @@ function HuddleCapsuleContent({
     companion.snapshot,
   );
   const [error, setError] = useState<string>();
-  const focus = useHuddleRequestFocus(call.phase === "connected");
+  const focus = useHuddleRequestFocus(call.phase === "connected", call.error);
   const audioUnavailable = call.error
     ?.toLowerCase()
     .includes("huddle audio unavailable in this deployment");
@@ -126,6 +126,7 @@ function HuddleCapsuleContent({
             {caller} calling
           </span>
         </Button>
+        {call.error && <span role="alert" className="text-caption text-danger">{call.error}</span>}
         <span className={styles.requestCompactActions}>
           <Button
             size="sm"

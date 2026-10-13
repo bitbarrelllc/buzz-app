@@ -14,6 +14,7 @@ import { stubAvatarBrowserApis } from "../../features/agents/avatar-testing";
 import { createRelaySession } from "../../features/relay/session";
 import type { RelayData } from "../../features/relay/service";
 import { writeView } from "../../shared/view-state";
+import { attachmentDraft } from "../../features/messages/attachment-draft";
 import { HuddlePanel } from "./HuddlePanel";
 import { huddleTarget } from "./HuddleCard";
 
@@ -114,9 +115,10 @@ it("releases unsent files on close while retaining the saved panel text draft", 
       screen.getByRole("button", { name: "Send message" }),
     ).not.toBeDisabled(),
   );
+  await waitFor(() => expect(attachmentDraft(session, `${scope}:draft:${room}`, room).snapshot()[0]?.status).toBe("ready"));
   view.unmount();
-  expect(upload).not.toHaveBeenCalled();
-  expect(release).not.toHaveBeenCalled();
+  expect(upload).toHaveBeenCalledOnce();
+  expect(release).toHaveBeenCalledWith(uploaded);
   render(panel());
   await waitFor(() =>
     expect(screen.getByRole("textbox").textContent).toContain(

@@ -669,6 +669,7 @@ it.each(["picker", "completion"] as const)(
           listeners.delete(listener);
         };
       },
+      refresh: async () => {},
     });
     const session = {
       ...test.session,

@@ -322,7 +322,8 @@ const bridge: HuddleBridge = {
   },
   async close() {
     stats.closes++;
-    endedAt = Math.floor(Date.now() / 1000);
+    // Local departure cannot end a room still owned by the incoming caller.
+    if (lifecycleCreator !== peer) endedAt = Math.floor(Date.now() / 1000);
     for (const listener of lifecycleListeners) listener();
   },
   async touch() {},

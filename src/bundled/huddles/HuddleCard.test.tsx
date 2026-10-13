@@ -8,7 +8,7 @@ import { createHuddles } from "../../features/huddle/service";
 import { HuddleCard, huddleTarget } from "./HuddleCard";
 
 afterEach(cleanup);
-it("keeps View available for an expired start after the lifecycle read fails", async () => {
+it.each([-3601, 86400])("keeps View without Join for an expired or future start (%s) after the lifecycle read fails", async (offset) => {
   const parent = "00000000-0000-4000-8000-000000000001";
   const room = "00000000-0000-4000-8000-000000000002";
   const viewer = "ab".repeat(32);
@@ -65,7 +65,7 @@ it("keeps View available for an expired start after the lifecycle read fails", a
       id: "1".repeat(64),
       pubkey: viewer,
       kind: 48100,
-      created_at: Math.floor(Date.now() / 1000) - 3601,
+      created_at: Math.floor(Date.now() / 1000) + offset,
       tags: [["h", parent]],
       content: JSON.stringify({ ephemeral_channel_id: room }),
     },

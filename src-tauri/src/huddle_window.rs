@@ -11,6 +11,8 @@ pub(crate) struct View {
     id: String,
     title: String,
     phase: String,
+    #[serde(default)]
+    error: Option<String>,
     muted: bool,
     level: f32,
     dark: bool,
@@ -190,6 +192,7 @@ fn require<R: tauri::Runtime>(window: &WebviewWindow<R>, label: &str) -> Result<
 fn validate(view: &View) -> Result<()> {
     if uuid::Uuid::parse_str(&view.id).is_err()
         || view.title.len() > 4096
+        || view.error.as_ref().is_some_and(|e| e.len() > 8192)
         || !matches!(
             view.phase.as_str(),
             "incoming" | "connecting" | "connected" | "leaving"
@@ -519,6 +522,7 @@ mod tests {
             id: id.into(),
             title: "Design".into(),
             phase: "connected".into(),
+            error: None,
             muted: false,
             level: 0.0,
             dark: false,
@@ -527,6 +531,16 @@ mod tests {
             discussion_open: false,
             audio_settings: None,
         }
+    }
+    #[test]
+    fn retry_error_survives_the_native_dto_and_is_bounded() {
+        let mut presentation = view("00000000-0000-4000-8000-000000000001");
+        presentation.error = Some("Microphone denied".into());
+        assert!(validate(&presentation).is_ok());
+        let decoded: View = serde_json::from_value(serde_json::to_value(&presentation).unwrap()).unwrap();
+        assert_eq!(decoded.error.as_deref(), Some("Microphone denied"));
+        presentation.error = Some("x".repeat(8193));
+        assert!(validate(&presentation).is_err());
     }
     #[test]
     fn audio_settings_survive_the_native_dto_and_limit_device_data() {
