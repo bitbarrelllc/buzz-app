@@ -537,7 +537,8 @@ mod tests {
         let mut presentation = view("00000000-0000-4000-8000-000000000001");
         presentation.error = Some("Microphone denied".into());
         assert!(validate(&presentation).is_ok());
-        let decoded: View = serde_json::from_value(serde_json::to_value(&presentation).unwrap()).unwrap();
+        let decoded: View =
+            serde_json::from_value(serde_json::to_value(&presentation).unwrap()).unwrap();
         assert_eq!(decoded.error.as_deref(), Some("Microphone denied"));
         presentation.error = Some("x".repeat(8193));
         assert!(validate(&presentation).is_err());

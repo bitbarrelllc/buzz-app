@@ -1024,7 +1024,9 @@ test("detached regular composer keeps failed drafts, uploads real file bytes and
       .getByRole("listitem"),
   ).toHaveCount(3);
   // Main now uploads eagerly; observe completion before removing one duplicate.
-  await expect.poll(() => page.evaluate(() => window.huddleFixture.stats.uploads.length)).toBe(3);
+  await expect
+    .poll(() => page.evaluate(() => window.huddleFixture.stats.uploads.length))
+    .toBe(3);
   await companion
     .getByRole("button", { name: "Remove notes.txt", exact: true })
     .first()
@@ -1388,12 +1390,20 @@ test("window Join and compact Decline operate on the same incoming request", asy
       if (outcome === "cancel") {
         await expect(request).toHaveCount(0);
         await expect(capsule).toHaveCount(0);
-        await expect(page.getByRole("button", { name: "Search Buzz", exact: true })).toBeFocused();
+        await expect(
+          page.getByRole("button", { name: "Search Buzz", exact: true }),
+        ).toBeFocused();
       } else {
-        await expect(request.getByRole("alert")).toHaveText("Microphone disconnected");
-        await expect(capsule.getByRole("alert")).toHaveText("Microphone disconnected");
+        await expect(request.getByRole("alert")).toHaveText(
+          "Microphone disconnected",
+        );
+        await expect(capsule.getByRole("alert")).toHaveText(
+          "Microphone disconnected",
+        );
         // Both views remain retryable; the companion owns focus after reopening.
-        await expect(request.getByRole("button", { name: "Join", exact: true })).toBeFocused();
+        await expect(
+          request.getByRole("button", { name: "Join", exact: true }),
+        ).toBeFocused();
       }
     }
   }

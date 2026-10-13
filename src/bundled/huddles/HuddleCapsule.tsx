@@ -126,7 +126,11 @@ function HuddleCapsuleContent({
             {caller} calling
           </span>
         </Button>
-        {call.error && <span role="alert" className="text-caption text-danger">{call.error}</span>}
+        {call.error && (
+          <span role="alert" className="text-caption text-danger">
+            {call.error}
+          </span>
+        )}
         <span className={styles.requestCompactActions}>
           <Button
             size="sm"

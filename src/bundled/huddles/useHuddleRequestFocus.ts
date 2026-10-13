@@ -25,7 +25,10 @@ export function useHuddleRequestFocus(connected: boolean, retryError?: string) {
     }
   }, [connected]);
   useLayoutEffect(() => {
-    if (retryError) request.current?.querySelector<HTMLButtonElement>("[data-huddle-join]")?.focus({ preventScroll: true });
+    if (retryError)
+      request.current
+        ?.querySelector<HTMLButtonElement>("[data-huddle-join]")
+        ?.focus({ preventScroll: true });
   }, [retryError]);
   return { requestRef, cancel, mute };
 }

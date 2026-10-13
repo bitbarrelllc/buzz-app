@@ -497,31 +497,66 @@ it("omits oversized inline avatars on open and update and projects retry errors"
   const oversized = `data:image/png;base64,${"a".repeat(9000)}`;
   try {
     h.profiles.set("peer", { name: "Peer", picture: oversized });
-    h.set({ ...h.call.snapshot(), participants: ["peer"], error: "Microphone denied" });
+    h.set({
+      ...h.call.snapshot(),
+      participants: ["peer"],
+      error: "Microphone denied",
+    });
     h.release();
     await h.companion.open();
-    expect(vi.mocked(h.bridge.open).mock.calls[0]?.[0]).toMatchObject({ error: "Microphone denied", participants: [{ picture: null }] });
-    h.profiles.set("peer", { name: "Peer", picture: "https://example.test/avatar.png" });
+    expect(vi.mocked(h.bridge.open).mock.calls[0]?.[0]).toMatchObject({
+      error: "Microphone denied",
+      participants: [{ picture: null }],
+    });
+    h.profiles.set("peer", {
+      name: "Peer",
+      picture: "https://example.test/avatar.png",
+    });
     h.set({ ...h.call.snapshot() });
-    await vi.waitFor(() => expect(vi.mocked(h.bridge.update).mock.lastCall?.[1]?.participants[0]?.picture).toBe("https://example.test/avatar.png"));
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(h.bridge.update).mock.lastCall?.[1]?.participants[0]?.picture,
+      ).toBe("https://example.test/avatar.png"),
+    );
     h.profiles.set("peer", { name: "Peer", picture: oversized });
     h.set({ ...h.call.snapshot() });
-    await vi.waitFor(() => expect(vi.mocked(h.bridge.update).mock.lastCall?.[1]?.participants[0]?.picture).toBeNull());
-  } finally { await h.dispose(); }
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(h.bridge.update).mock.lastCall?.[1]?.participants[0]?.picture,
+      ).toBeNull(),
+    );
+  } finally {
+    await h.dispose();
+  }
 });
 
 it("reopens the same invitation with its failure after an unsuccessful attempt", async () => {
   const h = harness();
   try {
-    const initial = { ...h.call.snapshot(), phase: "incoming" as const, room: "00000000-0000-4000-8000-000000000001", requester: "peer" };
+    const initial = {
+      ...h.call.snapshot(),
+      phase: "incoming" as const,
+      room: "00000000-0000-4000-8000-000000000001",
+      requester: "peer",
+    };
     h.release();
     h.set(initial);
     await h.companion.open();
     h.set({ ...initial, id: "attempt", phase: "connecting" });
     h.set({ ...initial, id: "attempt", phase: "leaving" });
-    h.set({ phase: "error", muted: false, participants: [], error: "Microphone denied" });
+    h.set({
+      phase: "error",
+      muted: false,
+      participants: [],
+      error: "Microphone denied",
+    });
     h.set({ ...initial, error: "Microphone denied" });
     await vi.waitFor(() => expect(h.bridge.open).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(h.bridge.open).mock.lastCall?.[0]).toMatchObject({ phase: "incoming", error: "Microphone denied" });
-  } finally { await h.dispose(); }
+    expect(vi.mocked(h.bridge.open).mock.lastCall?.[0]).toMatchObject({
+      phase: "incoming",
+      error: "Microphone denied",
+    });
+  } finally {
+    await h.dispose();
+  }
 });

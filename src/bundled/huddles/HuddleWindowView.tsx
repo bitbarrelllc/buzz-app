@@ -55,7 +55,12 @@ function HuddleWindowContent({ view, act, error }: WindowProps) {
     (view.phase === "connecting" && incoming.current)
   )
     return (
-      <HuddleRequestView view={view} act={act} error={error || view.error} focus={focus} />
+      <HuddleRequestView
+        view={view}
+        act={act}
+        error={error || view.error}
+        focus={focus}
+      />
     );
   const toggleChat = () => {
     if (call.current && layout.current)

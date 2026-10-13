@@ -188,7 +188,12 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
     calls = createHuddles(relay, bridge, openAudio);
     await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
     let releaseAudio!: (value: typeof audio) => void;
-    openAudio.mockImplementationOnce(() => new Promise((resolve) => { releaseAudio = resolve; }));
+    openAudio.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseAudio = resolve;
+        }),
+    );
     const joining = calls.join(destination, room);
     await calls.leave();
     releaseAudio(audio);

@@ -141,7 +141,9 @@ export function createHuddleWindow(
       title: call.destination.channelName,
       phase: call.phase as HuddleView["phase"],
       muted: call.muted,
-      error: call.error ? Array.from(call.error).slice(0, 2000).join("") : undefined,
+      error: call.error
+        ? Array.from(call.error).slice(0, 2000).join("")
+        : undefined,
       audioSettings: call.audioSettings,
       level: call.level ?? 0,
       dark: document.documentElement.classList.contains("dark"),
@@ -150,7 +152,9 @@ export function createHuddleWindow(
         : undefined,
       participants: call.participants.map((key) => {
         const profile = profiles.get(key);
-        const picture = profile?.picture ? session.media(profile.picture) : undefined;
+        const picture = profile?.picture
+          ? session.media(profile.picture)
+          : undefined;
         return {
           key,
           name: Array.from(
@@ -158,7 +162,10 @@ export function createHuddleWindow(
           )
             .slice(0, 1000)
             .join(""),
-          picture: picture && new TextEncoder().encode(picture).length <= 8192 ? picture : null,
+          picture:
+            picture && new TextEncoder().encode(picture).length <= 8192
+              ? picture
+              : null,
           own: key === call.destination?.viewer,
           level: call.speakers?.[key] ?? 0,
         };

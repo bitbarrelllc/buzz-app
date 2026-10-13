@@ -115,7 +115,12 @@ it("releases unsent files on close while retaining the saved panel text draft", 
       screen.getByRole("button", { name: "Send message" }),
     ).not.toBeDisabled(),
   );
-  await waitFor(() => expect(attachmentDraft(session, `${scope}:draft:${room}`, room).snapshot()[0]?.status).toBe("ready"));
+  await waitFor(() =>
+    expect(
+      attachmentDraft(session, `${scope}:draft:${room}`, room).snapshot()[0]
+        ?.status,
+    ).toBe("ready"),
+  );
   view.unmount();
   expect(upload).toHaveBeenCalledOnce();
   expect(release).toHaveBeenCalledWith(uploaded);
