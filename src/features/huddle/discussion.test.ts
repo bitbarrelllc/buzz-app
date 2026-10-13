@@ -45,8 +45,10 @@ function harness(room = "room", delivery: "failed" | "unknown" = "failed") {
   const ensure = vi.fn();
   const loadOlder = vi.fn();
   let hasMore = true;
+  const profiles = new Map<string, { name: string; picture: string }>();
   const session = {
     ...owner.session,
+    profiles: { ...owner.session.profiles, snapshot: () => profiles },
     viewer,
     relayAuthor: authority.pubkey,
     media: (url: string) =>
@@ -90,6 +92,7 @@ function harness(room = "room", delivery: "failed" | "unknown" = "failed") {
   const discussion = createHuddleDiscussion(session, room, parent, vi.fn());
   return {
     owner,
+    profiles,
     authority,
     read,
     ensure,
@@ -455,7 +458,7 @@ it("counts visible messages before limiting history and keeps older paging avail
   }
 });
 
-it("preserves signed mention evidence and edit boundaries in discussion rows", async () => {
+it("preserves signed mention evidence and edit boundaries while bounding discussion avatars", async () => {
   const h = harness();
   try {
     await vi.waitFor(() => expect(h.discussion.snapshot().writable).toBe(true));
@@ -476,6 +479,18 @@ it("preserves signed mention evidence and edit boundaries in discussion rows", a
         replyCount: 0,
       },
     ]);
+    h.profiles.set("ab".repeat(32), {
+      name: "Author",
+      picture: "data:image/png;base64," + "a".repeat(9000),
+    });
+    expect(h.discussion.snapshot().rows[0]?.picture).toBeNull();
+    h.profiles.set("ab".repeat(32), {
+      name: "Author",
+      picture: "https://example.test/avatar.png",
+    });
+    expect(h.discussion.snapshot().rows[0]?.picture).toBe(
+      "http://buzz-media.localhost/https%3A%2F%2Fexample.test%2Favatar.png",
+    );
     expect(h.discussion.snapshot().rows[0]).toMatchObject({
       mentions: ["cd".repeat(32)],
       mentionReferences: ["ef".repeat(32)],

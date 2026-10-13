@@ -152,6 +152,9 @@ export function createHuddleDiscussion(
         hasMore: resolved && window.hasMore && rows.length < 200,
         rows: (available() ? rows : []).slice(-200).map((r) => {
           const profile = profiles.get(r.authorId);
+          const picture = profile?.picture
+            ? session.media(profile.picture)
+            : undefined;
           return {
             id: r.id,
             authorId: r.authorId,
@@ -168,9 +171,10 @@ export function createHuddleDiscussion(
               formatPublicKey(r.authorId) ||
               "Participant"
             ).slice(0, 1000),
-            picture: profile?.picture
-              ? (session.media(profile.picture) ?? null)
-              : null,
+            picture:
+              picture && new TextEncoder().encode(picture).length <= 8192
+                ? picture
+                : null,
             text: r.content.slice(0, 16000),
             mentions: r.mentions,
             edited: r.edited === true,
