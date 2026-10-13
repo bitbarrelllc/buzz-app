@@ -460,11 +460,13 @@ it("bounds multibyte participant names on open and update and routes only curren
   const h = harness();
   const profiles = h.profiles;
   profiles.set("peer", { name: "界😀".repeat(3000) });
+  const destination = h.call.snapshot().destination;
+  assert(destination);
   try {
     h.set({
       ...h.call.snapshot(),
       destination: {
-        ...h.call.snapshot().destination!,
+        ...destination,
         channelName: "😀".repeat(3000),
       },
       participants: ["peer"],
