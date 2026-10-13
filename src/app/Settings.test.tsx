@@ -101,10 +101,11 @@ const host = {
   },
 } as unknown as Parameters<typeof Settings>[0];
 
-it("groups plugins by known categories and describes unknown ones under Other", () => {
+it("groups plugin cards by known categories and keeps unknown ones under Other", () => {
+  const { cards } = registry([]);
   const ready = {
     configuration: {
-      status: "ready",
+      status: "ready" as const,
       externalPluginsPaused: false,
       catalog: {
         profile: "test",
@@ -114,11 +115,11 @@ it("groups plugins by known categories and describes unknown ones under Other", 
             manifest: {
               id: "buzz.channels",
               name: "Channels",
-              apiVersion: 1,
+              apiVersion: 1 as const,
               description: "Navigate channels and hold conversations in Buzz.",
               discovery: { category: "communication" },
             },
-            source: "bundled",
+            source: "bundled" as const,
             enabled: true,
             revision: "bundled",
             previous: null,
@@ -129,11 +130,11 @@ it("groups plugins by known categories and describes unknown ones under Other", 
             manifest: {
               id: "buzz.codex",
               name: "Codex",
-              apiVersion: 1,
+              apiVersion: 1 as const,
               description: "Run local Codex coding agents in Buzz.",
               discovery: { category: "agents" },
             },
-            source: "bundled",
+            source: "bundled" as const,
             enabled: true,
             revision: "bundled",
             previous: null,
@@ -144,11 +145,11 @@ it("groups plugins by known categories and describes unknown ones under Other", 
             manifest: {
               id: "example.invoices",
               name: "Invoices",
-              apiVersion: 1,
+              apiVersion: 1 as const,
               description: "Reconcile invoices without leaving Buzz.",
               discovery: { category: "finance" },
             },
-            source: "external",
+            source: "external" as const,
             enabled: false,
             revision: "one",
             previous: null,
@@ -163,52 +164,156 @@ it("groups plugins by known categories and describes unknown ones under Other", 
     error: null,
     refreshError: null,
   };
-  const { cards } = registry([]);
-  render(
-    <Settings
-      {...host}
-      cards={cards}
-      plugins={
-        {
-          subscribe: () => () => {},
-          snapshot: () => ready,
-          change: vi.fn(async () => true),
-          reload: vi.fn(async () => true),
-          dismissError: vi.fn(),
-        } as unknown as Parameters<typeof Settings>[0]["plugins"]
-      }
-    />,
-  );
+  const plugins = {
+    subscribe: () => () => {},
+    snapshot: () => ready,
+    change: vi.fn(),
+    reload: vi.fn(),
+    dismissError: vi.fn(),
+  } as unknown as Parameters<typeof Settings>[0]["plugins"];
 
+  render(<Settings {...host} cards={cards} plugins={plugins} />);
   fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
+
   const content = screen.getByRole("region", { name: "Plugins" });
   expect(
     within(content)
       .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent),
   ).toEqual(["Communication", "Agents", "Other"]);
-  expect(content).toHaveTextContent(
+  for (const description of [
     "Navigate channels and hold conversations in Buzz.",
-  );
-  expect(content).toHaveTextContent("Run local Codex coding agents in Buzz.");
+    "Run local Codex coding agents in Buzz.",
+    "Reconcile invoices without leaving Buzz.",
+  ])
+    expect(within(content).getByText(description)).toBeVisible();
 
   const other = within(content)
     .getByRole("heading", { name: "Other" })
     .closest("section");
   expect(other).not.toBeNull();
-  expect(within(other as HTMLElement).getByText("Invoices")).toBeVisible();
   expect(
-    within(other as HTMLElement).getByText(
-      "Reconcile invoices without leaving Buzz.",
-    ),
-  ).toBeVisible();
-  expect(
-    within(other as HTMLElement).getByRole("switch", {
-      name: "Enable Invoices",
+    within(other as HTMLElement).getByRole("button", {
+      name: "View Invoices details",
     }),
   ).toBeVisible();
   expect(
     within(content).queryByRole("heading", { name: "Finance" }),
+  ).toBeNull();
+});
+
+it("opens each plugin's existing metadata and controls in a detail aside", () => {
+  const { cards } = registry([]);
+  const snapshot = {
+    configuration: {
+      status: "ready" as const,
+      externalPluginsPaused: false,
+      catalog: {
+        profile: "test",
+        location: "test",
+        plugins: [
+          {
+            manifest: {
+              id: "buzz.channels",
+              name: "Channels",
+              apiVersion: 1 as const,
+            },
+            source: "bundled" as const,
+            enabled: true,
+            revision: "bundled",
+            previous: null,
+            reloadable: false,
+            error: null,
+          },
+          {
+            manifest: {
+              id: "example.helper",
+              name: "External helper",
+              apiVersion: 1 as const,
+            },
+            source: "external" as const,
+            enabled: true,
+            revision: "abc123",
+            previous: null,
+            hasSignature: true,
+            publisher: "publisher-public-key",
+            reloadable: true,
+            error: null,
+          },
+        ],
+      },
+    },
+    activation: {},
+    busy: false,
+    error: null,
+    refreshError: null,
+  };
+  const plugins = {
+    subscribe: () => () => {},
+    snapshot: () => snapshot,
+    change: vi.fn(),
+    reload: vi.fn(),
+    dismissError: vi.fn(),
+  } as unknown as Parameters<typeof Settings>[0]["plugins"];
+
+  render(<Settings {...host} cards={cards} plugins={plugins} />);
+  fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
+
+  const bundledCard = screen.getByRole("button", {
+    name: "View Channels details",
+  });
+  const verifiedLabel = within(bundledCard).getByText("Buzz");
+  expect(verifiedLabel).toBeVisible();
+  expect(verifiedLabel.parentElement?.querySelector("svg")).not.toBeNull();
+  expect(screen.queryByText("buzz.channels")).toBeNull();
+
+  fireEvent.click(bundledCard);
+  const bundled = screen.getByRole("complementary", {
+    name: "Channels details",
+  });
+  expect(bundled.parentElement).toContainElement(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  );
+  expect(within(bundled).queryByText("Buzz")).toBeNull();
+  expect(within(bundled).getByText("buzz.channels")).toBeVisible();
+  expect(within(bundled).queryByText("Signature")).toBeNull();
+  const badge = within(bundled).getByText("Made by Buzz");
+  expect(badge).toBeVisible();
+  expect(badge.parentElement).toContainElement(
+    within(bundled).getByRole("heading", { name: "Channels" }),
+  );
+  expect(within(bundled).queryByText("Installed")).toBeNull();
+
+  fireEvent.click(
+    within(bundled).getByRole("button", { name: "Close plugin details" }),
+  );
+  expect(bundledCard).toHaveFocus();
+  expect(
+    screen.queryByRole("complementary", { name: "Channels details" }),
+  ).toBeNull();
+
+  const externalCard = screen.getByRole("button", {
+    name: "View External helper details",
+  });
+  const externalAuthor = within(externalCard).getByText("publisher-public-key");
+  expect(externalAuthor.parentElement?.querySelector("svg")).toBeNull();
+  fireEvent.click(externalCard);
+  const external = screen.getByRole("complementary", {
+    name: "External helper details",
+  });
+  expect(
+    within(external).getByRole("switch", { name: "Enable External helper" }),
+  ).toBeVisible();
+  for (const value of ["example.helper", "abc123", "Signed"])
+    expect(within(external).getByText(value)).toBeVisible();
+  expect(within(external).getAllByText("publisher-public-key")).toHaveLength(2);
+  expect(within(external).getByText("Installed")).toBeVisible();
+  expect(within(external).queryByText("Made by Buzz")).toBeNull();
+
+  fireEvent.keyDown(external, { key: "Escape" });
+  expect(externalCard).toHaveFocus();
+  expect(
+    screen.queryByRole("complementary", { name: "External helper details" }),
   ).toBeNull();
 });
 

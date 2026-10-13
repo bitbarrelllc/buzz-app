@@ -1,16 +1,22 @@
-import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
 import { Header, InlineHeader } from "../shared/design-system/ui/Header";
 import { ToastNotice } from "../shared/design-system/ui/Toast";
 import { Panel } from "../shared/design-system/ui/Panel";
 import { NavigationItem } from "../shared/design-system/ui/NavigationItem";
 import { NavigationSection } from "../shared/design-system/ui/NavigationSection";
 import { Button } from "../shared/design-system/ui/Button";
-import { SwitchPreferenceRow } from "../shared/design-system/ui/SwitchPreferenceRow";
-import { PreferenceRow } from "../shared/design-system/ui/PreferenceRow";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { IconButton } from "../shared/design-system/ui/IconButton";
+import { Switch } from "../shared/design-system/ui/Switch";
+import { ChoiceRow } from "../shared/design-system/ui/ChoiceRow";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { RecoveryScreen } from "./RecoveryScreen";
 import styles from "./Settings.module.css";
-import { SquaresFourIcon } from "../shared/design-system/icons/index";
+import { CheckCircleIcon, XIcon } from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
 import type { PluginInfo } from "../plugins/types";
 import type { Communities } from "../features/communities/service";
@@ -61,6 +67,196 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
     }),
     ...(other.length ? [{ id: "other", label: "Other", plugins: other }] : []),
   ];
+}
+
+function PluginProvenance({
+  source,
+  publisher,
+  className,
+}: {
+  source: "bundled" | "external";
+  publisher?: string | null | undefined;
+  className?: string | undefined;
+}) {
+  return (
+    <span className={`${styles.pluginProvenance} ${className ?? ""}`}>
+      <span>
+        {source === "bundled" ? "Buzz" : publisher || "Unknown author"}
+      </span>
+      {source === "bundled" && (
+        <CheckCircleIcon size={14} strokeWidth={2.5} aria-hidden="true" />
+      )}
+    </span>
+  );
+}
+
+function PluginDetails({
+  plugin,
+  failure,
+  busy,
+  plugins,
+  onClose,
+}: {
+  plugin: PluginInfo;
+  failure: string | null;
+  busy: boolean;
+  plugins: PluginManager;
+  onClose(): void;
+}) {
+  return (
+    <aside
+      id="plugin-details"
+      className={styles.pluginAside}
+      aria-label={`${plugin.manifest.name} details`}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className={styles.pluginAsideHeader}>
+        <div className={styles.pluginAsideIdentity}>
+          <h2>{plugin.manifest.name}</h2>
+          {plugin.source === "bundled" ? (
+            <span className={styles.pluginInstallBadge}>
+              <CheckCircleIcon size={14} aria-hidden="true" />
+              Made by Buzz
+            </span>
+          ) : (
+            <PluginProvenance
+              source={plugin.source}
+              publisher={plugin.publisher}
+            />
+          )}
+        </div>
+        <IconButton
+          aria-label="Close plugin details"
+          size="sm"
+          icon={<XIcon size={16} aria-hidden="true" />}
+          onClick={onClose}
+        />
+      </div>
+      {plugin.source === "external" && (
+        <span className={styles.pluginInstallBadge}>
+          <CheckCircleIcon size={14} aria-hidden="true" />
+          Installed
+        </span>
+      )}
+      {plugin.manifest.description && (
+        <p className={styles.pluginAsideDescription}>
+          {plugin.manifest.description}
+        </p>
+      )}
+      <section
+        className={styles.pluginAsideSection}
+        aria-labelledby="plugin-status-title"
+      >
+        <h3 id="plugin-status-title">Status</h3>
+        <div className={styles.pluginStatus}>
+          <span>{plugin.enabled ? "Enabled" : "Disabled"}</span>
+          {/* Channels is required and has no enable/disable control. */}
+          {plugin.manifest.id === "buzz.channels" ? (
+            <span className="text-caption text-secondary">Required</span>
+          ) : (
+            <Switch
+              aria-label={`Enable ${plugin.manifest.name}`}
+              checked={plugin.enabled}
+              readOnly={busy}
+              aria-disabled={busy}
+              onClick={(event) => event.currentTarget.focus()}
+              onCheckedChange={() => {
+                if (busy) return;
+                void plugins.change(
+                  plugin.enabled ? "disable" : "enable",
+                  plugin.manifest.id,
+                );
+              }}
+            />
+          )}
+        </div>
+      </section>
+      <section
+        className={styles.pluginAsideSection}
+        aria-labelledby="plugin-metadata-title"
+      >
+        <h3 id="plugin-metadata-title">Details</h3>
+        <dl className={styles.pluginMetadata}>
+          <div>
+            <dt>Identifier</dt>
+            <dd>
+              <code>{plugin.manifest.id}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>Plugin API</dt>
+            <dd>{plugin.manifest.apiVersion}</dd>
+          </div>
+          {plugin.source === "external" && (
+            <>
+              <div>
+                <dt>Revision</dt>
+                <dd>
+                  <code>{plugin.revision}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Signature</dt>
+                <dd>{plugin.hasSignature ? "Signed" : "Unsigned"}</dd>
+              </div>
+              {plugin.publisher && (
+                <div>
+                  <dt>Publisher</dt>
+                  <dd>
+                    <code title={plugin.publisher}>{plugin.publisher}</code>
+                  </dd>
+                </div>
+              )}
+            </>
+          )}
+        </dl>
+      </section>
+      {failure && (
+        <p role="alert" className="error text-body-sm">
+          {failure}
+        </p>
+      )}
+      <div className="actions items-center">
+        {plugin.previous && (
+          <Button
+            type="button"
+            disabled={busy || !!plugin.rollbackBlockedReason}
+            onClick={() => plugins.change("rollback", plugin.manifest.id)}
+          >
+            Roll back
+          </Button>
+        )}
+        {plugin.rollbackBlockedReason && (
+          <span className="text-body-sm text-muted">
+            {plugin.rollbackBlockedReason}
+          </span>
+        )}
+        {plugin.reloadable && !plugin.enabled && (
+          <Button
+            type="button"
+            disabled={busy}
+            onClick={() => plugins.reload(plugin.manifest.id)}
+          >
+            Reload
+          </Button>
+        )}
+        {plugin.source === "external" && (
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={busy}
+            onClick={() => plugins.change("remove", plugin.manifest.id)}
+          >
+            Delete
+          </Button>
+        )}
+      </div>
+    </aside>
+  );
 }
 
 export function Settings({
@@ -134,6 +330,28 @@ export function Settings({
     () => groupPlugins(catalog?.plugins ?? []),
     [catalog?.plugins],
   );
+  const [selectedPluginId, setSelectedPluginId] = useState<string>();
+  const pluginTrigger = useRef<HTMLButtonElement>(null);
+  const selectedPlugin = catalog?.plugins.find(
+    (plugin) => plugin.manifest.id === selectedPluginId,
+  );
+  useEffect(() => {
+    if (selectedPluginId && catalog && !selectedPlugin)
+      setSelectedPluginId(undefined);
+  }, [catalog, selectedPlugin, selectedPluginId]);
+  const closePluginDetails = () => {
+    pluginTrigger.current?.focus();
+    setSelectedPluginId(undefined);
+  };
+  const selectedRunning = selectedPlugin
+    ? activation[selectedPlugin.manifest.id]
+    : undefined;
+  const selectedFailure = selectedPlugin
+    ? (selectedPlugin.error ??
+      (selectedRunning?.revision === selectedPlugin.revision
+        ? selectedRunning.error
+        : null))
+    : null;
   return (
     <div
       className={`${styles.root} ${navigationPane ? styles.navigationPane : ""}`}
@@ -142,7 +360,12 @@ export function Settings({
         aria-label={navigationPane ? "Settings" : undefined}
         aria-labelledby={navigationPane ? undefined : "settings-title"}
       >
-        <div className={styles.layout}>
+        <div
+          className={styles.layout}
+          data-plugin-detail={
+            selected === "plugins" && selectedPlugin ? "" : undefined
+          }
+        >
           <aside className={styles.sidebar}>
             <div className={styles.sidebarHeader}>
               <h1 id="settings-title" className="m-0 text-label">
@@ -279,7 +502,7 @@ export function Settings({
                     still work.
                   </p>
                 )}
-                <div className="overflow-hidden">
+                <div>
                   <div>
                     {externalPluginsPaused && (
                       <p role="status" className="text-body-sm text-subtle">
@@ -303,7 +526,7 @@ export function Settings({
                       />
                     )}
                   </div>
-                  <div className="grid grid-cols-1 gap-section-gap">
+                  <div className={styles.pluginCategories}>
                     {pluginGroups.map((group) => (
                       <section
                         aria-labelledby={`plugin-category-${group.id}`}
@@ -313,108 +536,42 @@ export function Settings({
                           id={`plugin-category-${group.id}`}
                           title={group.label}
                         />
-                        <SettingsGroup>
+                        <div className={styles.pluginList}>
                           {group.plugins.map((plugin) => {
                             const id = plugin.manifest.id;
-                            const running = activation[id];
-                            const failure =
-                              plugin.error ??
-                              (running?.revision === plugin.revision
-                                ? running.error
-                                : null);
+                            const active = id === selectedPluginId;
                             return (
-                              <article className="py-1" key={id}>
-                                {/* Channels is required and has no enable/disable control. */}
-                                {id === "buzz.channels" ? (
-                                  <PreferenceRow
-                                    icon={<SquaresFourIcon size={20} />}
-                                    title={plugin.manifest.name}
-                                    subtitle={plugin.manifest.description}
-                                    trailing={
-                                      <span className="text-body-sm text-subtle">
-                                        Required
-                                      </span>
-                                    }
-                                  />
-                                ) : (
-                                  <SwitchPreferenceRow
-                                    icon={<SquaresFourIcon size={20} />}
+                              <article className={styles.plugin} key={id}>
+                                <button
+                                  ref={active ? pluginTrigger : undefined}
+                                  type="button"
+                                  className={styles.pluginRow}
+                                  aria-label={`View ${plugin.manifest.name} details`}
+                                  aria-expanded={active}
+                                  aria-controls={
+                                    active ? "plugin-details" : undefined
+                                  }
+                                  onClick={(event) => {
+                                    pluginTrigger.current = event.currentTarget;
+                                    setSelectedPluginId(
+                                      active ? undefined : id,
+                                    );
+                                  }}
+                                >
+                                  <ChoiceRow
                                     label={plugin.manifest.name}
-                                    {...(plugin.manifest.description
-                                      ? {
-                                          description:
-                                            plugin.manifest.description,
-                                        }
-                                      : {})}
-                                    aria-label={`Enable ${plugin.manifest.name}`}
-                                    checked={plugin.enabled}
-                                    readOnly={busy}
-                                    aria-disabled={busy}
-                                    onClick={(event) =>
-                                      event.currentTarget.focus()
-                                    }
-                                    onCheckedChange={() => {
-                                      if (busy) return;
-                                      void plugins.change(
-                                        plugin.enabled ? "disable" : "enable",
-                                        id,
-                                      );
-                                    }}
+                                    description={plugin.manifest.description}
                                   />
-                                )}
-                                {failure && (
-                                  <p
-                                    role="alert"
-                                    className="error text-body-sm"
-                                  >
-                                    {failure}
-                                  </p>
-                                )}
-                                <div className="actions items-center">
-                                  {plugin.previous && (
-                                    <Button
-                                      type="button"
-                                      disabled={
-                                        busy || !!plugin.rollbackBlockedReason
-                                      }
-                                      onClick={() =>
-                                        plugins.change("rollback", id)
-                                      }
-                                    >
-                                      Roll back
-                                    </Button>
-                                  )}
-                                  {plugin.rollbackBlockedReason && (
-                                    <span className="text-body-sm text-muted">
-                                      {plugin.rollbackBlockedReason}
-                                    </span>
-                                  )}
-                                  {plugin.reloadable && !plugin.enabled && (
-                                    <Button
-                                      type="button"
-                                      disabled={busy}
-                                      onClick={() => plugins.reload(id)}
-                                    >
-                                      Reload
-                                    </Button>
-                                  )}
-                                  {plugin.source === "external" && (
-                                    <Button
-                                      type="button"
-                                      variant="destructive"
-                                      disabled={busy}
-                                      onClick={() =>
-                                        plugins.change("remove", id)
-                                      }
-                                    >
-                                      Delete
-                                    </Button>
-                                  )}
-                                </div>
+                                  <PluginProvenance
+                                    source={plugin.source}
+                                    publisher={plugin.publisher}
+                                    className={styles.pluginRowAuthor}
+                                  />
+                                </button>
                               </article>
                             );
                           })}
-                        </SettingsGroup>
+                        </div>
                       </section>
                     ))}
                   </div>
@@ -422,6 +579,15 @@ export function Settings({
               </section>
             </div>
           </div>
+          {selected === "plugins" && selectedPlugin && (
+            <PluginDetails
+              plugin={selectedPlugin}
+              failure={selectedFailure}
+              busy={busy}
+              plugins={plugins}
+              onClose={closePluginDetails}
+            />
+          )}
         </div>
       </Panel>
     </div>

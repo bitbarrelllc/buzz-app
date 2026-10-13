@@ -12,10 +12,14 @@
   overflow-y: auto;
 }
 .layout {
+  position: relative;
   display: grid;
   grid-template-columns: var(--size-navigator) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+}
+.layout[data-plugin-detail] {
+  grid-template-columns: var(--size-navigator) minmax(0, 1fr) 22rem;
 }
 .sidebar,
 .detail {
@@ -110,8 +114,257 @@
 }
 
 .navigationPane .layout {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.navigationPane .detail {
+  overflow-y: auto;
+}
+.navigationPane .layout[data-plugin-detail] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
 }
 .navigationPane .sidebar {
   display: none;
+}
+
+.pluginCategories {
+  display: grid;
+  gap: var(--space-section-gap);
+}
+
+.pluginList {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+}
+
+.plugin {
+  min-width: 0;
+}
+
+.pluginRow {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-standard);
+  background: transparent;
+  text-align: left;
+  @apply text-label-sm;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--duration-fast, 160ms) var(--ease-out, ease-out),
+    border-color var(--duration-fast, 160ms) var(--ease-out, ease-out);
+}
+
+.pluginRow:hover {
+  background: var(--surface-hover);
+}
+
+.pluginRow[aria-expanded="true"] {
+  background: var(--surface-control);
+  border-color: var(--border-focus);
+}
+
+.pluginRow:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.pluginProvenance {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.pluginProvenance > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pluginRowAuthor {
+  max-width: 30%;
+  flex: none;
+  @apply text-caption font-medium;
+}
+
+@container (max-width: 32rem) {
+  .pluginRow {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .pluginRowAuthor {
+    max-width: 100%;
+    align-self: flex-start;
+  }
+}
+
+.pluginAside {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+  border-left: 1px solid var(--border-standard);
+  background: var(--surface-panel);
+  animation: plugin-side-in var(--duration-fast, 160ms)
+    var(--ease-out, ease-out);
+}
+
+@keyframes plugin-side-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--space-4));
+  }
+}
+
+.pluginAsideHeader {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.pluginAsideIdentity {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: var(--space-1);
+}
+
+.pluginAsideIdentity h2,
+.pluginAsideIdentity .pluginProvenance,
+.pluginAsideSection h3 {
+  margin: 0;
+}
+
+.pluginAsideIdentity h2 {
+  overflow-wrap: anywhere;
+  @apply text-heading;
+}
+
+.pluginAsideIdentity .pluginProvenance {
+  @apply text-caption font-medium;
+}
+
+.pluginAsideDescription {
+  margin: 0;
+  color: var(--text-secondary);
+  @apply text-body-sm;
+}
+
+.pluginInstallBadge {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-control);
+  background: var(--surface-control);
+  color: var(--text-standard);
+  @apply text-caption font-medium;
+}
+
+.pluginAsideSection {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.pluginAsideSection h3 {
+  color: var(--text-secondary);
+  @apply text-caption;
+}
+
+.pluginStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pluginMetadata {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  color: var(--text-subtle);
+  @apply text-body-sm;
+}
+
+.pluginMetadata > div {
+  min-width: 0;
+}
+
+.pluginMetadata dt {
+  color: var(--text-secondary);
+}
+
+.pluginMetadata dd {
+  margin: 0;
+  color: var(--text-standard);
+  overflow-wrap: anywhere;
+}
+
+.pluginMetadata > div + div {
+  margin-block-start: var(--space-2);
+}
+
+.pluginMetadata code {
+  font-family: var(--font-mono);
+}
+
+@container (max-width: 64rem) {
+  .layout[data-plugin-detail] {
+    grid-template-columns: var(--size-navigator) minmax(0, 1fr);
+  }
+
+  .layout[data-plugin-detail] > .pluginAside {
+    position: absolute;
+    z-index: 1;
+    inset-block: 0;
+    inset-inline-end: 0;
+    width: min(22rem, calc(100% - var(--size-navigator)));
+  }
+
+  .navigationPane .layout[data-plugin-detail] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .navigationPane .layout[data-plugin-detail] > .pluginAside {
+    width: min(22rem, 100%);
+  }
+}
+
+@container (max-width: 36rem) {
+  .layout[data-plugin-detail] > .pluginAside,
+  .navigationPane .layout[data-plugin-detail] > .pluginAside {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    width: auto;
+    border-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pluginAside {
+    animation: none;
+  }
+
+  .pluginRow {
+    transition: none;
+  }
 }

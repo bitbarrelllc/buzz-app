@@ -7,6 +7,7 @@ export type PluginInfo = {
   revision: string;
   previous: string | null;
   hasSignature?: boolean;
+  publisher?: string | null;
   rollbackBlockedReason?: string | null;
   reloadable: boolean;
   error: string | null;
