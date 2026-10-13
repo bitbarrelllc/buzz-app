@@ -86,12 +86,6 @@ export function DraftsView({
     (value) => !!mentionDraft(value).text.trim(),
     selected,
   );
-  const entries = saved.entries.flatMap(({ key, value }) => {
-    const coordinates = draftCoordinates(key);
-    return coordinates
-      ? [{ key, draft: mentionDraft(value), coordinates }]
-      : [];
-  });
   void revision;
   const list = useSyncExternalStore(
     session.channels.subscribeList,
@@ -99,6 +93,17 @@ export function DraftsView({
     session.channels.list,
   );
   const channels = list.channels;
+  // Keep private-room drafts stored for their Huddle composer, outside Inbox.
+  const excluded = (channelId: string) =>
+    channels.some(
+      (item) => item.id === channelId && (item.huddle || item.metadataPending),
+    );
+  const entries = saved.entries.flatMap(({ key, value }) => {
+    const coordinates = draftCoordinates(key);
+    return coordinates && !excluded(coordinates.channelId)
+      ? [{ key, draft: mentionDraft(value), coordinates }]
+      : [];
+  });
   const [limit, setLimit] = useState(50);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const closeControl = useRef<HTMLButtonElement>(null);
@@ -110,11 +115,15 @@ export function DraftsView({
   // Selection owns editor lifetime, not the bounded list summary's eligibility.
   const coordinates = selected && draftCoordinates(selected);
   const active =
-    selected && coordinates ? { key: selected, coordinates } : undefined;
+    selected && coordinates && !excluded(coordinates.channelId)
+      ? { key: selected, coordinates }
+      : undefined;
   const channelFor = (channelId: string) =>
     channels.find(
       (item) =>
         item.id === channelId &&
+        !item.huddle &&
+        !item.metadataPending &&
         !item.cached &&
         !item.archived &&
         !item.readOnly &&
