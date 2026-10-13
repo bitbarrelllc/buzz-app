@@ -25,6 +25,11 @@ export type HuddleDiscussion = {
     })[];
     picture: string | null;
     text: string;
+    mentions?: readonly string[];
+    mentionNames?: Record<string, string>;
+    edited?: boolean;
+    attachmentSeams?: readonly number[];
+    mentionReferences?: readonly string[];
     time: number;
     delivery: Delivery;
   }[];
@@ -167,6 +172,18 @@ export function createHuddleDiscussion(
               ? (session.media(profile.picture) ?? null)
               : null,
             text: r.content.slice(0, 16000),
+            mentions: r.mentions,
+            edited: r.edited === true,
+            attachmentSeams: r.attachmentSeams ?? [],
+            mentionNames: Object.fromEntries(
+              [
+                ...new Set([...r.mentions, ...(r.mentionReferences ?? [])]),
+              ].flatMap((key) => {
+                const name = profiles.get(key)?.name;
+                return name && name.length <= 1000 ? [[key, name]] : [];
+              }),
+            ),
+            mentionReferences: r.mentionReferences ?? [],
             time: r.createdAt,
             delivery:
               r.authorId === session.viewer ? (r.delivery ?? "seen") : "seen",

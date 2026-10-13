@@ -65,6 +65,16 @@ struct DiscussionRow {
     author: String,
     picture: Option<String>,
     text: String,
+    #[serde(default)]
+    mentions: Vec<String>,
+    #[serde(default)]
+    mention_names: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    edited: bool,
+    #[serde(default)]
+    attachment_seams: Vec<usize>,
+    #[serde(default)]
+    mention_references: Vec<String>,
     time: u64,
     delivery: String,
 }
@@ -120,6 +130,7 @@ struct Person {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum Action {
+    OpenLink,
     Join,
     Decline,
     RefreshAudio,
@@ -428,6 +439,14 @@ pub(crate) fn huddle_window_action<R: tauri::Runtime>(
         {
             return Err("Invalid Huddle message".into());
         }
+    } else if matches!(action, Action::OpenLink) {
+        if text.as_ref().map_or(true, |url| {
+            !url.get(..5)
+                .is_some_and(|scheme| scheme.eq_ignore_ascii_case("buzz:"))
+                || url.len() > 8192
+        }) {
+            return Err("Invalid Huddle link".into());
+        }
     } else if matches!(action, Action::InputDevice | Action::OutputDevice) {
         if text.as_ref().map_or(true, |id| id.len() > 4096) {
             return Err("Invalid audio device".into());
@@ -561,10 +580,23 @@ mod tests {
                 author: "Alex".into(),
                 picture: None,
                 text: "Hello".into(),
+                mentions: vec!["cd".repeat(32)],
+                mention_names: [("cd".repeat(32), "Taylor".into())].into(),
+                edited: false,
+                attachment_seams: vec![3],
+                mention_references: vec!["ef".repeat(32)],
                 time: 1,
                 delivery: "unknown".into(),
             }],
         });
+        let encoded = serde_json::to_value(&presentation).unwrap();
+        let decoded: View = serde_json::from_value(encoded).unwrap();
+        let row = &decoded.discussion.as_ref().unwrap().rows[0];
+        assert_eq!(row.mentions, vec!["cd".repeat(32)]);
+        assert_eq!(row.mention_references, vec!["ef".repeat(32)]);
+        assert_eq!(row.mention_names[&"cd".repeat(32)], "Taylor");
+        assert_eq!(row.attachment_seams, vec![3]);
+        assert!(!row.edited);
         let host = HuddleWindow::default();
         let source = "http://buzz-media.localhost/https%3A%2F%2Frelay.example%2Fmedia%2Faaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png";
         assert!(!host.permits_download(source, "photo.png"));

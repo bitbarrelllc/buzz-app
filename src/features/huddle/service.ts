@@ -254,7 +254,6 @@ export function createHuddles(
         ? { requester: incoming.requester, participants: incoming.participants }
         : {}),
     });
-    if (room) requests?.dismiss(room);
     const receive = (event: HuddleUpdate) => {
       if (!valid(attempt)) return;
       if (event.type === "ended") {
@@ -287,6 +286,7 @@ export function createHuddles(
       attempt.audio?.participants(participants);
       for (const peer of speakers.keys())
         if (!participants.includes(peer)) speakers.delete(peer);
+      if (event.type === "connected") requests?.dismiss(event.room);
       update({
         ...snapshot,
         participants,

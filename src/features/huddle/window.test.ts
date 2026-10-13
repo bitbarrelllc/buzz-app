@@ -41,7 +41,18 @@ function harness() {
     leave: vi.fn(async () => {}),
     dispose: async () => {},
   };
-  const relay = { snapshot: () => ({ session: store.session }) } as RelayData;
+  const profiles = new Map<string, { name: string }>();
+  const session = {
+    ...store.session,
+    profiles: { ...store.session.profiles, snapshot: () => profiles },
+  };
+  const connection = {
+    session,
+    status: "ready",
+    scope: "scope",
+    viewer: "viewer",
+  };
+  const relay = { snapshot: () => connection } as unknown as RelayData;
   let action = (_id: string, _action: HuddleWindowAction, _text?: string) => {};
   let release = () => {};
   const gate = new Promise<void>((resolve) => {
@@ -54,9 +65,19 @@ function harness() {
     }),
     update: vi.fn(async () => {}),
   };
-  const companion = createHuddleWindow(call, relay, bridge);
+  const openLink = vi.fn(() => true);
+  const companion = createHuddleWindow(
+    call,
+    relay,
+    bridge,
+    undefined,
+    openLink,
+  );
   return {
     companion,
+    profiles,
+    connection,
+    openLink,
     bridge,
     call,
     release,
@@ -429,6 +450,42 @@ it("routes audio settings only from the current companion call", async () => {
     h.set({ phase: "idle", participants: [], muted: false });
     h.action(id, "outputDevice", "wrong");
     expect(h.call.selectAudioDevice).toHaveBeenCalledTimes(2);
+  } finally {
+    await h.dispose();
+  }
+});
+
+it("bounds multibyte participant names on open and update and routes only current internal links", async () => {
+  const h = harness();
+  const profiles = h.profiles;
+  profiles.set("peer", { name: "界😀".repeat(3000) });
+  try {
+    h.set({ ...h.call.snapshot(), participants: ["peer"] });
+    h.release();
+    await h.companion.open();
+    const first = vi.mocked(h.bridge.open).mock.calls[0]?.[0];
+    assert(first?.participants[0]);
+    expect(
+      new TextEncoder().encode(first.participants[0].name).length,
+    ).toBeLessThanOrEqual(4096);
+    profiles.set("peer", { name: "😀".repeat(3000) });
+    h.set({ ...h.call.snapshot() });
+    await vi.waitFor(() =>
+      expect(
+        vi.mocked(h.bridge.update).mock.lastCall?.[1]?.participants[0]?.name,
+      ).toBe("😀".repeat(1000)),
+    );
+    const id = h.call.snapshot().id;
+    assert(id);
+    h.action(id, "openLink", "BUZZ://channel/test");
+    expect(h.openLink).toHaveBeenCalledWith("BUZZ://channel/test");
+    h.action("stale", "openLink", "buzz://channel/test");
+    h.action(id, "openLink", "https://example.test");
+    expect(h.openLink).toHaveBeenCalledTimes(1);
+    h.set({ ...h.call.snapshot(), phase: "leaving" });
+    h.connection.scope = "replacement-community";
+    h.action(id, "openLink", "buzz://channel/test");
+    expect(h.openLink).toHaveBeenCalledTimes(1);
   } finally {
     await h.dispose();
   }

@@ -1,3 +1,4 @@
+import { buzzLinkTarget } from "../../features/navigation/buzz-links";
 import { createHuddleRing } from "../../features/huddle/ring";
 import type { PluginModule } from "../../plugins/api";
 import { nativeHuddles } from "../../features/huddle/bridge";
@@ -9,16 +10,28 @@ import { HuddleLauncher } from "./HuddleLauncher";
 import { HuddleCard, parseHuddleTarget } from "./HuddleCard";
 import { HuddlePanel } from "./HuddlePanel";
 
-export const inject = ["panels", "relay", "conversation"];
+export const inject = ["panels", "relay", "conversation", "navigation"];
 export const apply: PluginModule["apply"] = (ctx) => {
   if (!nativeHuddles.available) return;
   const huddles = createHuddles(ctx.relay, nativeHuddles, openHuddleAudio);
   const stopRing = createHuddleRing(huddles);
+  const openLink = (url: string) => {
+    const connection = ctx.relay.snapshot();
+    if (!connection.viewer || !connection.origin) return false;
+    const target = buzzLinkTarget(url, {
+      viewer: connection.viewer,
+      communityOrigin: connection.origin,
+    });
+    if (!target) return false;
+    void ctx.navigation.open(target);
+    return true;
+  };
   const companion = createHuddleWindow(
     huddles,
     ctx.relay,
     undefined,
     ctx.conversation,
+    openLink,
   );
   ctx.conversation.registerMessage({
     id: "huddle",
@@ -58,7 +71,12 @@ export const apply: PluginModule["apply"] = (ctx) => {
     ),
     channelPlacement: "side",
     component: (props) => (
-      <HuddlePanel {...props} relay={ctx.relay} extensions={ctx.conversation} />
+      <HuddlePanel
+        {...props}
+        relay={ctx.relay}
+        extensions={ctx.conversation}
+        openLink={openLink}
+      />
     ),
   });
 };

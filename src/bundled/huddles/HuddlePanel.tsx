@@ -14,11 +14,14 @@ import { parseHuddleTarget } from "./HuddleCard";
 
 export function HuddlePanel({
   target,
+  context,
+  openLink,
   channelContext,
   relay,
   extensions,
 }: PanelProps & {
   relay: RelayData;
+  openLink?: ((url: string) => boolean) | undefined;
   extensions?: ConversationExtensions | undefined;
 }) {
   const connection = useRelayConnection(relay);
@@ -54,6 +57,7 @@ export function HuddlePanel({
   return valid && room && owner && discussion ? (
     <HuddleDiscussionView
       discussion={discussion}
+      openLink={(url) => context?.open(url) || openLink?.(url) || false}
       composer={
         <MessageComposer
           session={connection.session}

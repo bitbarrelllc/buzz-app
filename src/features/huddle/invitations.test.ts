@@ -1,4 +1,7 @@
-import { expect, it, vi } from "vitest";
+import { createHuddles } from "./service";
+import type { HuddleUpdate, HuddleBridge } from "./bridge";
+import type { OpenHuddleAudio } from "./audio";
+import { assert, expect, it, vi } from "vitest";
 import { createRelaySession } from "../relay/session";
 import type { LiveCallbacks } from "../relay/live";
 import type { RelayData } from "../relay/service";
@@ -114,6 +117,24 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
       request = next;
     },
   );
+  const audio = {
+    close: vi.fn(),
+    mute: vi.fn(),
+    play: vi.fn(),
+    participants: vi.fn(),
+  };
+  const openAudio = vi.fn<OpenHuddleAudio>(async () => audio);
+  let receive = (_event: HuddleUpdate) => {};
+  const bridge: HuddleBridge = {
+    available: true,
+    open: vi.fn(async (_id, _destination, _room, listener) => {
+      receive = listener;
+    }),
+    close: vi.fn(async () => {}),
+    touch: vi.fn(async () => {}),
+    send: vi.fn(async () => {}),
+  };
+  let calls: ReturnType<typeof createHuddles> | undefined;
   let discussion: ReturnType<typeof createHuddleDiscussion> | undefined;
   try {
     await sender.session.channels.resolve?.([parent, room]);
@@ -130,6 +151,25 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
     expect(
       guestReads.flat().some((filter) => filter["#h"]?.includes(parent)),
     ).toBe(false);
+    calls = createHuddles(relay, bridge, openAudio);
+    await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+    const destination = calls.snapshot().destination;
+    assert(destination);
+    openAudio.mockRejectedValueOnce(new Error("Microphone denied"));
+    await calls.join(destination, room);
+    await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+    vi.mocked(bridge.open).mockRejectedValueOnce(new Error("Admission failed"));
+    await calls.join(destination, room);
+    await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+    await calls.join(destination, room);
+    receive({
+      type: "connected",
+      room,
+      participants: [guest.pubkey, inviter.pubkey],
+    });
+    expect(calls.snapshot().phase).toBe("connected");
+    await calls.leave();
+    expect(calls.snapshot().phase).toBe("idle");
     discussion = createHuddleDiscussion(
       recipient.session,
       room,
@@ -142,6 +182,7 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
       inviter.pubkey,
     ]);
   } finally {
+    await calls?.dispose();
     discussion?.dispose();
     requests.dispose();
     recipient.dispose();

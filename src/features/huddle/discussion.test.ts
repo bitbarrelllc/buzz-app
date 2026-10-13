@@ -454,3 +454,35 @@ it("counts visible messages before limiting history and keeps older paging avail
     h.dispose();
   }
 });
+
+it("preserves signed mention evidence and edit boundaries in discussion rows", async () => {
+  const h = harness();
+  try {
+    await vi.waitFor(() => expect(h.discussion.snapshot().writable).toBe(true));
+    h.rows([
+      {
+        id: "mention",
+        channelId: "room",
+        authorId: "ab".repeat(32),
+        createdAt: 1,
+        content: "@Taylor",
+        mentions: ["cd".repeat(32)],
+        mentionReferences: ["ef".repeat(32)],
+        edited: true,
+        attachmentSeams: [3],
+        attachments: [],
+        reactions: [],
+        participants: [],
+        replyCount: 0,
+      },
+    ]);
+    expect(h.discussion.snapshot().rows[0]).toMatchObject({
+      mentions: ["cd".repeat(32)],
+      mentionReferences: ["ef".repeat(32)],
+      edited: true,
+      attachmentSeams: [3],
+    });
+  } finally {
+    h.dispose();
+  }
+});

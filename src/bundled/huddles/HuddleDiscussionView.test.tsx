@@ -189,3 +189,35 @@ it("renders Markdown and downloads the resolved attachment, without falling back
   ).toBeNull();
   expect(screen.getByText("File unavailable")).toBeTruthy();
 });
+
+it("routes internal links and signed mentions while leaving unbound or edited names as prose", () => {
+  const value = discussion("failed");
+  const key = "cd".repeat(32);
+  assert(value.rows[0]);
+  value.rows[0] = {
+    ...value.rows[0],
+    text: "@Taylor and @Unbound [Channel](buzz://channel/test)",
+    mentions: [key],
+    mentionNames: { [key]: "Taylor" },
+  };
+  const openLink = vi.fn(() => true);
+  const view = () => (
+    <HuddleDiscussionView
+      discussion={value}
+      composer={null}
+      older={() => {}}
+      retry={() => {}}
+      recover={() => {}}
+      openLink={openLink}
+    />
+  );
+  const mounted = render(view());
+  fireEvent.click(screen.getByRole("link", { name: "Channel" }));
+  expect(openLink).toHaveBeenCalledWith("buzz://channel/test");
+  expect(screen.getByText("Taylor").getAttribute("data-mention-kind")).toBe(
+    "person",
+  );
+  value.rows[0] = { ...value.rows[0], edited: true };
+  mounted.rerender(view());
+  expect(screen.queryByText("Taylor")).toBeNull();
+});

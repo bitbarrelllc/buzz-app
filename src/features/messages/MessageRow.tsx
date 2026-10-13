@@ -81,6 +81,7 @@ import { messageCopyLink, messageCopyText } from "./message-copy";
 
 export type MessageRowProps = {
   row: ChannelMessage;
+  staticMentions?: boolean | undefined;
   getThreadRoot?: (() => ChannelMessage | undefined) | undefined;
   session?: RelaySession | undefined;
   scope?: string | undefined;
@@ -175,6 +176,7 @@ const FullMessageRow = memo(function MessageRow(
 });
 function MessageRowContent({
   row,
+  staticMentions,
   shownRow,
   getThreadRoot,
   session,
@@ -442,6 +444,7 @@ function MessageRowContent({
       session={session}
       scope={scope}
       row={displayRow}
+      staticMentions={staticMentions}
       extensions={extensions}
       media={media}
       onOpenLink={onOpenLink}

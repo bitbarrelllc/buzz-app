@@ -1,3 +1,4 @@
+import { isBuzzLink } from "../navigation/buzz-links";
 import type { AudioSettingsState } from "./audio-settings";
 import type { ComposerReader } from "./composer-contract";
 import { createHuddleComposerOwner } from "./composer-owner";
@@ -25,6 +26,7 @@ export type HuddleView = {
   }[];
 };
 export type HuddleAction =
+  | "openLink"
   | "join"
   | "decline"
   | "refreshAudio"
@@ -88,6 +90,7 @@ export function createHuddleWindow(
   relay: RelayData,
   bridge = nativeHuddleWindow,
   extensions?: ComposerReader,
+  openLink?: (target: string) => boolean,
 ) {
   let disposed = false;
   let attempted: string | undefined;
@@ -147,7 +150,11 @@ export function createHuddleWindow(
         const profile = profiles.get(key);
         return {
           key,
-          name: profile?.name || formatPublicKey(key) || "Participant",
+          name: Array.from(
+            profile?.name || formatPublicKey(key) || "Participant",
+          )
+            .slice(0, 1000)
+            .join(""),
           picture: profile?.picture
             ? (session.media(profile.picture) ?? null)
             : null,
@@ -326,6 +333,20 @@ export function createHuddleWindow(
               );
             }
             sync();
+          } else if (
+            action === "openLink" &&
+            text &&
+            isBuzzLink(text) &&
+            text.length <= 8192
+          ) {
+            const connection = relay.snapshot();
+            if (
+              call.phase === "connected" &&
+              connection.status === "ready" &&
+              connection.scope === call.destination?.scope &&
+              connection.viewer === call.destination?.viewer
+            )
+              openLink?.(text);
           } else if (action === "send" && typeof text === "string")
             void discussion?.send(text);
           else if (action === "older") discussion?.older();

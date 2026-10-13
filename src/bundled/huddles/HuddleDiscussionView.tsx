@@ -14,9 +14,11 @@ export function HuddleDiscussionView({
   older,
   retry,
   recover,
+  openLink,
 }: {
   discussion: HuddleDiscussion;
   composer: ReactNode;
+  openLink?: ((target: string) => boolean) | undefined;
   older(): void;
   retry(): void;
   recover(id: string, dismiss?: boolean): void;
@@ -95,6 +97,7 @@ export function HuddleDiscussionView({
                 {discussion.rows.map((row) => (
                   <div key={row.id}>
                     <MessageRow
+                      staticMentions
                       row={{
                         id: row.id,
                         channelId: row.channelId,
@@ -102,11 +105,21 @@ export function HuddleDiscussionView({
                         createdAt: row.time,
                         content: row.text,
                         attachments: row.attachments,
-                        mentions: [],
+                        mentions: row.mentions ?? [],
+                        ...(row.edited ? { edited: true as const } : {}),
+                        attachmentSeams: row.attachmentSeams ?? [],
+                        mentionReferences: row.mentionReferences ?? [],
                         reactions: [],
                         replyCount: 0,
                         participants: [],
                       }}
+                      participantProfiles={
+                        new Map(
+                          Object.entries(row.mentionNames ?? {}).map(
+                            ([key, name]) => [key, { name }],
+                          ),
+                        )
+                      }
                       profile={{
                         name: row.author,
                         ...(row.picture ? { picture: row.picture } : {}),
@@ -129,7 +142,7 @@ export function HuddleDiscussionView({
                               attachment.url === url,
                           )
                         )
-                          return false;
+                          return openLink?.(url) ?? false;
                         setImage({ rowId: row.id, url });
                         return true;
                       }}

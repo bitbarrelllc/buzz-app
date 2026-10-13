@@ -1,3 +1,4 @@
+import { isBuzzLink } from "../../features/navigation/buzz-links";
 import { useHuddleRequestFocus } from "./useHuddleRequestFocus";
 import { HuddleAudioSettings } from "./HuddleAudioSettings";
 import { LayoutGroup } from "motion/react";
@@ -161,6 +162,11 @@ function HuddleWindowContent({ view, act, error }: WindowProps) {
         >
           <HuddleDiscussionView
             discussion={view.discussion}
+            openLink={(url) => {
+              if (!isBuzzLink(url)) return false;
+              act("openLink", url);
+              return true;
+            }}
             composer={composer}
             older={() => act("older")}
             retry={() => act("retry")}
