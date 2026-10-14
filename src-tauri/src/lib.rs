@@ -30,8 +30,10 @@ mod host_process;
 mod host_request;
 mod identity;
 mod nsec_backup;
+mod nsec_backup_choice;
 mod nsec_backup_config;
 use nsec_backup::{nsec_backup_available, nsec_backup_retry, nsec_backup_session, NsecBackupHost};
+use nsec_backup_choice::{nsec_backup_choice, nsec_backup_set_choice};
 mod image_clipboard;
 
 mod notifications;
@@ -416,6 +418,8 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         identity_import,
         identity_create,
         identity_export,
+        nsec_backup_choice,
+        nsec_backup_set_choice,
         identity_prepare_remote_agent_authorization,
         identity_sign_builderlab_binding,
         enterprise_login_gate,
@@ -563,6 +567,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
+            #[cfg(target_os = "linux")]
+            {
+                use gtk::prelude::GtkSettingsExt;
+
+                // Avoid medium/full hinting distorting Linux WebKit font spacing.
+                // Process-local only; preserve the user's hinting on/off preference.
+                if let Some(settings) = gtk::Settings::default() {
+                    settings.set_gtk_xft_hintstyle(Some("hintslight"));
+                }
+            }
             if let Some(window) = app.get_window("main") {
                 if let Err(error) = window_state::restore(&window) {
                     eprintln!("Could not restore Buzz window: {error}");

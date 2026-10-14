@@ -149,7 +149,13 @@ sessions and session draft do not.
 not reveal an empty section. Use the row menu to star the first channel.
 Dropping into Starred stars the channel; dropping out assigns the destination
 and clears its star, just like the row menu. Forums and Direct
-messages take no part in dragging, and the row menu remains the keyboard path. The
+messages take no part in dragging, and the row menu remains the keyboard path.
+A saved group also drags by its header, expanded or collapsed, onto another saved
+group; an accent line shows where it lands, and Escape cancels. Its section menu's
+**Move up** and **Move down** are the keyboard and single-pointer path. Each move
+rewrites every live section's `order` register with one stamp, so channels, sort
+and collapsed state stay with the group's id; the order shows optimistically and
+a failure rolls back with the same move notice and Retry. The
 session serializes placement, sort and mute writes through one queue, retaining
 one confirmed preferences snapshot beneath
 pending Move and Sort projections. Each confirmation updates only its owned fields
@@ -280,8 +286,10 @@ globally alphabetical directory: the relay pages by profile update time. Complet
 pages and recent searches stay in memory for this account/community session, so
 returning or clearing a search resumes the same results. Typing immediately filters
 loaded names without replacing local matches with a loading placeholder. Once the
-browse directory is complete, searches stay local; while it is incomplete, remote
-matches can append in the background. A failed background read
+browse directory is complete, searches stay local until New message closes; a
+reopened picker keeps the loaded list but searches the relay again, so people added
+since can be found. While the directory is incomplete, remote matches can append in
+the background. A failed background read
 keeps existing people visible and offers retry. Mentions retain their conversation-specific
 eligibility. Before a DM exists, a composer-local `DraftMentionRoster` supplies
 only the selected recipient identities and names to both mention tools. Removing

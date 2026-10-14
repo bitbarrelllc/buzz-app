@@ -81,6 +81,21 @@ impl Default for NsecBackupHost {
     }
 }
 impl NsecBackupHost {
+    pub(crate) async fn set_choice(
+        &self,
+        identity: IdentityHost,
+        pubkey: &str,
+        automatic: bool,
+    ) -> Result<crate::nsec_backup_choice::BackupChoice> {
+        let config = self.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
+        let path = self.root.as_ref().ok_or(UNAVAILABLE)?.join("choice.json");
+        let choice =
+            crate::nsec_backup_choice::set(&identity, &path, config, pubkey, automatic).await?;
+        if automatic {
+            self.trigger(identity);
+        }
+        Ok(choice)
+    }
     pub(crate) fn document_load(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.retire();
@@ -201,10 +216,21 @@ impl NsecBackupHost {
     }
     async fn backup(&self, identity: &IdentityHost, session: &Session, epoch: u64) -> Result<()> {
         let config = self.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
+        self.valid(epoch)?;
+        let pubkey = identity.viewer().await?;
+        let consent = crate::nsec_backup_choice::read(
+            &self.root.as_ref().ok_or(UNAVAILABLE)?.join("choice.json"),
+            config,
+            &pubkey,
+        )?;
+        if consent.automatic != Some(true) {
+            return Ok(());
+        }
+        // Hold consent's shared lease until this pass ends, including persisted retries.
+        self.valid(epoch)?;
         let api = Api::new(&config.service_url, &session.credential)?;
         let account = api.me().await?;
         self.valid(epoch)?;
-        let pubkey = identity.viewer().await?;
         let current = api.current().await?;
         if current.as_deref() != Some(&pubkey) {
             return Err("Backup identity mismatch".into());

@@ -126,7 +126,7 @@ impl Paths {
             key_lock: data.join(key_lock_name(buzz_credential_store::HUMAN_SERVICE)),
             ownership: data.join(AGENT_OWNERSHIP),
             app_data,
-            backups: crate::nsec_backup::storage_root()?,
+            backups: crate::nsec_backup_choice::root()?,
             others,
         })
     }
@@ -149,7 +149,7 @@ impl Paths {
         if !choices.wipe {
             return Ok(());
         }
-        // This target is outside app data; also refuse links in its shared parents.
+        // This target is outside app data; refuse links in its shared parents too.
         for parent in self.backups.ancestors().take(3) {
             real_dir(parent)?;
         }

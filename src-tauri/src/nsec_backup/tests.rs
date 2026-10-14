@@ -115,6 +115,11 @@ impl Service {
             credential: Zeroizing::new("synthetic-cli-credential".into()),
         }
     }
+    async fn enable(&self, host: &NsecBackupHost) {
+        host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+            .await
+            .unwrap();
+    }
 }
 async fn serve(
     mut stream: TcpStream,
@@ -210,6 +215,7 @@ async fn overlapping_binding_triggers_back_up_after_a_stale_missing_mapping_resp
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
+    service.enable(&host).await;
     let identity = IdentityHost::fixture();
     service.state.lock().unwrap().mapping = None;
     service.pause_current.store(true, Ordering::SeqCst);
@@ -249,6 +255,8 @@ async fn retirement_cancels_a_queued_binding_pass_without_recreating_erased_reco
         let root = directory.path().join("records");
         std::fs::create_dir(&root).unwrap();
         let host = service.host(&root);
+        service.enable(&host).await;
+        service.enable(&host).await;
         let identity = IdentityHost::fixture();
         service.pause_current.store(true, Ordering::SeqCst);
         host.state.lock().unwrap().session = Some(service.session());
@@ -276,7 +284,7 @@ async fn retirement_cancels_a_queued_binding_pass_without_recreating_erased_reco
         })
         .await
         .unwrap();
-        std::fs::remove_dir(&root).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
         service.release_upload.add_permits(1);
         host.trigger(identity);
         finish_background(&host).await;
@@ -292,15 +300,27 @@ async fn restart_retry_reuses_persisted_ciphertext_and_completion_prevents_more_
     // A server acceptance with a lost acknowledgment must not cause enrollment/reseal on retry.
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
+    let host = service.host(directory.path());
+    service.enable(&host).await;
     service.state.lock().unwrap().upload_status = 503;
-    assert!(service
-        .host(directory.path())
+    assert!(host
         .backup(&IdentityHost::fixture(), &service.session(), 0)
         .await
         .is_err());
     let first = service.state.lock().unwrap().uploads[0].clone();
     service.state.lock().unwrap().upload_status = 200;
     let restarted = service.host(directory.path());
+    restarted
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .await
+        .unwrap();
+    let baseline = service.state.lock().unwrap().requests.clone();
+    restarted
+        .backup(&IdentityHost::fixture(), &service.session(), 0)
+        .await
+        .unwrap();
+    assert_eq!(service.state.lock().unwrap().requests, baseline);
+    service.enable(&restarted).await;
     restarted
         .backup(&IdentityHost::fixture(), &service.session(), 0)
         .await
@@ -319,6 +339,7 @@ async fn invalid_receipts_and_changed_recipient_owner_cannot_settle_or_reseal_a_
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
+    service.enable(&host).await;
     service.state.lock().unwrap().receipt_matches = false;
     assert!(host
         .backup(&IdentityHost::fixture(), &service.session(), 0)
@@ -352,19 +373,30 @@ async fn mismatched_mapping_and_unwritable_pending_state_never_upload() {
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
+    service.enable(&host).await;
     service.state.lock().unwrap().mapping = Some(pubkey([2; 32]));
     assert!(host
         .backup(&IdentityHost::fixture(), &service.session(), 0)
         .await
         .is_err());
     service.state.lock().unwrap().mapping = Some(pubkey([1; 32]));
-    let blocked = directory.path().join("file-instead-of-directory");
-    std::fs::write(&blocked, b"synthetic").unwrap();
-    assert!(service
-        .host(&blocked)
-        .backup(&IdentityHost::fixture(), &service.session(), 0)
-        .await
-        .is_err());
+    service.pause_current.store(true, Ordering::SeqCst);
+    let task_host = host.clone();
+    let session = service.session();
+    let backup = tokio::spawn(async move {
+        task_host
+            .backup(&IdentityHost::fixture(), &session, 0)
+            .await
+    });
+    service.upload_started.notified().await;
+    let retained = directory.path().with_extension("retained");
+    std::fs::rename(directory.path(), &retained).unwrap();
+    std::fs::write(directory.path(), b"synthetic persistence failure").unwrap();
+    service.release_upload.add_permits(1);
+    let result = backup.await;
+    std::fs::remove_file(directory.path()).unwrap();
+    std::fs::rename(&retained, directory.path()).unwrap();
+    assert!(result.unwrap().is_err());
     assert!(service.state.lock().unwrap().uploads.is_empty());
 }
 
@@ -373,6 +405,7 @@ async fn competing_workers_and_signout_keep_an_admitted_upload_pending() {
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
+    service.enable(&host).await;
     service.pause_upload.store(true, Ordering::SeqCst);
     let task_host = host.clone();
     let session = service.session();
@@ -429,6 +462,7 @@ async fn completion_persistence_failure_retains_the_same_pending_bytes_for_resta
     let root = directory.path().join("records");
     let retained = directory.path().join("retained");
     let host = service.host(&root);
+    service.enable(&host).await;
     service.pause_upload.store(true, Ordering::SeqCst);
     let session = service.session();
     let task_host = host.clone();
@@ -454,6 +488,84 @@ async fn completion_persistence_failure_retains_the_same_pending_bytes_for_resta
     assert_eq!(state.uploads.len(), 2);
     assert_eq!(state.uploads[0], state.uploads[1]);
     assert_eq!(state.rows.len(), 1);
+}
+
+#[tokio::test]
+async fn absent_or_invalid_consent_never_contacts_the_backup_service() {
+    let service = Service::new().await;
+    let directory = tempfile::tempdir().unwrap();
+    let host = service.host(directory.path());
+    let identity = IdentityHost::fixture();
+    let path = directory.path().join("choice.json");
+    host.backup(&identity, &service.session(), 0).await.unwrap();
+    assert!(service.state.lock().unwrap().requests.is_empty());
+    service.enable(&host).await;
+    let session = service.session();
+    let queued = host.backup(&identity, &session, 0);
+    host.set_choice(identity.clone(), &pubkey([1; 32]), false)
+        .await
+        .unwrap();
+    queued.await.unwrap();
+    assert!(service.state.lock().unwrap().requests.is_empty());
+    service.enable(&host).await;
+    let original: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for (field, value) in [
+        ("automatic", serde_json::json!(false)),
+        ("pubkey", serde_json::json!(pubkey([2; 32]))),
+        ("service", serde_json::json!("https://other.example")),
+        ("namespace", serde_json::json!("other")),
+    ] {
+        let mut changed = original.clone();
+        changed[field] = value;
+        std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+        host.backup(&identity, &service.session(), 0).await.unwrap();
+        assert!(service.state.lock().unwrap().requests.is_empty());
+    }
+    std::fs::write(&path, b"corrupt").unwrap();
+    assert!(host.backup(&identity, &service.session(), 0).await.is_err());
+    assert!(service.state.lock().unwrap().requests.is_empty());
+}
+
+#[tokio::test]
+async fn saving_consent_after_login_wakes_the_existing_uploader_and_disable_fences_later_passes() {
+    let service = Service::new().await;
+    let directory = tempfile::tempdir().unwrap();
+    let host = service.host(directory.path());
+    host.state.lock().unwrap().session = Some(service.session());
+    host.trigger(IdentityHost::fixture());
+    finish_background(&host).await;
+    assert!(service.state.lock().unwrap().requests.is_empty());
+    service.pause_upload.store(true, Ordering::SeqCst);
+    let started = service.upload_started.notified();
+    host.set_choice(IdentityHost::fixture(), &pubkey([1; 32]), true)
+        .await
+        .unwrap();
+    started.await;
+    let other = service.host(directory.path());
+    let refused = other
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .await;
+    let choice = crate::nsec_backup_choice::read(
+        &directory.path().join("choice.json"),
+        host.config.as_ref().as_ref().unwrap(),
+        &pubkey([1; 32]),
+    );
+    let still_enabled = choice.as_ref().ok().map(|choice| choice.automatic);
+    drop(choice);
+    service.release_upload.add_permits(1);
+    finish_background(&host).await;
+    assert!(refused.is_err());
+    assert_eq!(still_enabled, Some(Some(true)));
+    other
+        .set_choice(IdentityHost::fixture(), &pubkey([1; 32]), false)
+        .await
+        .unwrap();
+    let baseline = service.state.lock().unwrap().requests.clone();
+    host.trigger(IdentityHost::fixture());
+    finish_background(&host).await;
+    assert_eq!(service.state.lock().unwrap().requests, baseline);
+    assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
 }
 
 #[test]

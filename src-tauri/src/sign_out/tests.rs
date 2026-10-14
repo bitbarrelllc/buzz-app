@@ -126,29 +126,21 @@ fn sign_out_without_wipe_removes_only_the_key_and_marker() {
 }
 
 #[test]
-fn backup_records_are_retained_on_plain_signout_and_erased_only_for_the_key_store_scope() {
+fn backup_choice_is_kept_on_plain_signout_and_erased_only_in_its_key_store_scope() {
     for wipe in [false, true] {
         let (dir, paths) = fixture();
-        let backups = dir.path().join("nsec-backups/identity");
         let other = dir.path().join("nsec-backups/identity.debug");
-        for root in [&backups, &other] {
+        for root in [&paths.backups, &other] {
             fs::create_dir_all(root).unwrap();
-            fs::write(
-                root.join("pending.json"),
-                r#"{"subject":"synthetic-account","envelope":"synthetic-ciphertext"}"#,
-            )
-            .unwrap();
-            fs::write(
-                root.join("complete.json"),
-                r#"{"subject":"synthetic-account","envelope":null}"#,
-            )
-            .unwrap();
+            for name in ["choice.json", "pending.json", "complete.json"] {
+                fs::write(root.join(name), b"synthetic backup metadata").unwrap();
+            }
         }
         mark(&paths, wipe, false);
         assert!(boot(&paths, no_agents, || Ok(())).is_ok());
         assert!(!paths.marker.exists());
-        for name in ["pending.json", "complete.json"] {
-            assert_eq!(backups.join(name).exists(), !wipe);
+        for name in ["choice.json", "pending.json", "complete.json"] {
+            assert_eq!(paths.backups.join(name).exists(), !wipe);
             assert!(other.join(name).exists());
         }
     }
@@ -156,16 +148,14 @@ fn backup_records_are_retained_on_plain_signout_and_erased_only_for_the_key_stor
 
 #[test]
 fn backup_erase_finishes_before_marker_removal_and_a_failure_remains_retryable() {
-    let (dir, paths) = fixture();
-    let backups = dir.path().join("nsec-backups/identity");
-    fs::create_dir_all(&backups).unwrap();
-    fs::write(backups.join("pending.json"), b"synthetic ciphertext").unwrap();
-    fs::write(backups.join("complete.json"), b"synthetic completion").unwrap();
+    let (_dir, paths) = fixture();
+    fs::create_dir_all(&paths.backups).unwrap();
+    fs::write(paths.backups.join("pending.json"), b"synthetic ciphertext").unwrap();
     fs::create_dir(&paths.finished).unwrap();
     mark(&paths, true, false);
     assert!(boot(&paths, no_agents, || Ok(())).is_err());
     assert!(paths.marker.exists());
-    assert!(!backups.exists());
+    assert!(!paths.backups.exists());
     fs::remove_dir(&paths.finished).unwrap();
     assert!(boot(&paths, no_agents, || Ok(())).is_ok());
     assert!(!paths.marker.exists());
@@ -173,17 +163,20 @@ fn backup_erase_finishes_before_marker_removal_and_a_failure_remains_retryable()
 
 #[cfg(unix)]
 #[test]
-fn backup_erase_refuses_a_linked_parent_without_touching_its_destination() {
+fn backup_choice_erase_refuses_a_linked_parent_without_touching_its_destination() {
     let (dir, paths) = fixture();
     let outside = tempfile::tempdir().unwrap();
     fs::create_dir(outside.path().join("identity")).unwrap();
-    let retained = outside.path().join("identity/pending.json");
-    fs::write(&retained, b"synthetic ciphertext").unwrap();
+    let retained = outside.path().join("identity/choice.json");
+    let pending_backup = outside.path().join("identity/pending.json");
+    fs::write(&retained, b"synthetic public consent").unwrap();
+    fs::write(&pending_backup, b"synthetic ciphertext").unwrap();
     std::os::unix::fs::symlink(outside.path(), dir.path().join("nsec-backups")).unwrap();
     mark(&paths, true, false);
     assert!(boot(&paths, no_agents, || panic!("key must not be touched")).is_err());
     assert!(paths.marker.exists());
-    assert_eq!(fs::read(retained).unwrap(), b"synthetic ciphertext");
+    assert_eq!(fs::read(retained).unwrap(), b"synthetic public consent");
+    assert_eq!(fs::read(pending_backup).unwrap(), b"synthetic ciphertext");
 }
 
 #[test]
