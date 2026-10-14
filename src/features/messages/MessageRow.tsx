@@ -801,7 +801,11 @@ function MessageRowContent({
                       if (attachment.kind === "image") {
                         return (
                           <AttachmentImage
-                            onOpenLink={onOpenLink}
+                            onOpenLink={
+                              canOpenLink?.(attachment.url)
+                                ? openLink
+                                : undefined
+                            }
                             key={url}
                             attachment={{ ...attachment, url }}
                             source={source}

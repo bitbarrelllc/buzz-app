@@ -134,6 +134,13 @@ export function HuddleDiscussionView({
                         }
                         return undefined;
                       }}
+                      canOpenLink={(url) =>
+                        row.attachments.some(
+                          (attachment) =>
+                            attachment.kind === "image" &&
+                            attachment.url === url,
+                        )
+                      }
                       onOpenLink={(url) => {
                         if (
                           !row.attachments.some(
