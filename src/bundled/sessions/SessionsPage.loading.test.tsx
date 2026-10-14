@@ -21,6 +21,7 @@ import type { Navigation } from "../../features/navigation/controller";
 import { composerDOMFixture } from "../../features/messages/composer-testing";
 import { writeView } from "../../shared/view-state";
 import { meTarget } from "../me/routes";
+import { MeSidebar } from "../me/MeSidebar";
 import { SessionsPage } from "./SessionsPage";
 
 composerDOMFixture();
@@ -139,6 +140,10 @@ function fixture(status: KitSnapshot["status"] = "ready", retained = true) {
     resolve: () => true,
   };
   const open = vi.fn(async () => ({ status: "opened" as const }));
+  const navigator = {
+    open,
+    snapshot: () => ({ attempt: { signal: abort.signal } }),
+  } as unknown as Navigation;
   const mount = () =>
     render(
       <SessionsPage
@@ -146,7 +151,7 @@ function fixture(status: KitSnapshot["status"] = "ready", retained = true) {
         panels={{ ...contribution, register() {}, resolve: () => undefined }}
         extensions={extensions}
         navigation={navigation}
-        navigator={{ open } as unknown as Navigation}
+        navigator={navigator}
       />,
     );
   return {
@@ -157,6 +162,8 @@ function fixture(status: KitSnapshot["status"] = "ready", retained = true) {
     open,
     scope,
     session,
+    relay,
+    navigator,
     update(next: KitSnapshot) {
       state = next;
       for (const listener of listeners) listener();
@@ -182,13 +189,23 @@ it.each([false, true])(
 it("keeps failed placement read-only and restores sending after confirmed preferences", async () => {
   const f = fixture("loading");
   writeView(f.scope, `draft:${id}`, "Saved thought");
-  f.mount();
+  const page = f.mount();
+  // The sidebar owns placement retries; the retained page preserves the draft.
+  const sidebar = render(
+    <MeSidebar
+      relay={f.relay}
+      navigator={f.navigator}
+      target={meTarget(f.scope, id)}
+    />,
+  );
   act(() =>
     f.update({ ...f.state, status: "error", error: "Preferences offline" }),
   );
-  expect(screen.getByText("Preferences offline")).toBeVisible();
+  expect(within(page.container).getByText("Preferences offline")).toBeVisible();
   expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
-  await userEvent.click(screen.getByRole("button", { name: "Retry Me" }));
+  await userEvent.click(
+    within(sidebar.container).getByRole("button", { name: "Retry Me" }),
+  );
   expect(f.refresh).toHaveBeenCalledOnce();
   act(() => f.update({ ...f.state, status: "ready" }));
   await waitFor(() =>
