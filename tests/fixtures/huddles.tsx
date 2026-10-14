@@ -9,11 +9,15 @@ import { foldMessages } from "../../src/features/relay/fold";
 import { createRoot } from "react-dom/client";
 import { useState, useSyncExternalStore } from "react";
 import { MessageBody } from "../../src/features/conversation/MessageBody";
+import { TargetOpenerProvider } from "../../src/features/conversation/opener";
 import type {
   ContributionReader,
   MessageRenderer,
 } from "../../src/features/conversation/contracts";
-import { HuddleCard } from "../../src/bundled/huddles/HuddleCard";
+import {
+  HuddleCard,
+  parseHuddleTarget,
+} from "../../src/bundled/huddles/HuddleCard";
 import { huddleComposerExtensions } from "../../src/bundled/huddles/composer-extensions";
 import { HuddlePanel } from "../../src/bundled/huddles/HuddlePanel";
 import { Panel } from "../../src/shared/design-system/ui/Panel";
@@ -640,17 +644,18 @@ function Fixture() {
           lifecycleEvent(48100, startedAt),
           ...(endedAt ? [lifecycleEvent(48103, endedAt)] : []),
         ]).map((message) => (
-          <MessageBody
+          <TargetOpenerProvider
             key={message.id}
-            registry={cardRegistry}
-            message={message}
+            canOpen={(target) => !!parseHuddleTarget(target)}
             open={(target) => {
               setChatTarget(target);
               return true;
             }}
           >
-            Huddle started
-          </MessageBody>
+            <MessageBody registry={cardRegistry} message={message}>
+              Huddle started
+            </MessageBody>
+          </TargetOpenerProvider>
         ))}
         {chatTarget && (
           <aside
