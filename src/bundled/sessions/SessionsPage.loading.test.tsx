@@ -177,6 +177,7 @@ it.each([false, true])(
     const f = fixture("loading", retained);
     f.mount();
     expect(screen.getByText("Loading Me placement…")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Retry Me" })).toBeNull();
     if (retained) {
       expect(screen.getByLabelText("Channel message history")).toBeVisible();
       expect(
@@ -198,6 +199,17 @@ it("keeps failed placement read-only and restores sending after confirmed prefer
       target={meTarget(f.scope, id)}
     />,
   );
+  act(() =>
+    f.update({
+      ...f.state,
+      status: "error",
+      error: "Network unavailable",
+      transient: true,
+    }),
+  );
+  expect(screen.queryByRole("button", { name: "Retry Me" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  expect(f.refresh).not.toHaveBeenCalled();
   act(() =>
     f.update({ ...f.state, status: "error", error: "Preferences offline" }),
   );

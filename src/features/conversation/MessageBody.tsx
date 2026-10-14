@@ -2,18 +2,17 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import type { ChannelMessage } from "../relay/contracts";
 import type { ContributionReader, MessageRenderer } from "./contracts";
 import { ContributionBoundary, contributionKey } from "./ContributionBoundary";
+import { WithTargetOpener } from "./opener";
 
 /** First active match wins; a broken optional renderer leaves the host fallback. */
 export function MessageBody({
   registry,
   message,
   children,
-  open,
 }: {
   registry: ContributionReader<MessageRenderer>;
   message: ChannelMessage;
   children: ReactNode;
-  open?: ((target: string) => boolean) | undefined;
 }) {
   const renderers = useSyncExternalStore(
     registry.subscribe,
@@ -28,13 +27,17 @@ export function MessageBody({
     }
   });
   if (!renderer) return children;
-  const Render = renderer.component;
   return (
     <ContributionBoundary
       key={`${contributionKey(renderer)}:${message.channelId}:${message.id}`}
       fallback={children}
     >
-      <Render message={message} open={open} />
+      <WithTargetOpener
+        component={renderer.component}
+        props={{ message }}
+        registry={registry}
+        entry={renderer}
+      />
     </ContributionBoundary>
   );
 }

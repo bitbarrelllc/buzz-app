@@ -6,6 +6,17 @@ import type { Attachment, ChannelMessage } from "../relay/contracts";
 import type { RelaySession } from "../relay/session";
 import type { ComposerSession } from "../messages/composer-session";
 
+/**
+ * Opens a target, such as a plugin panel URL, where the conversation host
+ * places it. In a channel or thread, panel targets open as side-pane tabs.
+ */
+export type TargetOpener = Readonly<{
+  /** Presentation only; the host re-resolves targets when opening. */
+  canOpen(target: string): boolean;
+  /** False when nothing can open the target, outside a conversation host,
+   * or after this contribution or its placement retires. */
+  open(target: string): boolean;
+}>;
 /** Editor-independent reference to plugin content. Not an access grant or recipient. */
 export type ComposerResource = Readonly<{ uri: string; label: string }>;
 export type ComposerToolProps = Readonly<{
@@ -34,7 +45,8 @@ export type ComposerToolProps = Readonly<{
     component: ComponentType<ComposerCaptureProps>,
   ): (() => void) | false;
   focus(): void;
-}>;
+}> &
+  TargetOpener;
 export type ComposerCaptureProps = Readonly<{
   accept(recording: VoiceRecording): boolean;
   cancel(): void;
@@ -43,7 +55,8 @@ export type AttachmentRendererProps = Readonly<{
   attachment: Attachment;
   source: string;
   onRemove?: (() => void) | undefined;
-}>;
+}> &
+  TargetOpener;
 export type AttachmentRenderer = Readonly<{
   id: string;
   title: string;
@@ -77,11 +90,13 @@ export type InlineRenderer = Readonly<{
   title: string;
   /** UTF-16 ranges within this plain-text segment. Links are never offered. */
   matches(content: InlineContent): readonly InlineRange[];
-  component: ComponentType<{
-    text: string;
-    content: InlineContent;
-    media(url: string): string | undefined;
-  }>;
+  component: ComponentType<
+    TargetOpener & {
+      text: string;
+      content: InlineContent;
+      media(url: string): string | undefined;
+    }
+  >;
 }>;
 /** Link presentation only. The host retains the anchor, destination and activation. */
 export type LinkRenderer = Readonly<{
@@ -127,11 +142,7 @@ export type MessageRenderer = Readonly<{
   id: string;
   title: string;
   matches(message: ChannelMessage): boolean;
-  component: ComponentType<{
-    message: ChannelMessage;
-    /** Host-owned panel/link activation; unavailable outside a conversation host. */
-    open?: ((target: string) => boolean) | undefined;
-  }>;
+  component: ComponentType<TargetOpener & { message: ChannelMessage }>;
 }>;
 /** One ⋯ menu entry for a message. The host owns the menu, focus and row lifetime. */
 export type MessageAction = Readonly<{
@@ -140,11 +151,13 @@ export type MessageAction = Readonly<{
   icon?: ComponentType;
   matches(message: ChannelMessage, session: RelaySession): boolean;
   /** Mounted by the row after the menu closes; call close() to dismiss. */
-  component: ComponentType<{
-    message: ChannelMessage;
-    session: RelaySession;
-    close(): void;
-  }>;
+  component: ComponentType<
+    TargetOpener & {
+      message: ChannelMessage;
+      session: RelaySession;
+      close(): void;
+    }
+  >;
   /**
    * Optional presentation beside the message timestamp, such as a state mark.
    * Rendered only while `matches` passes: hiding the menu entry hides the mark.

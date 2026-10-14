@@ -7,7 +7,7 @@ import { createHuddles } from "../../features/huddle/service";
 import { createHuddleWindow } from "../../features/huddle/window";
 import { HuddleCapsule } from "./HuddleCapsule";
 import { HuddleLauncher } from "./HuddleLauncher";
-import { HuddleCard, parseHuddleTarget } from "./HuddleCard";
+import { HuddleCard, huddleTarget, parseHuddleTarget } from "./HuddleCard";
 import { HuddlePanel } from "./HuddlePanel";
 
 export const inject = ["panels", "relay", "conversation", "navigation"];
@@ -40,6 +40,16 @@ export const apply: PluginModule["apply"] = (ctx) => {
     component: (props) => (
       <HuddleCard
         {...props}
+        open={
+          props.canOpen(
+            huddleTarget(
+              props.message.channelId,
+              props.message.huddle?.room ?? "",
+            ),
+          )
+            ? props.open
+            : undefined
+        }
         relay={ctx.relay}
         huddles={huddles}
         showWindow={companion.open}
