@@ -1078,7 +1078,8 @@ pub async fn identity_import(
     })
     .await?;
     let backup = backup.inner().clone();
-    backup.local_key_installed();
+    let identity = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || backup.local_key_installed(identity));
     Ok(public)
 }
 #[tauri::command]
@@ -1088,7 +1089,8 @@ pub async fn identity_create(
 ) -> Result<String> {
     let public = with_identity(host.inner().clone(), |identity| identity.save(None)).await?;
     let backup = backup.inner().clone();
-    backup.local_key_installed();
+    let identity = host.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || backup.local_key_installed(identity));
     Ok(public)
 }
 #[tauri::command]

@@ -30,11 +30,13 @@ mod host_process;
 mod host_request;
 mod identity;
 mod nsec_backup;
+mod nsec_backup_choice;
 mod nsec_backup_config;
 use nsec_backup::{
-    nsec_backup_available, nsec_restore_begin, nsec_restore_cancel, nsec_restore_install,
-    nsec_restore_wait, NsecBackupHost,
+    nsec_backup_available, nsec_backup_retry, nsec_backup_session, nsec_restore_begin,
+    nsec_restore_cancel, nsec_restore_install, nsec_restore_wait, NsecBackupHost,
 };
+use nsec_backup_choice::{nsec_backup_choice, nsec_backup_set_choice};
 mod image_clipboard;
 
 mod notifications;
@@ -419,6 +421,8 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         identity_import,
         identity_create,
         identity_export,
+        nsec_backup_choice,
+        nsec_backup_set_choice,
         identity_prepare_remote_agent_authorization,
         identity_sign_builderlab_binding,
         enterprise_login_gate,
@@ -474,6 +478,8 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         oauth_callback_wait,
         oauth_callback_cancel,
         nsec_backup_available,
+        nsec_backup_session,
+        nsec_backup_retry,
         nsec_restore_begin,
         nsec_restore_wait,
         nsec_restore_install,

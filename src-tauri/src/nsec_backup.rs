@@ -1,4 +1,5 @@
-//! Optional native recovery. Local identities are never enrolled, sealed, or uploaded.
+//! Purpose-bound native backup and optional recovery. No key or recovery credential crosses IPC.
+mod crypto;
 mod persistence;
 pub(crate) use persistence::root as storage_root;
 
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -27,9 +29,30 @@ const CANCELED: &str = "Restore was canceled. Try again.";
 const UNAVAILABLE: &str = "Backup recovery is unavailable. Try again later.";
 type Result<T> = std::result::Result<T, String>;
 
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Source {
+    Builderlab,
+    Hosted,
+}
+impl Source {
+    fn index(self) -> usize {
+        match self {
+            Self::Builderlab => 0,
+            Self::Hosted => 1,
+        }
+    }
+}
+
+#[derive(Clone)]
+struct Session {
+    source: Option<Source>,
+    credential: Zeroizing<String>,
+}
 struct Candidate {
     handle: String,
     pubkey: String,
+    backup_id: String,
     secret: Box<Zeroizing<[u8; 32]>>,
 }
 #[derive(Serialize)]
@@ -58,6 +81,7 @@ struct Restore {
     candidates: Vec<Candidate>,
     current: Option<String>,
     credential: Option<Zeroizing<String>>,
+    subject: Option<String>,
     installing: bool,
 }
 impl Drop for Restore {
@@ -71,11 +95,19 @@ impl Drop for Restore {
 struct State {
     closed: bool,
     epoch: u64,
+    generations: [Option<u64>; 2],
+    session: Option<Session>,
+    worker: Option<JoinHandle<()>>,
+    rerun: bool,
     restore: Option<Restore>,
 }
 impl State {
     fn retire(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
+        self.rerun = false;
+        if let Some(worker) = self.worker.take() {
+            worker.abort();
+        }
         self.restore.take();
     }
 }
@@ -83,6 +115,7 @@ impl State {
 pub(crate) struct NsecBackupHost {
     state: Arc<Mutex<State>>,
     config: Arc<Option<Config>>,
+    root: Option<PathBuf>,
 }
 impl Default for NsecBackupHost {
     fn default() -> Self {
@@ -95,23 +128,45 @@ impl Default for NsecBackupHost {
         Self {
             state: Default::default(),
             config: Arc::new(config),
+            // Default test hosts never access the OS account's backup directory.
+            root: if cfg!(test) { None } else { storage_root() },
         }
     }
 }
 impl NsecBackupHost {
+    pub(crate) async fn set_choice(
+        &self,
+        identity: IdentityHost,
+        pubkey: &str,
+        automatic: bool,
+    ) -> Result<crate::nsec_backup_choice::BackupChoice> {
+        let config = self.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
+        let path = self.root.as_ref().ok_or(UNAVAILABLE)?.join("choice.json");
+        let choice =
+            crate::nsec_backup_choice::set(&identity, &path, config, pubkey, automatic).await?;
+        if automatic {
+            self.trigger(identity);
+        }
+        Ok(choice)
+    }
     pub(crate) fn document_load(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.retire();
+        state.session = None;
+        // Source counters restart with each renderer document.
+        state.generations = [None, None];
     }
     pub(crate) fn close(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.closed = true;
         state.retire();
+        state.session = None;
     }
-    pub(crate) fn local_key_installed(&self) {
+    pub(crate) fn local_key_installed(&self, identity: IdentityHost) {
         if let Ok(mut state) = self.state.lock() {
             state.retire();
         }
+        self.trigger(identity);
     }
     fn valid(&self, epoch: u64) -> Result<()> {
         let state = self.state.lock().map_err(|_| CANCELED)?;
@@ -120,6 +175,195 @@ impl NsecBackupHost {
         } else {
             Ok(())
         }
+    }
+    fn source_allowed(&self, source: Source) -> bool {
+        let Some(config) = self.config.as_ref() else {
+            return false;
+        };
+        match source {
+            Source::Hosted => config.service_url == "https://app.builderlab.xyz/api/goose",
+            Source::Builderlab => url::Url::parse(&config.service_url)
+                .ok()
+                .is_some_and(|url| {
+                    !buzzodz_plugins::BUILDERLAB_ORIGIN.is_empty()
+                        && url.origin().ascii_serialization() == buzzodz_plugins::BUILDERLAB_ORIGIN
+                }),
+        }
+    }
+    fn session(
+        &self,
+        source: Source,
+        generation: u64,
+        credential: Option<String>,
+        identity: IdentityHost,
+    ) -> Result<()> {
+        // Reject a foreign service before copying a caller's already-held credential.
+        let credential = credential.map(Zeroizing::new);
+        if !self.source_allowed(source) {
+            return Ok(());
+        }
+        if credential.as_ref().is_some_and(|c| !valid_credential(c)) {
+            return Err("Invalid backup session".into());
+        }
+        let mut state = self.state.lock().map_err(|_| "Backup unavailable")?;
+        if state.closed {
+            return Ok(());
+        }
+        let previous = state.generations[source.index()];
+        if previous.is_some_and(|seen| generation <= seen) {
+            return Ok(());
+        }
+        state.generations[source.index()] = Some(generation);
+        if credential.is_none()
+            && state
+                .session
+                .as_ref()
+                .is_some_and(|s| s.source != Some(source))
+        {
+            return Ok(());
+        }
+        state.retire();
+        state.session = credential.map(|credential| Session {
+            source: Some(source),
+            credential,
+        });
+        drop(state);
+        self.trigger(identity);
+        Ok(())
+    }
+    fn trigger(&self, identity: IdentityHost) {
+        if self.config.is_none() || self.root.is_none() {
+            return;
+        }
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if state.closed {
+            return;
+        }
+        if state
+            .worker
+            .as_ref()
+            .is_some_and(|task| !task.inner().is_finished())
+        {
+            state.rerun = true;
+            return;
+        }
+        let Some(session) = state.session.clone() else {
+            return;
+        };
+        let epoch = state.epoch;
+        state.rerun = false;
+        let host = self.clone();
+        state.worker = Some(tauri::async_runtime::spawn(async move {
+            loop {
+                if host.backup(&identity, &session, epoch).await.is_err() {
+                    eprintln!("Automatic identity backup deferred");
+                }
+                let Ok(mut state) = host.state.lock() else {
+                    return;
+                };
+                if state.closed || state.epoch != epoch {
+                    return;
+                }
+                // Consume overlapping lifecycle events in this worker, without a timer.
+                if std::mem::take(&mut state.rerun) {
+                    continue;
+                }
+                state.worker = None;
+                return;
+            }
+        }));
+    }
+    async fn backup(&self, identity: &IdentityHost, session: &Session, epoch: u64) -> Result<()> {
+        let config = self.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
+        self.valid(epoch)?;
+        let pubkey = identity.viewer().await?;
+        let consent = crate::nsec_backup_choice::read(
+            &self.root.as_ref().ok_or(UNAVAILABLE)?.join("choice.json"),
+            config,
+            &pubkey,
+        )?;
+        if consent.automatic != Some(true) {
+            return Ok(());
+        }
+        // Hold consent's shared lease until this pass ends, including persisted retries.
+        self.valid(epoch)?;
+        let api = Api::new(&config.service_url, &session.credential)?;
+        let account = api.me().await?;
+        self.valid(epoch)?;
+        let current = api.current().await?;
+        if current.as_deref() != Some(&pubkey) {
+            return Err("Backup identity mismatch".into());
+        }
+        let client = Client::new(&config.service_url, &session.credential).map_err(|_| RETRY)?;
+        let enrollment = client.enroll().await.map_err(|_| RETRY)?;
+        self.valid(epoch)?;
+        crypto::validate_enrollment(
+            &enrollment,
+            &config.namespace,
+            &enrollment.owner_id,
+            &pubkey,
+        )?;
+        let locked = {
+            let state = self.state.lock().map_err(|_| RETRY)?;
+            if state.closed || state.epoch != epoch {
+                return Err(CANCELED.into());
+            }
+            persistence::LockedRecord::open(
+                self.root.as_ref().ok_or(RETRY)?,
+                config,
+                &account.subject,
+                &enrollment.nostr_pubkey,
+            )?
+        };
+        self.valid(epoch)?;
+        let mut record = match locked.read()? {
+            Some(record) => {
+                record.matches(config, &account.subject, &enrollment)?;
+                record
+            }
+            None => {
+                let mut record = persistence::Record::new(config, &account.subject, &enrollment);
+                let namespace = config.namespace.clone();
+                let expected = pubkey.clone();
+                let owner = enrollment.owner_id.clone();
+                let bytes = identity
+                    .with_key(move |secret, local| {
+                        if local != expected {
+                            return Err("Backup identity mismatch".into());
+                        }
+                        crypto::seal(&enrollment, &namespace, &owner, local, secret)
+                    })
+                    .await?;
+                record.envelope = Some(String::from_utf8(bytes).map_err(|_| RETRY)?);
+                let state = self.state.lock().map_err(|_| RETRY)?;
+                if state.closed || state.epoch != epoch {
+                    return Err(CANCELED.into());
+                }
+                locked.write(&record)?;
+                drop(state);
+                record
+            }
+        };
+        let Some(envelope) = record.envelope.as_ref() else {
+            return Ok(());
+        };
+        self.valid(epoch)?;
+        let receipt = client
+            .upload(envelope.as_bytes())
+            .await
+            .map_err(|_| RETRY)?;
+        if !receipt.stored || receipt.backup_id != record.backup_id {
+            return Err("Backup receipt mismatch".into());
+        }
+        let state = self.state.lock().map_err(|_| RETRY)?;
+        if state.closed || state.epoch != epoch {
+            return Err(CANCELED.into());
+        }
+        record.envelope = None;
+        locked.write(&record)?;
+        Ok(())
     }
     async fn begin<R: tauri::Runtime>(
         &self,
@@ -197,6 +441,7 @@ impl NsecBackupHost {
             candidates: Vec::new(),
             current: None,
             credential: None,
+            subject: None,
             installing: false,
         });
         Ok(RestoreStarted { attempt: id })
@@ -230,7 +475,7 @@ impl NsecBackupHost {
         let config = self.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
         let credential = Api::exchange(&config.service_url, code, &verifier, &redirect).await?;
         let api = Api::new(&config.service_url, &credential)?;
-        api.me().await?;
+        let account = api.me().await?;
         self.valid(epoch)?;
         let current = api.current().await?;
         let client = Client::new(&config.service_url, &credential).map_err(|_| RETRY)?;
@@ -262,6 +507,7 @@ impl NsecBackupHost {
         attempt.candidates = candidates;
         attempt.current = current;
         attempt.credential = Some(credential);
+        attempt.subject = Some(account.subject);
         Ok(summary)
     }
     async fn wait(&self, id: &str) -> Result<RestoreResult> {
@@ -287,7 +533,7 @@ impl NsecBackupHost {
         }
     }
     async fn install(&self, identity: IdentityHost, id: &str, handle: &str) -> Result<String> {
-        let (pubkey, credential, current, admission, epoch) = {
+        let (pubkey, backup_id, credential, subject, current, admission, epoch) = {
             let mut state = self.state.lock().map_err(|_| CANCELED)?;
             if state.closed {
                 return Err(CANCELED.into());
@@ -304,10 +550,13 @@ impl NsecBackupHost {
                 .find(|key| key.handle == handle)
                 .ok_or("Choose an identity to restore")?;
             let credential = attempt.credential.clone().ok_or(CANCELED)?;
+            let subject = attempt.subject.clone().ok_or(CANCELED)?;
             attempt.installing = true;
             (
                 key.pubkey.clone(),
+                key.backup_id.clone(),
                 credential,
+                subject,
                 attempt.current.clone(),
                 attempt.admission.clone(),
                 epoch,
@@ -332,6 +581,17 @@ impl NsecBackupHost {
                     .iter()
                     .find(|key| key.handle == handle)
                     .ok_or(CANCELED)?;
+                if self
+                    .root
+                    .as_ref()
+                    .ok_or_else(|| RETRY.to_owned())
+                    .and_then(|root| {
+                        persistence::remember_restored(root, config, &subject, &pubkey, &backup_id)
+                    })
+                    .is_err()
+                {
+                    eprintln!("Automatic identity backup completion deferred");
+                }
                 Zeroizing::new(**key.secret)
             };
             self.valid(epoch)?;
@@ -350,7 +610,13 @@ impl NsecBackupHost {
                     .is_some_and(|attempt| attempt.id == id)
             {
                 state.restore.take();
+                state.session = Some(Session {
+                    source: None,
+                    credential,
+                });
             }
+            drop(state);
+            self.trigger(identity);
         } else if let Ok(mut state) = self.state.lock() {
             if let Some(attempt) = state.restore.as_mut().filter(|attempt| attempt.id == id) {
                 attempt.installing = false;
@@ -398,6 +664,7 @@ fn candidates(recovered: Recovery) -> (Vec<Candidate>, usize) {
             Ok(pubkey) if seen.insert(pubkey.clone()) => candidates.push(Candidate {
                 handle: uuid::Uuid::new_v4().to_string(),
                 pubkey,
+                backup_id: backup.backup_id.clone(),
                 secret: Box::new(Zeroizing::new(*backup.secret_key())),
             }),
             Ok(_) => {}
@@ -565,6 +832,32 @@ impl Api {
 #[tauri::command]
 pub(crate) fn nsec_backup_available(host: tauri::State<'_, NsecBackupHost>) -> bool {
     host.config.is_some()
+}
+#[tauri::command]
+pub(crate) fn nsec_backup_session(
+    host: tauri::State<'_, NsecBackupHost>,
+    identity: tauri::State<'_, IdentityHost>,
+    source: Source,
+    generation: u64,
+    credential: Option<String>,
+) -> Result<()> {
+    host.session(source, generation, credential, identity.inner().clone())
+}
+#[tauri::command]
+pub(crate) fn nsec_backup_retry(
+    host: tauri::State<'_, NsecBackupHost>,
+    identity: tauri::State<'_, IdentityHost>,
+    source: Source,
+) {
+    let matching = host.state.lock().ok().is_some_and(|state| {
+        state
+            .session
+            .as_ref()
+            .is_some_and(|session| session.source == Some(source))
+    });
+    if matching {
+        host.trigger(identity.inner().clone());
+    }
 }
 #[tauri::command]
 pub(crate) async fn nsec_restore_begin<R: tauri::Runtime>(

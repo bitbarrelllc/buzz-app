@@ -643,6 +643,42 @@ it.each([
   },
 );
 
+it("uses loaded image proportions without metadata and resets them when the source changes", async () => {
+  const show = (url: string) => (
+    <MessageRow
+      row={{ ...row, attachments: [{ url, kind: "image" }] }}
+      profile={undefined}
+      media={(url) => url}
+      onOpenLink={() => false}
+      day={false}
+      retry={undefined}
+    />
+  );
+  const view = renderDom(show("https://image.test/landscape.png"));
+  try {
+    const link = () =>
+      view.getByRole("link", { name: "Open image attachment" });
+    const loaded = (width: number, height: number) => {
+      const image = link().querySelector("img");
+      if (!image) throw new Error("Expected attachment image");
+      Object.defineProperties(image, {
+        naturalWidth: { value: width },
+        naturalHeight: { value: height },
+        decode: { value: () => Promise.resolve() },
+      });
+      fireEvent.load(image);
+    };
+    loaded(900, 600);
+    await waitFor(() => expect(link().style.aspectRatio).toBe("360 / 240"));
+    view.rerender(show("https://image.test/portrait.png"));
+    expect(link().style.aspectRatio).toBe("");
+    loaded(300, 600);
+    await waitFor(() => expect(link().style.aspectRatio).toBe("160 / 320"));
+  } finally {
+    view.unmount();
+  }
+});
+
 it.each([undefined, { width: 640, height: 400 }])(
   "keeps cached images silent and unfetched, but explains a live unavailable source (%j)",
   (dimensions) => {
@@ -1527,7 +1563,7 @@ it("bounds reply participants and projects artwork with fallback initials", () =
     expect(trigger.querySelector('[title="p3"]')).toHaveTextContent("P");
     expect(trigger).toHaveTextContent("+2");
     expect(media).toHaveBeenCalledWith("https://safe/avatar", "small");
-    expect(media).toHaveBeenCalledWith("http://unsafe", "small");
+    expect(media).not.toHaveBeenCalledWith("http://unsafe", "small");
   } finally {
     view.unmount();
   }
@@ -1562,8 +1598,7 @@ it.each([1, 2, 10])(
     expect(html).toContain(`href="https://image.test/${count - 1}.png"`);
     const text = new DOMParser().parseFromString(html, "text/html").body
       .textContent;
-    if (count === 1) expect(text).not.toContain("1 image");
-    else expect(text).toContain(`${count} images`);
+    expect(text).not.toContain(`${count} ${count === 1 ? "image" : "images"}`);
   },
 );
 
@@ -1595,7 +1630,7 @@ it("preserves interleaved file order and counts unavailable images but not unsaf
   expect(html).toContain('role="group" aria-label="1 image"');
   const text = new DOMParser().parseFromString(html, "text/html").body
     .textContent;
-  expect(text).toContain("2 images");
+  expect(text).not.toContain("2 images");
   expect(text).not.toContain("1 image");
   expect(html).toContain("Image unavailable");
   expect(html).not.toContain("javascript:");
@@ -2154,6 +2189,122 @@ it("keeps a plugin action dialog closed when its plugin is reinstalled with the 
   }
 });
 
+it("renders built-in own bubbles and keeps only the last grouped avatar", () => {
+  const props = {
+    row: { ...row, authorId: "ab".repeat(32) },
+    viewer: "ab".repeat(32),
+    profile: { name: "author" },
+    media: () => undefined,
+    onOpenLink: () => true,
+    canOpenLink: () => true,
+    day: false,
+    retry: undefined,
+  };
+  try {
+    const { container, rerender } = renderDom(
+      <MessageRow {...props} stackNext />,
+    );
+    expect(container.querySelector("[data-own]")).toHaveTextContent("Root");
+    expect(
+      screen.queryByRole("button", { name: "View author profile" }),
+    ).toBeNull();
+    rerender(<MessageRow {...props} stackPrevious />);
+    expect(
+      screen.getByRole("button", { name: "View author profile" }),
+    ).toBeInTheDocument();
+    rerender(<MessageRow {...props} viewer="someone-else" />);
+    expect(container.querySelector("[data-own]")).toBeNull();
+  } finally {
+    cleanup();
+  }
+});
+
+it.each(["timeline", "thread", "continuation"] as const)(
+  "retains a focused grouped avatar until focus leaves in %s rows",
+  (layout) => {
+    const render = (stackNext: boolean) => (
+      <>
+        <button type="button">Elsewhere</button>
+        <MessageRow
+          row={{ ...row, authorId: "ab".repeat(32) }}
+          profile={{ name: "author" }}
+          media={() => undefined}
+          onOpenLink={() => true}
+          canOpenLink={() => true}
+          day={false}
+          retry={undefined}
+          layout={layout}
+          stackNext={stackNext}
+        />
+      </>
+    );
+    try {
+      const view = renderDom(render(false));
+      const avatar = screen.getByRole("button", {
+        name: "View author profile",
+      });
+      const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+      act(() => avatar.focus());
+      // Window blur retains activeElement even though the control gets blur.
+      fireEvent.blur(avatar, { relatedTarget: null });
+      expect(avatar).toHaveFocus();
+      view.rerender(render(true));
+      expect(avatar).toHaveFocus();
+      act(() => elsewhere.focus());
+      expect(avatar).not.toBeInTheDocument();
+      expect(elsewhere).toHaveFocus();
+      view.rerender(render(false));
+      view.rerender(render(true));
+      expect(
+        screen.queryByRole("button", { name: "View author profile" }),
+      ).toBeNull();
+      expect(elsewhere).toHaveFocus();
+    } finally {
+      cleanup();
+    }
+  },
+);
+
+it.each(["image", "video", "file", "audio"] as const)(
+  "places %s attachments outside the text bubble and omits empty bubbles",
+  (kind) => {
+    const props = {
+      row: {
+        ...row,
+        content: "",
+        attachments: [{ kind, url: "https://example.com/photo.png" }],
+      },
+      profile: undefined,
+      media: () => undefined,
+      onOpenLink: () => true,
+      day: false,
+      retry: undefined,
+    };
+    try {
+      const { container, rerender } = renderDom(<MessageRow {...props} />);
+      expect(container.querySelector("[data-own]")).toBeNull();
+      expect(container.querySelector("[class*=messageBubble]")).toBeNull();
+      rerender(
+        <MessageRow
+          {...props}
+          row={{ ...props.row, content: "Photo caption" }}
+        />,
+      );
+      const bubble = container.querySelector("[class*=messageBubble]");
+      const attachments = container.querySelector(
+        "[class*=messageAttachments]",
+      );
+      expect(bubble).toHaveTextContent("Photo caption");
+      expect(attachments).not.toBeNull();
+      expect(bubble?.contains(attachments)).toBe(false);
+      expect(bubble?.nextElementSibling).toBe(attachments);
+      expect(screen.getByText("Photo caption")).toBeInTheDocument();
+    } finally {
+      cleanup();
+    }
+  },
+);
+
 it("shows a message for agents as one line from its author to whom it addresses", () => {
   const agent = keypair();
   const rivet = "b".repeat(64);
@@ -2181,6 +2332,10 @@ it("shows a message for agents as one line from its author to whom it addresses"
     renderDom(
       <MessageRow
         row={quiet}
+        viewer={quiet.authorId}
+        stackPrevious={false}
+        stackNext={false}
+        canOpenLink={() => true}
         profile={{ name: "Morgarita" }}
         participantProfiles={new Map([[rivet, { name: "Rivet" }]])}
         media={() => undefined}
@@ -2200,6 +2355,12 @@ it("shows a message for agents as one line from its author to whom it addresses"
     expect(screen.queryByText(/Then report back/)).toBeNull();
     fireEvent.click(line);
     expect(line).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.queryByRole("button", { name: "View Morgarita profile" }),
+    ).toBeNull();
+    const expanded = screen.getByText("run").closest("[data-message-id]");
+    expect(expanded?.querySelector('[class*="messageBubble"]')).toBeNull();
+    expect(expanded?.querySelector("[data-own]")).toBeNull();
     // The body keeps later mentions but drops the one the line shows.
     expect(screen.getByText(/Then report back/)).toBeInTheDocument();
     expect(screen.queryByText("@Rivet,")).toBeNull();
@@ -2306,9 +2467,9 @@ it("keeps agent and human emoji reactions ordinary, without treating them as act
         }
       />,
     );
-    expect(view.container.textContent).toContain("👀 2");
-    expect(view.container.textContent).toContain("💬 1");
-    expect(view.container.textContent).toContain("✅ 1");
+    expect(view.getAllByText("👀", { exact: true })).toHaveLength(2);
+    expect(view.getAllByText("💬", { exact: true })).toHaveLength(1);
+    expect(view.getAllByText("✅", { exact: true })).toHaveLength(1);
     expect(
       screen.queryByRole("img", { name: "Other agent working" }),
     ).toBeNull();
