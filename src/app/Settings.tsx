@@ -45,6 +45,14 @@ const pluginCategoryDefinitions = [
   { id: "people-and-communities", label: "People & communities" },
 ] as const;
 
+function isRequiredPlugin(plugin: PluginInfo) {
+  return plugin.manifest.id === "buzz.channels";
+}
+
+function compareRequiredPlugins(a: PluginInfo, b: PluginInfo) {
+  return Number(isRequiredPlugin(b)) - Number(isRequiredPlugin(a));
+}
+
 function groupPlugins(plugins: readonly PluginInfo[]) {
   const known = new Map<string, PluginInfo[]>(
     pluginCategoryDefinitions.map(({ id }) => [id, []]),
@@ -54,6 +62,10 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
     const group = known.get(plugin.manifest.discovery?.category ?? "");
     (group ?? other).push(plugin);
   }
+  for (const entries of known.values()) {
+    entries.sort(compareRequiredPlugins);
+  }
+  other.sort(compareRequiredPlugins);
   return [
     ...pluginCategoryDefinitions.flatMap(({ id, label }) => {
       const entries = known.get(id) ?? [];
@@ -325,7 +337,7 @@ export function Settings({
                             return (
                               <article className="py-1" key={id}>
                                 {/* Channels is required and has no enable/disable control. */}
-                                {id === "buzz.channels" ? (
+                                {isRequiredPlugin(plugin) ? (
                                   <PreferenceRow
                                     icon={<SquaresFourIcon size={20} />}
                                     title={plugin.manifest.name}
