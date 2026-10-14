@@ -269,7 +269,10 @@ it.each([true, false, null])(
     ).toEqual([]);
     await backend.send("identity");
     await vi.waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith("nsec_upload_status", {}),
+      expect(invoke).toHaveBeenCalledWith("nsec_upload_status", {
+        source: "hosted",
+        credential: "token",
+      }),
     );
     if (automatic) {
       await vi.waitFor(() =>
@@ -303,6 +306,65 @@ it.each([true, false, null])(
     );
   },
 );
+
+it("uses a replacement account credential for status and uploads instead of reusing the previous account's stored receipt", async () => {
+  let token = "first-account-token";
+  const { backend, invoke } = setup(
+    {
+      ...signedIn,
+      "/v1/auth/login/exchange": () => ({
+        body: { session_credential: token, expires_at: "2030" },
+      }),
+      "/v1/buzz/nostr-identities/current": {
+        body: { identity: { pubkey_hex: "ab".repeat(32) } },
+      },
+    },
+    {
+      nsec_upload_status: (input) => ({
+        available: true,
+        automatic: true,
+        stored: input?.credential === "first-account-token",
+      }),
+      nsec_upload: () => undefined,
+      nsec_upload_cancel: () => undefined,
+    },
+  );
+  await login(backend);
+  await backend.send("identity");
+  await vi.waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("nsec_upload_status", {
+      source: "hosted",
+      credential: "first-account-token",
+    }),
+  );
+  expect(
+    invoke.mock.calls.filter(([command]) => command === "nsec_upload"),
+  ).toEqual([]);
+  token = "second-account-token";
+  await login(backend);
+  await backend.send("identity");
+  await vi.waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("nsec_upload", {
+      source: "hosted",
+      credential: "second-account-token",
+      onResult: expect.any(Channel),
+    }),
+  );
+  expect(invoke).toHaveBeenCalledWith("nsec_upload_status", {
+    source: "hosted",
+    credential: "second-account-token",
+  });
+  const channel = invoke.mock.calls.find(
+    ([command]) => command === "nsec_upload",
+  )?.[1]?.onResult as Channel<unknown>;
+  const deliver = backupCallbacks.get(channel.id);
+  if (!deliver) throw new Error("No native backup callback");
+  deliver({ message: { Ok: true }, index: 0 });
+  deliver({ end: true, index: 1 });
+  const backup = backend.backup;
+  if (!backup) throw new Error("Missing native identity backup");
+  await vi.waitFor(() => expect(backup.snapshot().busy).toBe(false));
+});
 
 it("returns a challenge error without signing", async () => {
   const sign = vi.fn();

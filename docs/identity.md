@@ -57,11 +57,13 @@ The screen explains that Block can recover the private key and that someone with
 access to the Builderlab account may be able to act as this identity anywhere the
 same key is used. Automatic backup does not ask again for every upload. The
 native host stores only the choice, public key, configured service and namespace,
-and whether a stored receipt was confirmed. Missing, unreadable, mismatched or
-self-managed metadata cannot authorize an upload. An explicit choice can repair
+and the authenticated account for which a stored receipt was confirmed. Missing,
+unreadable, mismatched or self-managed metadata cannot authorize an upload. An explicit choice can repair
 unreadable metadata without replacing the key. A confirmed receipt suppresses
-repeat uploads; a failed attempt can be retried from account settings or on a
-later account connection. An uncertain response does not prove no copy was stored.
+repeat uploads to the recorded account. Connecting the same key to another account needs
+a backup for that account; the previous account’s receipt cannot suppress it.
+A failed attempt can be retried from account settings or on a later account
+connection. An uncertain response does not prove no copy was stored.
 Choice changes and uploads share a native file lock across running copies; a
 competing copy must wait until the current backup ends before changing the choice.
 

@@ -345,6 +345,10 @@ it("shares plugin login with Settings and hosted Agents, replays failed setup wr
     expect(
       await screen.findByText(/You manage your own cryptography/),
     ).toBeVisible();
+    expect(native.invoke).toHaveBeenCalledWith("nsec_upload_status", {
+      source: "builderlab",
+      credential: "private-token",
+    });
     // Both writes happen after Beekeeper has returned the identity. Neither
     // failure may turn a retry into a second backend creation.
     for (const failedKey of [
@@ -678,6 +682,15 @@ it.each([
           ).length,
         ).toBeGreaterThanOrEqual(2),
       );
+      expect(
+        native.invoke.mock.calls
+          .filter(([command]) => command === "nsec_upload_status")
+          .every(
+            ([, args]) =>
+              args.source === "builderlab" &&
+              args.credential === "backup-token",
+          ),
+      ).toBe(true);
       const uploads = native.invoke.mock.calls.filter(
         ([command]) => command === "nsec_upload",
       );

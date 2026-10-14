@@ -38,6 +38,7 @@ struct Service {
     config: Config,
     state: Arc<Mutex<FixtureState>>,
     enrollment: Arc<Gate>,
+    receipt: Arc<Gate>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -73,6 +74,12 @@ impl Service {
             release: Semaphore::new(0),
         });
         let gate = enrollment.clone();
+        let receipt = Arc::new(Gate {
+            paused: AtomicBool::new(false),
+            started: Notify::new(),
+            release: Semaphore::new(0),
+        });
+        let receipt_gate = receipt.clone();
         let config = Config {
             service_url: format!("http://{}", listener.local_addr().unwrap()),
             namespace: "backup/staging".into(),
@@ -81,13 +88,15 @@ impl Service {
             while let Ok((stream, _)) = listener.accept().await {
                 let state = shared.clone();
                 let gate = gate.clone();
-                tokio::spawn(async move { serve(stream, state, gate).await });
+                let receipt = receipt_gate.clone();
+                tokio::spawn(async move { serve(stream, state, gate, receipt).await });
             }
         });
         Self {
             config,
             state,
             enrollment,
+            receipt,
             task,
         }
     }
@@ -103,7 +112,12 @@ impl Service {
     }
 }
 
-async fn serve(mut stream: TcpStream, shared: Arc<Mutex<FixtureState>>, gate: Arc<Gate>) {
+async fn serve(
+    mut stream: TcpStream,
+    shared: Arc<Mutex<FixtureState>>,
+    gate: Arc<Gate>,
+    receipt: Arc<Gate>,
+) {
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 1024];
     let header_end = loop {
@@ -228,6 +242,10 @@ async fn serve(mut stream: TcpStream, shared: Arc<Mutex<FixtureState>>, gate: Ar
         gate.started.notify_one();
         gate.release.acquire().await.unwrap().forget();
     }
+    if path == "/v1/buzz/nsec-backups" && receipt.paused.load(Ordering::SeqCst) {
+        receipt.started.notify_one();
+        receipt.release.acquire().await.unwrap().forget();
+    }
     let response = serde_json::to_vec(&response).unwrap();
     let header = format!(
         "HTTP/1.1 {status} Synthetic\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -298,7 +316,9 @@ async fn automatic_choice_and_verified_receipt_survive_restart_without_repeating
     let host = service.host();
     host.choose(&path, &pubkey([1; 32]), true).unwrap();
     assert_eq!(
-        host.status(&path, &pubkey([1; 32])).unwrap().automatic,
+        host.status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+            .unwrap()
+            .automatic,
         Some(true)
     );
     assert!(host
@@ -313,9 +333,23 @@ async fn automatic_choice_and_verified_receipt_survive_restart_without_repeating
     let before = service.state.lock().unwrap().requests.clone();
     assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
     let restarted = service.host();
-    let status = restarted.status(&path, &pubkey([1; 32])).unwrap();
+    let status = restarted
+        .status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+        .unwrap();
     assert_eq!(status.automatic, Some(true));
     assert!(status.stored);
+    assert!(
+        !restarted
+            .status(&path, &pubkey([1; 32]), None)
+            .unwrap()
+            .stored
+    );
+    assert!(
+        !restarted
+            .status(&path, &pubkey([1; 32]), Some("other-account"))
+            .unwrap()
+            .stored
+    );
     assert!(!restarted
         .upload(
             Source::Hosted,
@@ -325,7 +359,13 @@ async fn automatic_choice_and_verified_receipt_survive_restart_without_repeating
         )
         .await
         .unwrap());
-    assert_eq!(service.state.lock().unwrap().requests, before);
+    let after = service.state.lock().unwrap().requests.clone();
+    for endpoint in ["/v1/auth/me", "/v1/buzz/nostr-identities/current"] {
+        assert_eq!(after.get(endpoint), Some(&(before[endpoint] + 1)));
+    }
+    for endpoint in ["/v1/buzz/nsec-backups/enrollment", "/v1/buzz/nsec-backups"] {
+        assert_eq!(after.get(endpoint), before.get(endpoint));
+    }
     let state = service.state.lock().unwrap();
     let envelope: serde_json::Value = serde_json::from_slice(&state.uploads[0]).unwrap();
     assert_eq!(envelope["nostr_pubkey"], pubkey([1; 32]));
@@ -338,6 +378,91 @@ async fn automatic_choice_and_verified_receipt_survive_restart_without_repeating
             .len(),
         48
     );
+}
+
+#[tokio::test]
+async fn account_a_receipt_cannot_suppress_an_upload_or_claim_a_backup_for_account_b() {
+    let service = Service::new().await;
+    let host = service.host();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("policy.json");
+    host.choose(&path, &pubkey([1; 32]), true).unwrap();
+    assert!(host
+        .upload(
+            Source::Hosted,
+            CREDENTIAL.into(),
+            IdentityHost::fixture(),
+            path.clone()
+        )
+        .await
+        .unwrap());
+    assert!(
+        host.status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+            .unwrap()
+            .stored
+    );
+    {
+        let mut state = service.state.lock().unwrap();
+        state.subject = "account-b".into();
+        state.owner = "subject:account-b".into();
+    }
+    let restarted = service.host();
+    assert!(
+        !restarted
+            .status(&path, &pubkey([1; 32]), Some("account-b"))
+            .unwrap()
+            .stored
+    );
+    assert!(restarted
+        .upload(
+            Source::Hosted,
+            CREDENTIAL.into(),
+            IdentityHost::fixture(),
+            path.clone()
+        )
+        .await
+        .unwrap());
+    assert!(
+        restarted
+            .status(&path, &pubkey([1; 32]), Some("account-b"))
+            .unwrap()
+            .stored
+    );
+    let state = service.state.lock().unwrap();
+    assert_eq!(state.uploads.len(), 2);
+    let second: serde_json::Value = serde_json::from_slice(&state.uploads[1]).unwrap();
+    assert_eq!(second["nostr_pubkey"], pubkey([1; 32]));
+    assert_eq!(second["owner_id"], "subject:account-b");
+}
+
+#[tokio::test]
+async fn post_receipt_policy_read_failure_reports_uncertain_storage_instead_of_missing_authorization(
+) {
+    let service = Service::new().await;
+    let host = service.host();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("policy.json");
+    let previous = directory.path().join("previous-policy.json");
+    host.choose(&path, &pubkey([1; 32]), true).unwrap();
+    service.receipt.paused.store(true, Ordering::SeqCst);
+    let uploading = host.upload(
+        Source::Hosted,
+        CREDENTIAL.into(),
+        IdentityHost::fixture(),
+        path.clone(),
+    );
+    tokio::pin!(uploading);
+    tokio::select! {
+        _ = service.receipt.started.notified() => {},
+        _ = &mut uploading => panic!("upload completed before the accepted receipt"),
+    }
+    assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
+    std::fs::rename(&path, &previous).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    service.receipt.release.add_permits(1);
+    assert_eq!(uploading.await.err().as_deref(), Some(UNCONFIRMED));
+    assert!(host.status(&path, &pubkey([1; 32]), None).is_err());
+    assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
 }
 
 #[tokio::test]
@@ -366,7 +491,12 @@ async fn mismatched_mapping_or_malformed_enrollment_owner_never_uploads_or_recor
             .await
             .is_err());
         assert!(service.state.lock().unwrap().uploads.is_empty());
-        assert!(!host.status(&path, &pubkey([1; 32])).unwrap().stored);
+        assert!(
+            !host
+                .status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+                .unwrap()
+                .stored
+        );
     }
 }
 
@@ -401,7 +531,9 @@ async fn another_app_copy_cannot_change_choice_or_upload_until_the_active_copy_r
         .await
         .is_err());
     assert_eq!(
-        host.status(&path, &pubkey([1; 32])).unwrap().automatic,
+        host.status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+            .unwrap()
+            .automatic,
         Some(true)
     );
     host.cancel(Some(Source::Hosted));
@@ -409,7 +541,10 @@ async fn another_app_copy_cannot_change_choice_or_upload_until_the_active_copy_r
     service.enrollment.release.add_permits(1);
     other.choose(&path, &pubkey([1; 32]), false).unwrap();
     assert_eq!(
-        other.status(&path, &pubkey([1; 32])).unwrap().automatic,
+        other
+            .status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+            .unwrap()
+            .automatic,
         Some(false)
     );
     assert!(service.state.lock().unwrap().uploads.is_empty());
@@ -439,7 +574,12 @@ async fn failed_or_invalid_receipt_does_not_record_success_or_retry_in_the_same_
             .await
             .is_err());
         assert_eq!(service.state.lock().unwrap().uploads.len(), 1);
-        assert!(!host.status(&path, &pubkey([1; 32])).unwrap().stored);
+        assert!(
+            !host
+                .status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+                .unwrap()
+                .stored
+        );
     }
 }
 
@@ -525,7 +665,12 @@ async fn cancel_close_or_self_managed_choice_during_enrollment_prevents_upload_a
         assert_eq!(uploading.await.err().as_deref(), Some(STOPPED));
         service.enrollment.release.add_permits(1);
         assert!(service.state.lock().unwrap().uploads.is_empty());
-        assert!(!host.status(&path, &pubkey([1; 32])).unwrap().stored);
+        assert!(
+            !host
+                .status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+                .unwrap()
+                .stored
+        );
     }
 }
 
@@ -558,7 +703,12 @@ async fn changed_account_or_closed_local_key_during_enrollment_prevents_upload()
         service.enrollment.release.add_permits(1);
         assert!(uploading.await.is_err(), "accepted {changed}");
         assert!(service.state.lock().unwrap().uploads.is_empty());
-        assert!(!host.status(&path, &pubkey([1; 32])).unwrap().stored);
+        assert!(
+            !host
+                .status(&path, &pubkey([1; 32]), Some("synthetic-account"))
+                .unwrap()
+                .stored
+        );
     }
 }
 

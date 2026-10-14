@@ -7,8 +7,7 @@ use std::{
     path::Path,
 };
 
-const FAILED: &str =
-    "Could not read or save your identity backup choice. No backup was authorized.";
+const FAILED: &str = "Could not read or save your identity backup choice.";
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -17,7 +16,7 @@ pub(super) struct Policy {
     pub service: String,
     pub namespace: String,
     pub automatic: bool,
-    pub stored: bool,
+    pub stored_subject: Option<String>,
 }
 impl Policy {
     pub fn matches(&self, config: &Config, pubkey: &str) -> bool {

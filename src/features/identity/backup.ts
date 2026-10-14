@@ -38,7 +38,13 @@ export function createIdentityBackup(
         listeners.delete(listener);
       };
     },
-    status: () => send<BackupStatus>("nsec_upload_status", {}),
+    status: () => {
+      const current = credential();
+      return send<BackupStatus>(
+        "nsec_upload_status",
+        current ? { source, credential: current } : {},
+      );
+    },
     upload: async () => {
       const current = credential();
       if (!current) throw new Error("Sign in to Builderlab first.");

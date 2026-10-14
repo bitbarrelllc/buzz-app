@@ -89,7 +89,7 @@ impl Default for NsecUploadHost {
     }
 }
 impl NsecUploadHost {
-    fn status(&self, path: &Path, pubkey: &str) -> Result<BackupStatus> {
+    fn status(&self, path: &Path, pubkey: &str, subject: Option<&str>) -> Result<BackupStatus> {
         let Some(config) = self.config.as_ref() else {
             return Ok(BackupStatus {
                 available: false,
@@ -101,7 +101,9 @@ impl NsecUploadHost {
         Ok(BackupStatus {
             available: true,
             automatic: saved.as_ref().map(|saved| saved.automatic),
-            stored: saved.is_some_and(|saved| saved.stored),
+            stored: saved.is_some_and(|saved| {
+                subject.is_some() && saved.stored_subject.as_deref() == subject
+            }),
         })
     }
 
@@ -119,10 +121,11 @@ impl NsecUploadHost {
             None => Arc::new(policy::lock(path)?),
         };
         // An explicit new choice can repair unreadable metadata; it never changes the key.
-        let stored = policy::read(path)
+        let stored_subject = policy::read(path)
             .ok()
             .flatten()
-            .is_some_and(|saved| saved.matches(config, pubkey) && saved.stored);
+            .filter(|saved| saved.matches(config, pubkey))
+            .and_then(|saved| saved.stored_subject);
         policy::write(
             path,
             &policy::Policy {
@@ -130,7 +133,7 @@ impl NsecUploadHost {
                 service: config.service_url.clone(),
                 namespace: config.namespace.clone(),
                 automatic,
-                stored,
+                stored_subject,
             },
         )
     }
@@ -224,8 +227,8 @@ async fn perform(
     stop: &CancellationToken,
 ) -> Result<bool> {
     let pubkey = identity.viewer().await?;
-    let Some(saved) = policy::read(path)?
-        .filter(|saved| saved.matches(config, &pubkey) && saved.automatic && !saved.stored)
+    let Some(saved) =
+        policy::read(path)?.filter(|saved| saved.matches(config, &pubkey) && saved.automatic)
     else {
         return Ok(false);
     };
@@ -235,6 +238,9 @@ async fn perform(
         return Err(
             "Link this device’s Buzz identity to this account before backing it up.".into(),
         );
+    }
+    if saved.stored_subject.as_deref() == Some(&account.subject) {
+        return Ok(false);
     }
     if stop.is_cancelled() {
         return Err(STOPPED.into());
@@ -269,9 +275,8 @@ async fn perform(
         return Err("Your account identity changed. Start a new backup.".into());
     }
     if stop.is_cancelled()
-        || !policy::read(path)?.is_some_and(|current| {
-            current.matches(config, &pubkey) && current.automatic && !current.stored
-        })
+        || !policy::read(path)?
+            .is_some_and(|current| current.matches(config, &pubkey) && current.automatic)
     {
         return Err(STOPPED.into());
     }
@@ -283,12 +288,14 @@ async fn perform(
     if state.closed || stop.is_cancelled() {
         return Err(STOPPED.into());
     }
-    let mut current = policy::read(path)?.ok_or(STOPPED)?;
+    let mut current = policy::read(path)
+        .map_err(|_| UNCONFIRMED)?
+        .ok_or(UNCONFIRMED)?;
     if !current.matches(config, &saved.pubkey) || !current.automatic {
         return Err(STOPPED.into());
     }
-    current.stored = true;
-    policy::write(path, &current)?;
+    current.stored_subject = Some(account.subject);
+    policy::write(path, &current).map_err(|_| UNCONFIRMED)?;
     Ok(true)
 }
 
@@ -399,8 +406,29 @@ pub(crate) async fn nsec_upload_status<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     host: tauri::State<'_, NsecUploadHost>,
     identity: tauri::State<'_, IdentityHost>,
+    source: Option<Source>,
+    credential: Option<String>,
 ) -> Result<BackupStatus> {
-    host.status(&policy_path(&app)?, &identity.viewer().await?)
+    let path = policy_path(&app)?;
+    let pubkey = identity.viewer().await?;
+    let status = host.status(&path, &pubkey, None)?;
+    if status.automatic != Some(true) {
+        return Ok(status);
+    }
+    let credential = match (source, credential) {
+        (None, None) => return Ok(status),
+        (Some(source), Some(credential)) if host.available(source) => Zeroizing::new(credential),
+        _ => return Err(UNAVAILABLE.into()),
+    };
+    let config = host.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
+    let api = AccountApi::new(&config.service_url, &credential)?;
+    let account = api.me().await?;
+    if api.current().await? != pubkey {
+        return Err(
+            "Link this device’s Buzz identity to this account before backing it up.".into(),
+        );
+    }
+    host.status(&path, &pubkey, Some(&account.subject))
 }
 #[tauri::command]
 pub(crate) async fn nsec_upload_choice<R: tauri::Runtime>(

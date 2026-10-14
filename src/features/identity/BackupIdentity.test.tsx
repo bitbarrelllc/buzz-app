@@ -92,8 +92,11 @@ it.each([false, null])(
       ),
     ).toBeVisible();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(send.mock.calls.map(([command]) => command)).toEqual([
-      "nsec_upload_status",
+    expect(send.mock.calls).toEqual([
+      [
+        "nsec_upload_status",
+        { source: "builderlab", credential: "synthetic-token" },
+      ],
     ]);
   },
 );
@@ -107,7 +110,10 @@ it("hides the status widget when the native backup service is unavailable", asyn
   await act(async () => {
     render(<BackupIdentity backup={backup} active={() => true} />);
   });
-  expect(send).toHaveBeenCalledWith("nsec_upload_status", {});
+  expect(send).toHaveBeenCalledWith("nsec_upload_status", {
+    source: "builderlab",
+    credential: "synthetic-token",
+  });
   expect(
     screen.queryByRole("region", { name: "Identity backup" }),
   ).not.toBeInTheDocument();
