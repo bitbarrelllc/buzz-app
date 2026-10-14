@@ -45,6 +45,8 @@ test("mocked native IPC admission and uncertain delivery survive page reload wit
     "mockedNativeIpcInvoke",
     async (command, payload) => {
       if (command === "identity_restore") return viewer;
+      if (command === "nsec_upload_status")
+        return { available: false, automatic: null, stored: false };
       if (command === "relay_sign") {
         expect(Object.keys(payload.event).sort()).toEqual([
           "content",
