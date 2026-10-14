@@ -4,6 +4,7 @@ import { huddleParent } from "../huddle/lifecycle";
 import { objectBody } from "./body";
 import { newer, hasTag, tag, type RelayEvent } from "./events";
 import type { ChannelSummary } from "./contracts";
+import { channelIdentity } from "./channel-labels";
 
 /** Display name from signed channel metadata; the content body overrides the tag. */
 export function metadataName(event: RelayEvent): string | undefined {
@@ -224,6 +225,7 @@ export class DiscoveryState {
       Number(ttl) > 0 &&
       (this.name(id) === "Huddle" ||
         this.name(id) === `huddle-${id.slice(0, 8)}`);
+    const identity = event && channelIdentity(event);
     return {
       id,
       ...(huddle || legacyHuddle ? { huddle: true as const } : {}),
@@ -266,6 +268,11 @@ export class DiscoveryState {
           }
         : {}),
       ...(event && hasTag(event, "archived", "true") ? { archived: true } : {}),
+      ...(identity?.labels.length ? { labels: identity.labels } : {}),
+      ...(identity?.creator ? { creator: identity.creator } : {}),
+      ...(identity?.createdAt !== undefined
+        ? { createdAt: identity.createdAt }
+        : {}),
       ...(channelType === "dm"
         ? {
             participants: [
