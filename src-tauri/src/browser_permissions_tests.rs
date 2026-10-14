@@ -71,6 +71,8 @@ fn native_command_permissions_allow_only_main_webview() {
         "nsec_restore_wait",
         "nsec_restore_install",
         "nsec_restore_cancel",
+        "nsec_backup_choice",
+        "nsec_backup_set_choice",
         "relay_sign",
         "identity_prepare_remote_agent_authorization",
         "identity_sign_builderlab_binding",
