@@ -19,6 +19,7 @@ import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Agent, AgentType } from "../../features/agents/service";
+import { fileBacked } from "../../features/agents/state";
 import type { HostProcessOptions } from "../../features/host/service";
 import { ClaudeLogoIcon } from "../../shared/design-system/icons";
 import { apply, inject } from "./index";
@@ -106,7 +107,10 @@ function applied({
   latest = version,
   files = {},
   catalog = { listed: true },
+  storage,
 }: {
+  /** Agent storage; this page's localStorage without it. */
+  storage?: Storage;
   loggedIn?: boolean;
   available?: boolean;
   version?: string;
@@ -234,6 +238,7 @@ function applied({
       })),
     },
     agents: {
+      storage,
       register: (registered: AgentType<Config>) => {
         type = registered;
       },
@@ -672,11 +677,43 @@ it("says when Claude's models could not be loaded and tries again", async () => 
   ).toBeInTheDocument();
 });
 
-it("preserves native behavior for invalid defaults and keeps explicit agent models", () => {
+it("keeps the provider dialog and its draft open while a default could not be saved", async () => {
+  let failing = true;
+  const storage = fileBacked(new Map(), async () => {
+    if (failing) throw new Error("disk full");
+  });
+  const { type } = installed({ storage });
+  const Provider = providerSetup(type);
+  const onClose = vi.fn();
+  render(<Provider onClose={onClose} />);
+  await waitFor(() =>
+    expect(screen.getByLabelText("Default model")).toHaveTextContent(
+      "Opus 5.5 · Default",
+    ),
+  );
+  await choose("Default model", "Fable 5.1");
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Save defaults" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("disk full");
+  error.mockRestore();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Default model")).toHaveTextContent("Fable 5.1");
+  expect(storage.getItem("buzz.claude-code.provider-defaults.v1")).toBeNull();
+  // The same draft can be saved again.
+  failing = false;
+  await user.click(screen.getByRole("button", { name: "Save defaults" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(storage.getItem("buzz.claude-code.provider-defaults.v1")).toContain(
+    "fable",
+  );
+});
+
+it("preserves native behavior for invalid defaults and keeps explicit agent models", async () => {
   localStorage.setItem("buzz.claude-code.provider-defaults.v1", "not json");
   const defaults = new ClaudeDefaults(localStorage);
   expect(defaults.resolve(DEFAULT_CONFIG)).toEqual(DEFAULT_CONFIG);
-  defaults.save({ model: "sonnet" });
+  await defaults.save({ model: "sonnet" });
   const inherited = { ...DEFAULT_CONFIG };
   expect(defaults.resolve(inherited).model).toBe("sonnet");
   expect(inherited).toEqual(DEFAULT_CONFIG);

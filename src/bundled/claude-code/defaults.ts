@@ -1,3 +1,4 @@
+import { persisted } from "../../features/agents/store";
 import { config, type Config } from "./runtime";
 
 export type ClaudeProviderDefaults = Readonly<{ model: string }>;
@@ -26,9 +27,12 @@ export class ClaudeDefaults {
       model: explicit.model.trim() ? explicit.model : this.state.model,
     };
   }
-  save(next: ClaudeProviderDefaults) {
+  /** Settles once the defaults are saved, and only then uses them; rejects,
+   * keeping the saved ones, when they could not be saved. */
+  async save(next: ClaudeProviderDefaults) {
     const { model } = next;
     this.storage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, model }));
+    await persisted(this.storage, STORAGE_KEY);
     this.state = Object.freeze({ model });
     for (const listener of this.listeners) listener();
   }
