@@ -12,7 +12,6 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Channel } from "@tauri-apps/api/core";
 import { HostService, type HostResponse } from "../../features/host/service";
 import { SettingsCardsService } from "../../features/settings/service";
 import {
@@ -30,34 +29,9 @@ import { communityFixture } from "./agents/community-testing";
 import { stubAvatarBrowserApis } from "../../features/agents/avatar-testing";
 
 const native = vi.hoisted(() => ({ isTauri: () => true, invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/core", async (original) => ({
-  ...(await original<typeof import("@tauri-apps/api/core")>()),
-  ...native,
-}));
-type BackupWireMessage =
-  | { message: { Ok: boolean } | { Err: string }; index: number }
-  | { end: true; index: number };
-const backupCallbacks = new Map<number, (message: BackupWireMessage) => void>();
-const originalInternals = Object.getOwnPropertyDescriptor(
-  window,
-  "__TAURI_INTERNALS__",
-);
-let callbackId = 0;
+vi.mock("@tauri-apps/api/core", () => native);
 stubAvatarBrowserApis();
 beforeEach(() => {
-  Object.defineProperty(window, "__TAURI_INTERNALS__", {
-    configurable: true,
-    value: {
-      transformCallback(callback: (message: BackupWireMessage) => void) {
-        const id = ++callbackId;
-        backupCallbacks.set(id, callback);
-        return id;
-      },
-      unregisterCallback(id: number) {
-        backupCallbacks.delete(id);
-      },
-    },
-  });
   vi.stubEnv("VITE_BUZZ_BUILDERLAB_URL", "https://builderlab.example");
   vi.stubGlobal("navigator", {
     platform: "MacIntel",
@@ -76,10 +50,6 @@ afterEach(() => {
   native.invoke.mockReset();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
-  backupCallbacks.clear();
-  if (originalInternals)
-    Object.defineProperty(window, "__TAURI_INTERNALS__", originalInternals);
-  else Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
 });
 
 function provideAgents(
@@ -163,7 +133,6 @@ it.each([undefined, "", "http://builderlab.example"])(
 );
 
 it("shares plugin login with Settings and hosted Agents, replays failed setup writes, and clears login on re-enable", async () => {
-  vi.stubEnv("VITE_BUZZ_LIVE", "0");
   const user = userEvent.setup();
   const hostedKey = "de".repeat(32);
   const browserKey = "09".repeat(32);
@@ -184,10 +153,6 @@ it("shares plugin login with Settings and hosted Agents, replays failed setup wr
       ([command]) => command === "oauth_callback_wait",
     );
   native.invoke.mockImplementation(async (command, input) => {
-    if (command === "nsec_upload_status")
-      return { available: true, automatic: false, stored: false };
-    if (command === "nsec_upload_cancel") return;
-    if (command === "nsec_upload") return false;
     if (command === "oauth_callback_begin")
       return {
         id: "native-attempt-id",
@@ -338,17 +303,6 @@ it("shares plugin login with Settings and hosted Agents, replays failed setup wr
     expect(requests.at(-1).request.headers["X-BB-Session-Credential"]).toBe(
       "private-token",
     );
-    // This saved self-managed choice must survive login and public-key linking.
-    expect(
-      native.invoke.mock.calls.filter(([command]) => command === "nsec_upload"),
-    ).toEqual([]);
-    expect(
-      await screen.findByText(/You manage your own cryptography/),
-    ).toBeVisible();
-    expect(native.invoke).toHaveBeenCalledWith("nsec_upload_status", {
-      source: "builderlab",
-      credential: "private-token",
-    });
     // Both writes happen after Beekeeper has returned the identity. Neither
     // failure may turn a retry into a second backend creation.
     for (const failedKey of [
@@ -574,154 +528,3 @@ it("shares plugin login with Settings and hosted Agents, replays failed setup wr
     await community.dispose();
   }
 });
-
-it.each([
-  [true, false],
-  [false, false],
-  [null, false],
-  [true, true],
-] as const)(
-  "login and key linking upload only a pending saved automatic=%s, stored=%s choice",
-  async (automatic, alreadyStored) => {
-    vi.stubEnv("VITE_BUZZ_LIVE", "0");
-    const community = communityFixture();
-    const linked = deferred<HostResponse>();
-    let stored = alreadyStored;
-    native.invoke.mockImplementation(async (command, input) => {
-      if (command === "identity_restore") return community.viewer;
-      if (command === "nsec_upload_status")
-        return { available: true, automatic, stored };
-      if (
-        command === "nsec_upload_cancel" ||
-        command === "oauth_callback_cancel"
-      )
-        return;
-      if (command === "nsec_upload") {
-        stored = true;
-        const deliver = backupCallbacks.get(
-          (input.onResult as Channel<unknown>).id,
-        );
-        if (!deliver) throw new Error("No native backup callback");
-        deliver({ message: { Ok: true }, index: 0 });
-        deliver({ end: true, index: 1 });
-        return;
-      }
-      if (command === "oauth_callback_begin")
-        return {
-          id: "backup-login",
-          callbackUrl: `http://127.0.0.1:12345${input.callbackPath}`,
-        };
-      if (command === "oauth_callback_wait")
-        return { parameters: [["code", "one-time"]] };
-      if (command !== "plugin_host_request")
-        throw new Error(`Unexpected command ${command}`);
-      const { url } = input.request;
-      if (url.endsWith("/nostr-identities/current")) return linked.promise;
-      const response = url.endsWith("/exchange")
-        ? { session_credential: "backup-token" }
-        : url.endsWith("/me")
-          ? { subject: "synthetic-account", email: "backup@example.com" }
-          : url.endsWith("/list-agents")
-            ? { status: 1, agents: [] }
-            : undefined;
-      if (!response) throw new Error(`Unexpected Builderlab request ${url}`);
-      return { status: 200, headers: {}, body: JSON.stringify(response) };
-    });
-    const root = new Context();
-    const runtime = new PluginRuntime(root, async () => builderlab);
-    new HostService(root);
-    const cards = new SettingsCardsService(root);
-    provideAgents(root, community);
-    try {
-      runtime.reconcile([
-        {
-          manifest: { ...manifest, apiVersion: 1 },
-          source: "bundled",
-          revision: "bundled",
-          enabled: true,
-          previous: null,
-          reloadable: false,
-          error: null,
-        },
-      ]);
-      await waitFor(() => expect(cards.snapshot()).toHaveLength(1));
-      const Card = cards.snapshot()[0]?.component;
-      if (!Card) throw new Error("Missing Builderlab card");
-      render(<Card active={() => true} />);
-      await userEvent
-        .setup()
-        .click(screen.getByRole("button", { name: "Sign in with Builderlab" }));
-      expect(
-        await screen.findByRole("button", { name: "Sign out" }),
-      ).toBeEnabled();
-      await waitFor(() =>
-        expect(
-          native.invoke.mock.calls.some(
-            ([command, input]) =>
-              command === "plugin_host_request" &&
-              input.request.url.endsWith("/nostr-identities/current"),
-          ),
-        ).toBe(true),
-      );
-      expect(
-        native.invoke.mock.calls.filter(
-          ([command]) => command === "nsec_upload",
-        ),
-      ).toEqual([]);
-      await act(async () =>
-        linked.resolve({
-          status: 200,
-          headers: {},
-          body: JSON.stringify({ identity: { pubkey_hex: community.viewer } }),
-        }),
-      );
-      await waitFor(() =>
-        expect(
-          native.invoke.mock.calls.filter(
-            ([command]) => command === "nsec_upload_status",
-          ).length,
-        ).toBeGreaterThanOrEqual(2),
-      );
-      expect(
-        native.invoke.mock.calls
-          .filter(([command]) => command === "nsec_upload_status")
-          .every(
-            ([, args]) =>
-              args.source === "builderlab" &&
-              args.credential === "backup-token",
-          ),
-      ).toBe(true);
-      const uploads = native.invoke.mock.calls.filter(
-        ([command]) => command === "nsec_upload",
-      );
-      if (automatic && !alreadyStored) {
-        expect(uploads).toEqual([
-          [
-            "nsec_upload",
-            {
-              source: "builderlab",
-              credential: "backup-token",
-              onResult: expect.any(Channel),
-            },
-          ],
-        ]);
-        expect(
-          await screen.findByText("Encrypted identity backup stored."),
-        ).toBeVisible();
-      } else {
-        expect(uploads).toEqual([]);
-      }
-      expect(
-        native.invoke.mock.calls.filter(
-          ([command]) => command === "nsec_upload_choice",
-        ),
-      ).toEqual([]);
-    } finally {
-      linked.resolve({ status: 200, headers: {}, body: "{}" });
-      cleanup();
-      await runtime.dispose();
-      await root.fiber.dispose();
-      await community.dispose();
-    }
-  },
-);

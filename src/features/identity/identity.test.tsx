@@ -9,7 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createIdentity, nativeIdentityEnabled } from "./service";
@@ -25,14 +25,6 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 const viewer = "ab".repeat(32);
 const key = "nsec-fixture-only";
-const backupUnavailable = { available: false, automatic: null, stored: false };
-beforeEach(() => {
-  vi.mocked(invoke).mockImplementation((command) => {
-    if (command === "nsec_upload_status")
-      return Promise.resolve(backupUnavailable);
-    throw new Error(`Unexpected command ${command}`);
-  });
-});
 function titleBar() {
   const header = document.querySelector("header");
   if (!header) throw new Error("Missing native title bar");
@@ -63,8 +55,6 @@ it("keeps native titlebar actions available throughout identity setup without dr
   vi.mocked(invoke).mockImplementation((command) => {
     if (command === "identity_restore") return restored.promise;
     if (command === "identity_import") return imported.promise;
-    if (command === "nsec_upload_status")
-      return Promise.resolve(backupUnavailable);
     if (command === "title_bar_double_click") return Promise.resolve();
     throw new Error("Unexpected command");
   });
@@ -121,8 +111,6 @@ it("offers alternatives, passes exactly the imported key, and keeps secrets out 
   vi.mocked(invoke).mockImplementation((command) => {
     if (command === "identity_restore") return Promise.resolve(null);
     if (command === "identity_import") return imported.promise;
-    if (command === "nsec_upload_status")
-      return Promise.resolve(backupUnavailable);
     throw new Error("Unexpected command");
   });
   const identity = createIdentity();
@@ -149,7 +137,6 @@ it("offers alternatives, passes exactly the imported key, and keeps secrets out 
   expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
     "identity_restore",
     "identity_import",
-    "nsec_upload_status",
   ]);
   identity.dispose();
 });
@@ -188,7 +175,6 @@ it("restore denial does not become first run or generate a replacement", async (
   expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
     "identity_restore",
     "identity_restore",
-    "nsec_upload_status",
   ]);
   identity.dispose();
 });
@@ -237,7 +223,7 @@ it("fetches a private key only on interaction, masks by absence, and cancels a l
   vi.mocked(invoke).mockImplementationOnce(() => exported.promise);
   const user = userEvent.setup();
   const view = render(<PrivateKey identity={identity} />);
-  expect(invoke).toHaveBeenCalledTimes(2);
+  expect(invoke).toHaveBeenCalledTimes(1);
   expect(screen.getByLabelText("Private key (nsec)")).toHaveValue(
     "••••••••••••••••",
   );
@@ -257,188 +243,6 @@ it("fetches a private key only on interaction, masks by absence, and cancels a l
   expect(screen.getByLabelText("Private key (nsec)")).toHaveValue(
     "••••••••••••••••",
   );
-  identity.dispose();
-});
-
-it.each([
-  ["create", true],
-  ["create", false],
-  ["import", true],
-  ["import", false],
-  ["restore", true],
-  ["restore", false],
-] as const)(
-  "holds %s onboarding until the automatic=%s choice is saved for that identity",
-  async (source, automatic) => {
-    const saved = deferred<void>();
-    vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "identity_restore")
-        return Promise.resolve(source === "restore" ? viewer : null);
-      if (command === "identity_create" || command === "identity_import")
-        return Promise.resolve(viewer);
-      if (command === "nsec_upload_status")
-        return Promise.resolve({
-          available: true,
-          automatic: null,
-          stored: false,
-        });
-      if (command === "nsec_upload_choice") return saved.promise;
-      throw new Error(`Unexpected command ${command}`);
-    });
-    const identity = createIdentity();
-    let ready = false;
-    void identity.ready.then(() => {
-      ready = true;
-    });
-    const user = userEvent.setup();
-    render(<IdentitySetup identity={identity}>Connected app</IdentitySetup>);
-    if (source === "create") {
-      await user.click(
-        await screen.findByRole("button", { name: "Create a new identity" }),
-      );
-    } else if (source === "import") {
-      await user.click(
-        await screen.findByRole("button", { name: "Use an existing key" }),
-      );
-      await user.type(screen.getByLabelText("Private key (nsec)"), key);
-      await user.click(screen.getByRole("button", { name: "Use this key" }));
-    }
-    expect(
-      await screen.findByRole("heading", { name: "Private-key backup" }),
-    ).toBeVisible();
-    expect(screen.getByText(/Block can recover that key/)).toBeVisible();
-    expect(
-      screen.getByText(
-        /losing this device’s key can mean losing this identity/,
-      ),
-    ).toBeVisible();
-    expect(screen.queryByText("Connected app")).not.toBeInTheDocument();
-    expect(ready).toBe(false);
-    expect(
-      vi
-        .mocked(invoke)
-        .mock.calls.filter(
-          ([command]) =>
-            command === "nsec_upload_choice" || command === "nsec_upload",
-        ),
-    ).toEqual([]);
-    const next = screen.getByRole("button", { name: "Continue" });
-    expect(next).toBeDisabled();
-    const selected = screen.getByRole("radio", {
-      name: automatic
-        ? "Automatically back up my key with Block"
-        : "I do my own cryptography",
-    });
-    await user.click(selected);
-    expect(
-      vi
-        .mocked(invoke)
-        .mock.calls.filter(([command]) => command === "nsec_upload_choice"),
-    ).toEqual([]);
-    await user.click(next);
-    expect(invoke).toHaveBeenCalledWith("nsec_upload_choice", {
-      pubkey: viewer,
-      automatic,
-    });
-    expect(next).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Saving your backup choice",
-    );
-    expect(ready).toBe(false);
-    await act(async () => saved.resolve());
-    expect(await identity.ready).toBe(viewer);
-    expect(screen.getByText("Connected app")).toBeVisible();
-    expect(
-      vi
-        .mocked(invoke)
-        .mock.calls.filter(([command]) => command === "nsec_upload"),
-    ).toEqual([]);
-    identity.dispose();
-  },
-);
-
-it.each([true, false])(
-  "restores a persisted automatic=%s choice without asking again",
-  async (automatic) => {
-    vi.mocked(invoke).mockImplementation((command) => {
-      if (command === "identity_restore") return Promise.resolve(viewer);
-      if (command === "nsec_upload_status")
-        return Promise.resolve({ available: true, automatic, stored: false });
-      throw new Error(`Unexpected command ${command}`);
-    });
-    const identity = createIdentity();
-    render(<IdentitySetup identity={identity}>Connected app</IdentitySetup>);
-    expect(await screen.findByText("Connected app")).toBeVisible();
-    expect(await identity.ready).toBe(viewer);
-    expect(
-      screen.queryByRole("heading", { name: "Private-key backup" }),
-    ).not.toBeInTheDocument();
-    expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual([
-      "identity_restore",
-      "nsec_upload_status",
-    ]);
-    identity.dispose();
-  },
-);
-
-it("retries a failed backup-choice save without creating or importing the saved key again", async () => {
-  let fail = true;
-  vi.mocked(invoke).mockImplementation((command) => {
-    if (command === "identity_restore") return Promise.resolve(null);
-    if (command === "identity_create") return Promise.resolve(viewer);
-    if (command === "nsec_upload_status")
-      return Promise.resolve({
-        available: true,
-        automatic: null,
-        stored: false,
-      });
-    if (command === "nsec_upload_choice")
-      return fail
-        ? Promise.reject(new Error("Could not save your backup choice"))
-        : Promise.resolve();
-    throw new Error(`Unexpected command ${command}`);
-  });
-  const identity = createIdentity();
-  const user = userEvent.setup();
-  render(<IdentitySetup identity={identity}>Connected app</IdentitySetup>);
-  await user.click(
-    await screen.findByRole("button", { name: "Create a new identity" }),
-  );
-  const select = await screen.findByRole("radio", {
-    name: "I do my own cryptography",
-  });
-  await user.click(select);
-  const next = screen.getByRole("button", { name: "Continue" });
-  await user.click(next);
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Could not save your backup choice",
-  );
-  expect(next).toBeEnabled();
-  expect(screen.queryByText("Connected app")).not.toBeInTheDocument();
-  expect(
-    screen.queryByRole("button", { name: "Create a new identity" }),
-  ).not.toBeInTheDocument();
-  fail = false;
-  await user.click(next);
-  expect(await screen.findByText("Connected app")).toBeVisible();
-  expect(
-    vi
-      .mocked(invoke)
-      .mock.calls.filter(([command]) => command === "identity_create"),
-  ).toHaveLength(1);
-  expect(
-    vi
-      .mocked(invoke)
-      .mock.calls.filter(([command]) => command === "identity_import"),
-  ).toEqual([]);
-  expect(
-    vi
-      .mocked(invoke)
-      .mock.calls.filter(([command]) => command === "nsec_upload_choice"),
-  ).toEqual([
-    ["nsec_upload_choice", { pubkey: viewer, automatic: false }],
-    ["nsec_upload_choice", { pubkey: viewer, automatic: false }],
-  ]);
   identity.dispose();
 });
 

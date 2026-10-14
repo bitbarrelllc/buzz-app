@@ -297,8 +297,6 @@ it.each(["MacIntel", "Linux x86_64", "Win32"])(
     vi.mocked(fetch).mockClear();
     vi.mocked(invoke).mockImplementation(async (command) => {
       if (command === "identity_restore") return viewer;
-      if (command === "nsec_upload_status")
-        return { available: false, automatic: null, stored: false };
       if (command === "deep_link_take") return [];
       if (command === "deep_link_watch") return null;
       // Other native owners may initialize, but no actual native operations run.
@@ -386,8 +384,6 @@ it("restores the selected native community and recovers discovery failure withou
   const destinations: string[] = [];
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "identity_restore") return viewer;
-    if (command === "nsec_upload_status")
-      return { available: false, automatic: null, stored: false };
     if (command === "deep_link_take") return [];
     if (command === "deep_link_watch") return null;
     if (command === "relay_http") {

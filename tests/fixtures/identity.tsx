@@ -15,21 +15,7 @@ import "../../src/shared/styles/globals.css";
 const bytes = new Uint8Array(32).fill(1);
 const fixtureKey = nsecEncode(bytes);
 let saved: string | null = null;
-let automatic: boolean | null = null;
 mockIPC((command, payload) => {
-  if (command === "nsec_upload_status")
-    return {
-      available: new URLSearchParams(location.search).has("backup"),
-      automatic,
-      stored: false,
-    };
-  if (command === "nsec_upload_choice") {
-    const choice = payload as { pubkey: string; automatic: boolean };
-    if (!saved || choice.pubkey !== getPublicKey(bytesFrom(saved)))
-      throw new Error("Fixture identity changed");
-    automatic = choice.automatic;
-    return;
-  }
   if (command === "identity_restore")
     return saved ? getPublicKey(bytesFrom(saved)) : null;
   if (command === "identity_export") {
@@ -72,7 +58,6 @@ function Fixture() {
           type="button"
           onClick={() => {
             saved = null;
-            automatic = null;
             setAttempt(attempt + 1);
           }}
         >

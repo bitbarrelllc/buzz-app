@@ -1,5 +1,4 @@
 // Block-hosted community accounts through a Builderlab account backend.
-import type { IdentityBackup } from "../../features/identity/backup";
 export const HOST_SUFFIX = "communities.buzz.xyz";
 export const VALID_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const ACKNOWLEDGEMENT_VERSION = 1;
@@ -111,8 +110,6 @@ export function quotaLimitMessage(limit?: number | null) {
 
 /** A Builderlab account backend: the development broker or the packaged-app adapter. */
 export type Backend = Readonly<{
-  /** Native-only backup, gated by the saved onboarding choice. */
-  backup?: IdentityBackup;
   /** Identifies this backend in persisted deletion requests. */
   origin: string;
   auth(): Promise<Account | null>;
@@ -198,7 +195,6 @@ export const broker: Backend = {
 /** Account operations over one backend. */
 export function createApi(backend: Backend) {
   return {
-    ...(backend.backup ? { backup: backend.backup } : {}),
     origin: () => backend.origin,
     getAuth: () => backend.auth(),
     localKey: () => backend.localKey(),

@@ -43,40 +43,6 @@ coupling human writes to agent credentials or old-app blob writers. This is not 
 claim that per-secret storage is always superior or that prompts are eliminated.
 Consent, app signing and update behavior require attended native verification.
 
-## Private-key backup choice
-
-Configured desktop builds ask how to protect the identity in a separate onboarding
-step. **Automatically back up my key with Block** authorizes an encrypted upload
-once the user signs in to Builderlab and connects this public identity to the
-account. **I do my own cryptography** prevents upload. Neither option is
-preselected. The same choice follows creation and import, so an imported key is
-not silently authorized by importing it. Existing identities with no recorded
-choice see this step too. Builds without a backup service skip it and never upload.
-
-The screen explains that Block can recover the private key and that someone with
-access to the Builderlab account may be able to act as this identity anywhere the
-same key is used. Automatic backup does not ask again for every upload. The
-native host stores only the choice, public key, configured service and namespace,
-and the authenticated account for which a stored receipt was confirmed. Missing,
-unreadable, mismatched or self-managed metadata cannot authorize an upload. An explicit choice can repair
-unreadable metadata without replacing the key. A confirmed receipt suppresses
-repeat uploads to the recorded account. Connecting the same key to another account needs
-a backup for that account; the previous account’s receipt cannot suppress it.
-A failed attempt can be retried from account settings or on a later account
-connection. An uncertain response does not prove no copy was stored.
-Choice changes and uploads share a native file lock across running copies; a
-competing copy must wait until the current backup ends before changing the choice.
-
-The native host accepts a session credential only from the matching configured
-Builderlab or Hosted Communities source. Paired build inputs
-`BUZZ_NSEC_BACKUP_SERVICE_URL` and `BUZZ_NSEC_BACKUP_NAMESPACE` pin the destination.
-It checks authenticated account and key binding, obtains an enrolled recipient,
-seals the native key, and verifies the stored receipt. No private key or encrypted
-envelope crosses this command’s IPC boundary. Account sign-out, page reload,
-window close and app sign-out cancel pending work; they cannot retract accepted
-bytes. There is no retry worker or persisted envelope, and this change adds no
-recovery UI. The existing app-data wipe removes the public choice record.
-
 ## UI and sensitive data
 
 Settings exposes Profile in Personal space as well as in a selected community.
@@ -218,6 +184,31 @@ wipe, local data stays: it is already scoped by public key, so signing back in
 with the same key finds it. Builderlab and hosted-community logins live only in
 memory and end with the restart. Kept agents start only while the signed-in key
 matches the owner in their saved attestation, checked before their key is read.
+
+## Automatic backup consent hooks
+
+The native identity service exposes `getBackupChoice()` and
+`setBackupChoice(pubkey, automatic)`. These are public metadata APIs; they do not
+expose a private key, contact a server, or change identity readiness. No onboarding
+or settings selection is added here. A future selection must disclose that Block
+can recover the key, including an imported key used elsewhere, before saving
+`automatic: true`. Account sign-in and key creation/import do not imply consent.
+
+The choice is bound to the current public key and trusted build-configured backup
+service and namespace. Missing or mismatched metadata returns no choice;
+unreadable metadata fails closed. An unavailable build rejects choice writes.
+Debug and release use their existing separate key-custody namespaces. Only the
+main WebView can read or save the choice.
+Plain sign-out retains the choice; sign-out and erase removes it through the
+existing resumable wipe, without erasing the other key-custody namespace.
+
+The original upload stack must consume `nsec_backup_choice::read` before any
+backup request and retain its returned value through the upload. Its shared file
+lease prevents a successful choice change from racing an admitted upload across
+app copies. Saving a choice reports busy while such a lease is held. Disabling
+automatic backup governs future uploads and does not delete existing backups.
+This hooks-only change supplies no uploader. It is the base of the draft stack:
+#1137 consent hooks → #1106 gated uploader → #1107 recovery → #1101 restore UI.
 
 ## Packaged connection
 
