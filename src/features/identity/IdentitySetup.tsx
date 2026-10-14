@@ -7,6 +7,10 @@ import {
 import { macTitleBarDragHandlers } from "../../app/shell/title-bar";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Input } from "../../shared/design-system/ui/Input";
+import { InlineHeader } from "../../shared/design-system/ui/Header";
+import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
+import { Field } from "../../shared/design-system/ui/Field";
+import { Radio, RadioGroup } from "../../shared/design-system/ui/RadioGroup";
 import type { Identity } from "./service";
 
 export function IdentitySetup({
@@ -19,6 +23,9 @@ export function IdentitySetup({
   const state = useSyncExternalStore(identity.subscribe, identity.snapshot);
   const [importing, setImporting] = useState(false);
   const [nsec, setNsec] = useState("");
+  const [backupChoice, setBackupChoice] = useState<
+    "automatic" | "self-managed" | null
+  >(null);
   const macDesktop = isTauri() && /Mac/i.test(navigator.platform);
   const integratedWindowControls = hasIntegratedWindowControls();
   if (state.status === "ready") return children;
@@ -45,6 +52,65 @@ export function IdentitySetup({
             Retry secure storage access
           </Button>
         </>
+      ) : state.status === "backup-choice" ? (
+        <div
+          data-buzz-ui=""
+          className="mt-section-gap grid max-w-3xl gap-section-gap"
+        >
+          <InlineHeader level={2} title="Private-key backup" />
+          <SettingsGroup layout="form">
+            <p className="text-body-sm text-secondary">
+              Choose how to protect this identity. Automatic backup uploads an
+              encrypted copy of your private key after you sign in to Builderlab
+              and connect this identity. Block can recover that key. Anyone with
+              access to your Builderlab account may be able to recover it and
+              act as you, including anywhere else you use the same key.
+            </p>
+            <p className="text-body-sm text-secondary">
+              If you manage your own cryptography, Buzz will not upload this
+              key. Keep your own backup: losing this device’s key can mean
+              losing this identity.
+            </p>
+            {state.error && (
+              <p role="alert" className="text-body-sm text-danger">
+                {state.error}
+              </p>
+            )}
+            <Field label="How should Buzz back up this key?">
+              <RadioGroup
+                value={backupChoice}
+                disabled={state.busy}
+                onValueChange={setBackupChoice}
+              >
+                <Radio
+                  value="automatic"
+                  disabled={state.busy}
+                  label="Automatically back up my key with Block"
+                />
+                <Radio
+                  value="self-managed"
+                  disabled={state.busy}
+                  label="I do my own cryptography"
+                />
+              </RadioGroup>
+            </Field>
+            <Button
+              variant="prominent"
+              disabled={state.busy || backupChoice === null}
+              onClick={() => {
+                if (backupChoice !== null)
+                  void identity.chooseBackup(backupChoice === "automatic");
+              }}
+            >
+              Continue
+            </Button>
+            {state.busy && (
+              <p role="status" className="text-body-sm text-secondary">
+                Saving your backup choice…
+              </p>
+            )}
+          </SettingsGroup>
+        </div>
       ) : (
         <>
           <p>

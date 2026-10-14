@@ -1,8 +1,35 @@
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { Channel } from "@tauri-apps/api/core";
 import type { Host, HostRequest } from "../../features/host/service";
 import { createNativeBackend } from "./native";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", async (original) => ({
+  ...(await original<typeof import("@tauri-apps/api/core")>()),
+  invoke: vi.fn(),
+}));
+type BackupWireMessage =
+  | { message: { Ok: boolean } | { Err: string }; index: number }
+  | { end: true; index: number };
+const backupCallbacks = new Map<number, (message: BackupWireMessage) => void>();
+let callbackId = 0;
+beforeEach(() => {
+  vi.stubGlobal("window", {
+    __TAURI_INTERNALS__: {
+      transformCallback(callback: (message: BackupWireMessage) => void) {
+        const id = ++callbackId;
+        backupCallbacks.set(id, callback);
+        return id;
+      },
+      unregisterCallback(id: number) {
+        backupCallbacks.delete(id);
+      },
+    },
+  });
+});
+afterEach(() => {
+  backupCallbacks.clear();
+  vi.unstubAllGlobals();
+});
 
 const API = "https://app.builderlab.xyz/api/goose";
 type Reply = { status?: number; body: unknown };
@@ -213,6 +240,69 @@ it("forgets the credential on sign-out and plugin disposal", async () => {
   dispose();
   await expect(backend.auth()).resolves.toBeNull();
 });
+
+it.each([true, false, null])(
+  "linked identity discovery respects automatic=%s and sign-out cancels an admitted upload",
+  async (automatic) => {
+    const { backend, invoke } = setup(
+      {
+        ...signedIn,
+        "/v1/buzz/nostr-identities/current": {
+          body: { identity: { pubkey_hex: "ab".repeat(32) } },
+        },
+      },
+      {
+        nsec_upload_status: () => ({
+          available: true,
+          automatic,
+          stored: false,
+        }),
+        nsec_upload: () => undefined,
+        nsec_upload_cancel: () => undefined,
+      },
+    );
+    const backup = backend.backup;
+    if (!backup) throw new Error("Missing native identity backup");
+    await login(backend);
+    expect(
+      invoke.mock.calls.filter(([command]) => command === "nsec_upload"),
+    ).toEqual([]);
+    await backend.send("identity");
+    await vi.waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("nsec_upload_status", {}),
+    );
+    if (automatic) {
+      await vi.waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith("nsec_upload", {
+          source: "hosted",
+          credential: "token",
+          onResult: expect.any(Channel),
+        }),
+      );
+      expect(backup.snapshot().busy).toBe(true);
+      await backend.send("sign-out");
+      expect(invoke).toHaveBeenCalledWith("nsec_upload_cancel", {
+        source: "hosted",
+      });
+      const channel = invoke.mock.calls.find(
+        ([command]) => command === "nsec_upload",
+      )?.[1]?.onResult as Channel<unknown>;
+      const deliver = backupCallbacks.get(channel.id);
+      if (!deliver) throw new Error("No native backup callback");
+      deliver({ message: { Ok: false }, index: 0 });
+      deliver({ end: true, index: 1 });
+      await vi.waitFor(() => expect(backup.snapshot().busy).toBe(false));
+    } else {
+      expect(
+        invoke.mock.calls.filter(([command]) => command === "nsec_upload"),
+      ).toEqual([]);
+      await backend.send("sign-out");
+    }
+    await expect(backup.upload()).rejects.toThrow(
+      "Sign in to Builderlab first.",
+    );
+  },
+);
 
 it("returns a challenge error without signing", async () => {
   const sign = vi.fn();

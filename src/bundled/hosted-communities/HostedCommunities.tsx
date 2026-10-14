@@ -1,4 +1,5 @@
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
+import { BackupIdentity } from "../../features/identity/BackupIdentity";
 import {
   type ReactNode,
   useCallback,
@@ -507,7 +508,7 @@ export function HostedCommunities({
                 <div className="space-y-3">
                   <InlineHeader
                     title="Link this account to your Buzz identity"
-                    subtitle="This Builderlab account isn’t linked to a Buzz identity yet. Connect this device’s key to create and own communities under it — Buzz signs a one-time challenge locally, so your private key never leaves this computer."
+                    subtitle="Connect this device’s key to create and own communities. Connecting sends a signed proof and your public identity. If you chose automatic backup during setup, Buzz also uploads an encrypted copy of your private key to Block."
                   />
                   <Button
                     variant="primary"
@@ -606,6 +607,9 @@ export function HostedCommunities({
               </div>
             )}
           </SettingsGroup>
+          {api.backup && bound && local === bound && !identityLoadFailed && (
+            <BackupIdentity backup={api.backup} active={active} />
+          )}
           <div className="mt-section-gap">
             <InlineHeader
               title="Your communities"

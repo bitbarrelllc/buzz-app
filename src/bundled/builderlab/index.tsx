@@ -1,4 +1,8 @@
 import type { PluginModule } from "../../plugins/api";
+import { useSyncExternalStore } from "react";
+import { createIdentityBackup } from "../../features/identity/backup";
+import { BackupIdentity } from "../../features/identity/BackupIdentity";
+import { nativeIdentityEnabled } from "../../features/identity/service";
 import { Login } from "./login/Login";
 import {
   browserCredential,
@@ -29,6 +33,25 @@ export const apply: PluginModule["apply"] = (ctx) => {
     return browserCredential(ctx.host, signal);
   });
   ctx.effect(() => () => session.dispose());
+  const backup = createIdentityBackup(
+    "builderlab",
+    () => session.credential().value,
+  );
+  ctx.effect(() => {
+    const stop = session.subscribe(() => {
+      if (session.snapshot().status !== "signed-in") backup.cancel();
+    });
+    return () => {
+      stop();
+      backup.cancel();
+    };
+  });
+  const BackupSettings = ({ active }: { active(): boolean }) => {
+    const state = useSyncExternalStore(session.subscribe, session.snapshot);
+    return nativeIdentityEnabled() && state.status === "signed-in" ? (
+      <BackupIdentity backup={backup} active={active} />
+    ) : null;
+  };
   const agents = createAgentClient(ctx.host, session);
   const loginAvailable = browserLoginAvailable() && !unavailable;
   if (!unavailable) {
@@ -86,7 +109,26 @@ export const apply: PluginModule["apply"] = (ctx) => {
       const credential = session.credential();
       if (linked === credential) return;
       linked = credential;
-      void agents.link(new AbortController().signal).catch(() => {});
+      const controller = new AbortController();
+      void agents
+        .link(controller.signal)
+        .then(async () => {
+          if (
+            !nativeIdentityEnabled() ||
+            session.credential() !== credential ||
+            session.snapshot().status !== "signed-in"
+          )
+            return;
+          const status = await backup.status();
+          if (
+            status.automatic &&
+            !status.stored &&
+            session.credential() === credential &&
+            session.snapshot().status === "signed-in"
+          )
+            await backup.upload();
+        })
+        .catch(() => {});
     }),
   );
   ctx.settingsCards.register({
@@ -105,6 +147,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
           }
           active={active}
         />
+        <BackupSettings active={active} />
         <RemoteAgents client={agents} session={session} active={active} />
       </>
     ),

@@ -4,6 +4,7 @@ export type IdentitySnapshot =
   | { status: "loading" }
   | { status: "missing"; busy: boolean; error?: string }
   | { status: "error"; error: string }
+  | { status: "backup-choice"; viewer: string; busy: boolean; error?: string }
   | { status: "ready"; viewer: string };
 
 // App-owned, not registered on the plugin context. Snapshots contain public data only.
@@ -22,6 +23,26 @@ export function createIdentity() {
     if (next.status === "ready") resolveReady(next.viewer);
     for (const listener of listeners) listener();
   };
+  async function adopt(viewer: string) {
+    try {
+      const backup = await invoke<{
+        available: boolean;
+        automatic: boolean | null;
+      }>("nsec_upload_status");
+      update(
+        backup.available && backup.automatic === null
+          ? { status: "backup-choice", viewer, busy: false }
+          : { status: "ready", viewer },
+      );
+    } catch (reason) {
+      update({
+        status: "backup-choice",
+        viewer,
+        busy: false,
+        error: reason instanceof Error ? reason.message : String(reason),
+      });
+    }
+  }
   async function run(
     command: "identity_restore" | "identity_create" | "identity_import",
     nsec?: string,
@@ -41,7 +62,7 @@ export function createIdentity() {
       if (viewer === null && restoring)
         update({ status: "missing", busy: false });
       else if (typeof viewer === "string" && /^[a-f0-9]{64}$/.test(viewer))
-        update({ status: "ready", viewer });
+        await adopt(viewer);
       else
         throw new Error(
           "The saved identity could not be verified. Restart the app.",
@@ -70,6 +91,25 @@ export function createIdentity() {
     retry: () => run("identity_restore"),
     importKey: (nsec: string) => run("identity_import", nsec),
     create: () => run("identity_create"),
+    async chooseBackup(automatic: boolean) {
+      if (disposed || busy || state.status !== "backup-choice") return;
+      const viewer = state.viewer;
+      busy = true;
+      update({ status: "backup-choice", viewer, busy: true });
+      try {
+        await invoke("nsec_upload_choice", { pubkey: viewer, automatic });
+        update({ status: "ready", viewer });
+      } catch (reason) {
+        update({
+          status: "backup-choice",
+          viewer,
+          busy: false,
+          error: reason instanceof Error ? reason.message : String(reason),
+        });
+      } finally {
+        busy = false;
+      }
+    },
     exportKey: () => invoke<string>("identity_export"),
     /** Why this build can't wipe, if it can't; `sign_out` enforces it either way. */
     wipeRefusal: () => invoke<string | null>("sign_out_wipe_refusal"),

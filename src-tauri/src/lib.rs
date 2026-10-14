@@ -29,6 +29,11 @@ mod host_command;
 mod host_process;
 mod host_request;
 mod identity;
+mod nsec_upload;
+mod nsec_upload_config;
+use nsec_upload::{
+    nsec_upload, nsec_upload_cancel, nsec_upload_choice, nsec_upload_status, NsecUploadHost,
+};
 mod image_clipboard;
 
 mod notifications;
@@ -413,6 +418,10 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         identity_import,
         identity_create,
         identity_export,
+        nsec_upload,
+        nsec_upload_status,
+        nsec_upload_choice,
+        nsec_upload_cancel,
         identity_prepare_remote_agent_authorization,
         identity_sign_builderlab_binding,
         enterprise_login_gate,
@@ -660,6 +669,7 @@ pub fn run() {
         .manage(Terminals::default())
         .manage(HostProcesses::default())
         .manage(OAuthCallbackHost::default())
+        .manage(NsecUploadHost::default())
         .manage(Notifications::default())
         .manage(DeepLinks::default())
         .manage(PluginManager(Manager::from_env()))
@@ -690,6 +700,7 @@ pub fn run() {
                 eprintln!("OAuth callback cleanup failed: {error}");
             }
             if webview.label() == "main" && matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                webview.state::<NsecUploadHost>().cancel(None);
                 webview.state::<pairing::Pairing>().cancel_all();
                 webview.state::<relay::Spools>().cancel_all(&webview.state::<relay::Uploads>());
                 // Processes belong to the page that started them.
@@ -698,7 +709,10 @@ pub fn run() {
             browser::page_load(webview, payload);
         })
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed | tauri::WindowEvent::CloseRequested { .. }) { window.state::<pairing::Pairing>().cancel_all(); }
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed | tauri::WindowEvent::CloseRequested { .. }) {
+                window.state::<NsecUploadHost>().cancel(None);
+                window.state::<pairing::Pairing>().cancel_all();
+            }
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) { window.state::<relay::Spools>().cancel_all(&window.state::<relay::Uploads>()); }
             #[cfg(target_os = "macos")]
             if window.label() == "main" {
@@ -728,6 +742,7 @@ pub fn run() {
 
 /// Best-effort native teardown when Buzz exits, from Quit or a fenced sign-out.
 pub(crate) fn shut_down<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.state::<NsecUploadHost>().close();
     app.state::<relay::Spools>()
         .cancel_all(&app.state::<relay::Uploads>());
     app.state::<image_clipboard::ImageClipboard>().release();

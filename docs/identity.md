@@ -43,6 +43,38 @@ coupling human writes to agent credentials or old-app blob writers. This is not 
 claim that per-secret storage is always superior or that prompts are eliminated.
 Consent, app signing and update behavior require attended native verification.
 
+## Private-key backup choice
+
+Configured desktop builds ask how to protect the identity in a separate onboarding
+step. **Automatically back up my key with Block** authorizes an encrypted upload
+once the user signs in to Builderlab and connects this public identity to the
+account. **I do my own cryptography** prevents upload. Neither option is
+preselected. The same choice follows creation and import, so an imported key is
+not silently authorized by importing it. Existing identities with no recorded
+choice see this step too. Builds without a backup service skip it and never upload.
+
+The screen explains that Block can recover the private key and that someone with
+access to the Builderlab account may be able to act as this identity anywhere the
+same key is used. Automatic backup does not ask again for every upload. The
+native host stores only the choice, public key, configured service and namespace,
+and whether a stored receipt was confirmed. Missing, unreadable, mismatched or
+self-managed metadata cannot authorize an upload. An explicit choice can repair
+unreadable metadata without replacing the key. A confirmed receipt suppresses
+repeat uploads; a failed attempt can be retried from account settings or on a
+later account connection. An uncertain response does not prove no copy was stored.
+Choice changes and uploads share a native file lock across running copies; a
+competing copy must wait until the current backup ends before changing the choice.
+
+The native host accepts a session credential only from the matching configured
+Builderlab or Hosted Communities source. Paired build inputs
+`BUZZ_NSEC_BACKUP_SERVICE_URL` and `BUZZ_NSEC_BACKUP_NAMESPACE` pin the destination.
+It checks authenticated account and key binding, obtains an enrolled recipient,
+seals the native key, and verifies the stored receipt. No private key or encrypted
+envelope crosses this command’s IPC boundary. Account sign-out, page reload,
+window close and app sign-out cancel pending work; they cannot retract accepted
+bytes. There is no retry worker or persisted envelope, and this change adds no
+recovery UI. The existing app-data wipe removes the public choice record.
+
 ## UI and sensitive data
 
 Settings exposes Profile in Personal space as well as in a selected community.

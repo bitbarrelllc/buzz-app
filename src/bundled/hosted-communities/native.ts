@@ -2,6 +2,7 @@
 // route. The session credential lives only in this plugin's memory; native code owns
 // the browser callback, host HTTP, and the kind 24243 binding signature.
 import { invoke } from "@tauri-apps/api/core";
+import { createIdentityBackup } from "../../features/identity/backup";
 import type { Host, HostRequest } from "../../features/host/service";
 import { boundKey, type Account, type Backend } from "./api";
 
@@ -101,6 +102,22 @@ export function createNativeBackend(host: Host, bridge: Native = native) {
     }
   };
   let credential: string | undefined;
+  const backup = createIdentityBackup(
+    "hosted",
+    () => credential,
+    bridge.invoke,
+  );
+  const maybeBackup = async (current: string | undefined, started: number) => {
+    if (!current || backup.snapshot().busy) return;
+    const status = await backup.status();
+    if (
+      started === generation &&
+      credential === current &&
+      status.automatic &&
+      !status.stored
+    )
+      await backup.upload();
+  };
   const request = async (
     path: string,
     body: object,
@@ -163,6 +180,7 @@ export function createNativeBackend(host: Host, bridge: Native = native) {
   let generation = 0;
   let session = new AbortController();
   const revoke = () => {
+    backup.cancel();
     generation += 1;
     session.abort();
     session = new AbortController();
@@ -238,7 +256,7 @@ export function createNativeBackend(host: Host, bridge: Native = native) {
       current,
     );
   };
-  const call = (action: string, input?: Record<string, unknown>) => {
+  const call = async (action: string, input?: Record<string, unknown>) => {
     const route = Object.hasOwn(ROUTES, action) ? ROUTES[action] : undefined;
     if (!route) throw new Error("Unknown Builderlab route");
     const [path, fields] = route;
@@ -254,9 +272,20 @@ export function createNativeBackend(host: Host, bridge: Native = native) {
         throw new Error(`Missing ${field}`);
       body[field] = value;
     }
-    return request(path, body);
+    const current = credential;
+    const started = generation;
+    const response = await request(path, body);
+    if (
+      action === "identity" &&
+      boundKey(
+        (response.value as { identity?: { pubkey_hex?: string } }).identity,
+      )
+    )
+      void maybeBackup(current, started).catch(() => {});
+    return response;
   };
   const backend: Backend = {
+    backup,
     origin: BUILDERLAB_ORIGIN,
     async auth() {
       const current = credential;
@@ -268,7 +297,10 @@ export function createNativeBackend(host: Host, bridge: Native = native) {
           throw new Error("Builderlab session changed");
         return account;
       } catch (error) {
-        if (started === generation) credential = undefined;
+        if (started === generation) {
+          credential = undefined;
+          backup.cancel();
+        }
         throw error;
       }
     },
