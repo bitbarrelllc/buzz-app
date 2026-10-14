@@ -459,7 +459,9 @@ export function createTabs({
     );
   }
 
-  function Conversations({
+  /** The agent's sessions: the one it was opened from, recent ones, and their
+   * transcripts. */
+  function ActivityTab({
     agent,
     conversation,
   }: {
@@ -554,12 +556,7 @@ export function createTabs({
   }
 
   /** What the agent runs with. Saving restarts idle sessions with the change. */
-  function SettingsTab({
-    agent,
-    save,
-    settingsHost,
-    conversation,
-  }: AgentViewProps<Config>) {
+  function SettingsTab({ agent, save, settingsHost }: AgentViewProps<Config>) {
     const saved = readConfig(agent.config);
     const setupState = useSetupCatalog();
     const providerDefaults = useSyncExternalStore(
@@ -653,12 +650,6 @@ export function createTabs({
             Save
           </Button>
         </div>
-        <details className="grid gap-2">
-          <summary>Runtime diagnostics</summary>
-          <div className="mt-2">
-            <Conversations agent={agent} conversation={conversation} />
-          </div>
-        </details>
       </form>
     );
   }
@@ -669,5 +660,6 @@ export function createTabs({
     createModelLabel,
     ProviderDialogBody,
     SettingsTab,
+    ActivityTab,
   };
 }
