@@ -142,3 +142,45 @@ it("updates an already-visible start when its authoritative end arrives", () => 
   expect(next[0]?.huddle?.endedAt).toBe(20);
   expect(projection.reconcile([start, end], [])).toBe(next);
 });
+
+it.each([author, relay])(
+  "retains valid creator or relay ends in batch and incremental folds",
+  (ender) => {
+    const start = event(48100, author, 10);
+    const end = event(48103, ender, 20);
+    expect(
+      foldMessages(parent, relay.pubkey, [end, start])[0]?.huddle?.endedAt,
+    ).toBe(20);
+    const projection = new MessageProjection(
+      parent,
+      relay.pubkey,
+      createRelayProfiler(),
+    );
+    expect(projection.reconcile([end], [])).toHaveLength(
+      ender === relay ? 1 : 0,
+    );
+    const rows = projection.reconcile([end, start], []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.huddle?.endedAt).toBe(20);
+  },
+);
+
+it("rejects unrelated, premature and unmatched creator ends", () => {
+  const start = event(48100, author, 10);
+  for (const end of [event(48103, stranger, 20), event(48103, author, 5)]) {
+    expect(
+      foldMessages(parent, relay.pubkey, [start, end])[0]?.huddle?.endedAt,
+    ).toBeUndefined();
+  }
+  expect(
+    foldMessages(parent, relay.pubkey, [event(48103, author, 20)]),
+  ).toEqual([]);
+  const otherStart = event(48100, stranger, 15);
+  expect(
+    foldMessages(parent, relay.pubkey, [
+      start,
+      otherStart,
+      event(48103, stranger, 20),
+    ])[0]?.huddle?.endedAt,
+  ).toBeUndefined();
+});

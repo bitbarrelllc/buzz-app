@@ -287,6 +287,7 @@ export function createHuddles(
         ) {
           if (unavailable.size >= 100) unavailable.clear();
           unavailable.add(`${destination.scope}:${room}`);
+          requests?.dismiss(room);
         }
         void leave(event.error ?? undefined);
         return;

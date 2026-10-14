@@ -1469,37 +1469,63 @@ it("returns to the invoking row when Send saves a remembered-agent follow-up", a
   });
 });
 
-it("retires an open ordinary draft when its channel is marked as a Huddle, preserving storage", async () => {
-  const h = fixture({ withWriter: true });
-  writeView(h.owner.session.scope, "draft:room", "Private draft text");
-  render(h.view);
-  await screen.findByText("Please review this");
-  await chooseFilter("Drafts");
-  fireEvent.click(
-    screen.getByRole("button", { name: "Open draft for #Design" }),
-  );
-  await screen.findByRole("region", { name: "Draft detail" });
-  await act(async () =>
-    h.emit([
-      metadata(h.relayKey, "room", "Huddle", 100, [
-        ["private"],
-        ["about", huddleDescription("00000000-0000-4000-8000-000000000001")],
+it.each([true, false])(
+  "retires an excluded draft with focus owned=%s and preserves storage",
+  async (ownedFocus) => {
+    const h = fixture({ withWriter: true });
+    writeView(h.owner.session.scope, "draft:room", "Private draft text");
+    render(
+      <>
+        <button type="button">Outside draft</button>
+        {h.view}
+      </>,
+    );
+    await screen.findByText("Please review this");
+    await chooseFilter("Drafts");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open draft for #Design" }),
+    );
+    await screen.findByRole("region", { name: "Draft detail" });
+    const outside = screen.getByRole("button", { name: "Outside draft" });
+    (ownedFocus
+      ? screen.getByRole("button", { name: "Close detail" })
+      : outside
+    ).focus();
+    await act(async () =>
+      h.emit([
+        metadata(h.relayKey, "room", "Huddle", 100, [
+          ["private"],
+          ["about", huddleDescription("00000000-0000-4000-8000-000000000001")],
+        ]),
       ]),
-    ]),
-  );
-  await waitFor(() =>
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Draft detail" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Private draft text")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Open draft for/ }),
+    ).not.toBeInTheDocument();
+    expect(readView(h.owner.session.scope, "draft:room", "")).toBe(
+      "Private draft text",
+    );
+    await waitFor(() =>
+      expect(
+        ownedFocus
+          ? screen.getByRole("button", { name: "Inbox filters" })
+          : outside,
+      ).toHaveFocus(),
+    );
+    await act(async () =>
+      h.emit([metadata(h.relayKey, "room", "Restored", 101)]),
+    );
     expect(
       screen.queryByRole("region", { name: "Draft detail" }),
-    ).not.toBeInTheDocument(),
-  );
-  expect(screen.queryByText("Private draft text")).not.toBeInTheDocument();
-  expect(
-    screen.queryByRole("button", { name: /^Open draft for/ }),
-  ).not.toBeInTheDocument();
-  expect(readView(h.owner.session.scope, "draft:room", "")).toBe(
-    "Private draft text",
-  );
-});
+    ).not.toBeInTheDocument();
+  },
+);
 
 it("withholds drafts with pending metadata and restores ordinary destinations after discovery", async () => {
   const h = fixture();

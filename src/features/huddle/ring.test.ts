@@ -109,3 +109,18 @@ it("ignores a late autoplay rejection after the request is gone", async () => {
   window.dispatchEvent(new Event("pointerdown"));
   expect(h.play).toHaveBeenCalledTimes(1);
 });
+
+it("keeps an answered request silent through retry recovery but rings for a new request", () => {
+  const h = harness();
+  h.update("incoming");
+  h.update("connecting", "attempt-id");
+  h.update("leaving", "attempt-id");
+  h.update("error", "attempt-id");
+  h.update("incoming");
+  h.audio.dispatchEvent(new Event("ended"));
+  vi.advanceTimersByTime(5000);
+  expect(h.play).toHaveBeenCalledTimes(1);
+  expect(h.pause).toHaveBeenCalledTimes(1);
+  h.update("incoming", "new-request");
+  expect(h.play).toHaveBeenCalledTimes(2);
+});

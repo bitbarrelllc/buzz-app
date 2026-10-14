@@ -199,6 +199,23 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
     releaseAudio(audio);
     await joining;
     expect(calls.snapshot().phase).toBe("idle");
+    for (const error of [
+      "not a member",
+      "huddle has ended",
+      "channel is archived",
+    ]) {
+      await calls.dispose();
+      calls = createHuddles(relay, bridge, openAudio);
+      await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
+      await calls.join(destination, room);
+      receive({ type: "ended", error });
+      await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("error"));
+      expect(calls.canJoin(destination.scope, room)).toBe(false);
+      // Re-discovery of the unchanged invitation must not restore Join.
+      live.get(guest.pubkey)?.receive(notices);
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
+      expect(calls.snapshot().phase).toBe("error");
+    }
     discussion = createHuddleDiscussion(
       recipient.session,
       room,

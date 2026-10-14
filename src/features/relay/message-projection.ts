@@ -114,6 +114,7 @@ export class MessageProjection {
                     ],
                     {
                       includeReplies: this.includeReplies(),
+                      collapseHuddles: false,
                       signingAuthority: this.signingAuthority,
                     },
                   )[0]
@@ -123,9 +124,10 @@ export class MessageProjection {
             else this.messages.delete(id);
           }
           this.rows = Object.freeze(
-            collapseHuddleCards([...this.messages.values()]).sort(
-              compareMessages,
-            ),
+            collapseHuddleCards(
+              [...this.messages.values()],
+              this.relayAuthor,
+            ).sort(compareMessages),
           );
         },
         affected.size,

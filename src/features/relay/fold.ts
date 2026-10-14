@@ -253,8 +253,13 @@ export function foldMessages(
   events: readonly EventData[],
   {
     includeReplies = false,
+    collapseHuddles = true,
     signingAuthority,
-  }: { includeReplies?: boolean; signingAuthority?: string | undefined } = {},
+  }: {
+    includeReplies?: boolean;
+    collapseHuddles?: boolean;
+    signingAuthority?: string | undefined;
+  } = {},
 ): ChannelMessage[] {
   const overlays = new Map<string, EventData[]>();
   const summaries = new Map<string, EventData>();
@@ -299,8 +304,7 @@ export function foldMessages(
     if (event.kind === 48100 || event.kind === 48103) {
       const room = huddleRoom(event);
       if (!room || room === channelId) continue;
-      // End cards are authoritative; creator-authored ends still update the start card.
-      if (event.kind === 48103 && event.pubkey !== relayAuthor) continue;
+      // End authority is checked with matching starts when cards are collapsed.
       rows.push(
         Object.freeze({
           id: event.id,
@@ -455,7 +459,9 @@ export function foldMessages(
       }),
     );
   }
-  return collapseHuddleCards(rows).sort(compareMessages);
+  return (collapseHuddles ? collapseHuddleCards(rows, relayAuthor) : rows).sort(
+    compareMessages,
+  );
 }
 
 /** Count people, but retain event IDs for author-only removal and duplicate cleanup. */
@@ -516,18 +522,35 @@ export function groupReactions(
 }
 
 /** Keep the start ID stable without discarding its retained authoritative end. */
-export function collapseHuddleCards(rows: ChannelMessage[]): ChannelMessage[] {
+export function collapseHuddleCards(
+  rows: ChannelMessage[],
+  relayAuthor: string,
+): ChannelMessage[] {
   const key = (row: ChannelMessage) => `${row.channelId}:${row.huddle?.room}`;
-  const starts = new Set(
-    rows.filter((row) => row.huddle?.state === "started").map(key),
-  );
-  if (!starts.size) return rows;
-  const ends = new Map<string, number>();
+  const starts = new Map<string, ChannelMessage>();
   for (const row of rows) {
+    if (row.huddle?.state !== "started") continue;
+    const previous = starts.get(key(row));
+    if (
+      !previous ||
+      row.createdAt < previous.createdAt ||
+      (row.createdAt === previous.createdAt && row.id < previous.id)
+    )
+      starts.set(key(row), row);
+  }
+  const authorized = rows.filter((row) => {
+    if (row.huddle?.state !== "ended" || row.authorId === relayAuthor)
+      return true;
+    const start = starts.get(key(row));
+    return start?.authorId === row.authorId && start.createdAt <= row.createdAt;
+  });
+  if (!starts.size) return authorized;
+  const ends = new Map<string, number>();
+  for (const row of authorized) {
     if (row.huddle?.state === "ended")
       ends.set(key(row), Math.max(ends.get(key(row)) ?? 0, row.createdAt));
   }
-  return rows.flatMap((row) => {
+  return authorized.flatMap((row) => {
     if (row.huddle?.state === "ended" && starts.has(key(row))) return [];
     const endedAt = ends.get(key(row));
     return row.huddle?.state === "started" &&

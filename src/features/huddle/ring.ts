@@ -8,13 +8,16 @@ export function createHuddleRing(
   makeAudio = () => new Audio(HUDDLE_RING),
 ) {
   let key: string | undefined;
+  let answered: string | undefined;
   let stopRing: (() => void) | undefined;
   function sync() {
     const call = huddles.snapshot();
-    const next =
+    if (call.phase === "connecting" && key) answered = key;
+    const request =
       call.phase === "incoming"
         ? `${call.destination?.scope}:${call.id}`
         : undefined;
+    const next = request === answered ? undefined : request;
     if (next === key) return;
     stopRing?.();
     stopRing = undefined;

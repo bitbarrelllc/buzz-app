@@ -1,5 +1,6 @@
 import {
   type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -70,6 +71,16 @@ export function DraftsView({
   const fallbackRow = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef<HTMLButtonElement>(null);
   const visit = invoking.current;
+  const detailRef = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    // Ref cleanup runs before removal, while focus ownership is still observable.
+    return () => {
+      if (invoking.current)
+        restoreFocus.current = node.contains(document.activeElement)
+          ? invoking.current.row
+          : null;
+    };
+  }, []);
   useLayoutEffect(() => {
     if (selected || !restoreFocus.current) return;
     const row = restoreFocus.current.isConnected
@@ -118,6 +129,13 @@ export function DraftsView({
     selected && coordinates && !excluded(coordinates.channelId)
       ? { key: selected, coordinates }
       : undefined;
+  useLayoutEffect(() => {
+    if (!selected || active) return;
+    invoking.current = undefined;
+    setSelected(undefined);
+    setConfirmDelete(false);
+    setError(undefined);
+  }, [selected, active]);
   const channelFor = (channelId: string) =>
     channels.find(
       (item) =>
@@ -345,6 +363,7 @@ export function DraftsView({
       </div>
       {active && (
         <section
+          ref={detailRef}
           aria-label="Draft detail"
           className={styles.detail}
           onKeyDown={(event) => {
