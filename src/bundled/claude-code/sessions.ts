@@ -298,8 +298,8 @@ export class AgentSessions {
     }
   }
 
-  /** Stops idle processes started with old settings; active ones stop when
-   * they next fall idle. */
+  /** Stops idle processes started with old settings; active ones stop at their
+   * next message or idle deadline once quiet. */
   reconfigure() {
     this.clearDiscovery();
     const fingerprint = this.options.fingerprint();
@@ -345,7 +345,10 @@ export class AgentSessions {
   }
   private adopt(key: string, live: Live, seen: number) {
     live.process.conversation = key;
-    live.process.onQuiet = () => this.quiet(key, live);
+    // Not a stop: a turn that reports finished work may be about to start.
+    live.process.onQuiet = () => {
+      if (this.live.get(key) === live) this.touch(key, live);
+    };
     this.live.set(key, live);
     this.touch(key, live, seen);
     this.options.onChange?.();
@@ -360,15 +363,15 @@ export class AgentSessions {
     activity: TurnPick & ActivityReceipt,
   ) {
     const settled = await live.process.send(text, activity);
-    this.quiet(key, live);
+    if (this.live.get(key) === live) {
+      this.touch(key, live);
+      if (
+        live.fingerprint !== this.options.fingerprint() &&
+        !live.process.active
+      )
+        this.drop(key, live);
+    }
     return settled;
-  }
-  /** Restarts the idle countdown, or stops a process left with old settings. */
-  private quiet(key: string, live: Live) {
-    if (this.live.get(key) !== live) return;
-    this.touch(key, live);
-    if (live.fingerprint !== this.options.fingerprint() && !live.process.active)
-      this.drop(key, live);
   }
   /** Saves the session and restarts its idle countdown. */
   private touch(key: string, live: Live, seen?: number) {
