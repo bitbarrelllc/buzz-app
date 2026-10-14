@@ -19,6 +19,7 @@ export function ChannelPreview({
   anchor,
   draft = false,
   onDraftSaved,
+  label = "Conversation preview",
 }: {
   session: RelaySession;
   channelId: string;
@@ -27,6 +28,7 @@ export function ChannelPreview({
   anchor?: string | undefined;
   draft?: boolean;
   onDraftSaved?: () => void;
+  label?: string;
 }) {
   const window = useChannelWindow(session.channels, channelId);
   const [sentId, setSentId] = useState<string>();
@@ -85,7 +87,7 @@ export function ChannelPreview({
     <MessageEditScope>
       <section
         className={styles.previewFrame}
-        aria-label="Conversation preview"
+        aria-label={label}
         data-reading-surface=""
       >
         <div className={styles.previewHistory}>
