@@ -126,6 +126,7 @@ fn native_command_permissions_isolate_webviews() {
         "app_agent_port",
         "app_agent_rename",
         "app_agent_set_picture",
+        "app_agent_set_type",
         "app_agent_delete",
         "app_agent_forget",
         "app_agent_publish",
