@@ -263,23 +263,30 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
   expect(within(content).getAllByRole("article")).toHaveLength(5);
   expect(
     within(content).queryAllByRole("img", { name: "Essential" }),
-  ).toHaveLength(essentials ? 3 : 0);
+  ).toHaveLength(0);
   expect(within(content).queryByText("Essential")).toBeNull();
   if (essentials) {
-    const voiceRow = within(content)
-      .getByText("Voice Notes")
-      .closest("article");
-    expect(voiceRow).not.toBeNull();
-    const row = within(voiceRow as HTMLElement);
-    expect(row.getByRole("img", { name: "Essential" }).nextElementSibling).toBe(
-      row.getByRole("switch", { name: "Enable Voice Notes" }),
+    const essentialGroup = within(communication as HTMLElement).getByRole(
+      "region",
+      { name: "Essentials" },
     );
+    expect(
+      within(essentialGroup)
+        .getAllByRole("article")
+        .map((row) =>
+          within(row).getByRole("button").getAttribute("aria-label"),
+        ),
+    ).toEqual(["View Channels details", "View Voice Notes details"]);
+    expect(within(essentialGroup).queryByText("Messages")).toBeNull();
   }
+  expect(
+    within(content).queryAllByRole("region", { name: "Essentials" }),
+  ).toHaveLength(essentials ? 2 : 0);
   expect(
     within(content).queryByRole("switch", { name: "Enable Channels" }),
   ).toBeNull();
   expect(
-    within(communication as HTMLElement).getByRole("switch", {
+    within(content).getByRole("switch", {
       name: "Enable Voice Notes",
     }),
   ).toBeEnabled();
