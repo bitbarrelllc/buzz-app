@@ -3,8 +3,8 @@
 // conversation's session is closed; its next message opens a new one, shown
 // the conversation again. A one-off turn (a watch or timer wake) gets a
 // session of its own, closed when it ends. Every session holds one of the
-// host's MCP servers, in a pool the plugin's agents share, and the least
-// recently used idle session closes to make room. Nothing is saved: sessions
+// host's MCP servers, in one pool every ACP plugin's agents share, and the
+// least recently used idle session closes to make room, whichever plugin's. Nothing is saved: sessions
 // live as long as the app does.
 import type { AcpProcess } from "./process";
 import type { AcpSession } from "./session";
@@ -18,8 +18,8 @@ import type {
 
 /** A conversation's session closes after this long without a message. */
 export const IDLE_MS = 15 * 60_000;
-/** The most MCP servers a pool's sessions hold at once, below the host's 64 for
- * every plugin, so other plugins keep room. */
+/** The most MCP servers the pool's sessions hold at once, below the host's 64
+ * for every plugin, so plugins not on this client keep room. */
 export const POOL_LIMIT = 48;
 
 /** A session's hold on one MCP server in the pool. */
@@ -30,8 +30,7 @@ export type Slot = {
   evict(): Promise<unknown>;
 };
 
-/** The MCP servers a plugin's agents' sessions hold, least recently used
- * first. One runtime shares one. */
+/** The MCP servers agents' sessions hold, least recently used first. */
 export class ServerPool {
   private readonly slots = new Set<Slot>();
   constructor(private readonly limit = POOL_LIMIT) {}
@@ -71,6 +70,9 @@ export class ServerPool {
   }
 }
 
+/** The pool every ACP plugin's sessions share. */
+export const SHARED_POOL = new ServerPool();
+
 /** What a session is opened with. */
 export type Launch = Readonly<{
   /** The agent's working directory, absolute or `~/…`. */
@@ -86,8 +88,8 @@ export type SessionsOptions = Readonly<{
   tools: ToolServer;
   /** The process its sessions open in, started when needed. */
   process: Readonly<{ get(): Promise<AcpProcess> }>;
-  /** The servers its plugin's sessions hold. */
-  pool: ServerPool;
+  /** The servers its sessions hold: the shared pool unless given. */
+  pool?: ServerPool;
   /** The agent's current settings, for a new session. */
   launch(): Promise<Launch>;
   /** The agent's provider, model and thinking level now, which each new
@@ -310,6 +312,10 @@ export class AgentSessions {
     for (const live of this.once.values()) if (live) void this.close(live);
   }
 
+  private get pool() {
+    return this.options.pool ?? SHARED_POOL;
+  }
+
   /** Opened with old settings, or on a thinking level when the harness's
    * own is chosen now, which only a new session runs on. */
   private stale(live: Live) {
@@ -326,7 +332,8 @@ export class AgentSessions {
     title: string | undefined,
     use: (live: Live) => unknown,
   ): Promise<Live> {
-    const { pool, spawn } = this.options;
+    const { spawn } = this.options;
+    const { pool } = this;
     // Read before `launch` reads the settings, so it never describes newer ones.
     const fingerprint = this.options.fingerprint();
     const launch = await this.options.launch();
@@ -414,7 +421,7 @@ export class AgentSessions {
   }
   /** Notes what the session has been shown and restarts its idle countdown. */
   private touch(key: string, live: Live, seen?: number) {
-    this.options.pool.touch(live.slot);
+    this.pool.touch(live.slot);
     clearTimeout(live.timer);
     live.timer = setTimeout(() => {
       if (live.session.busy) this.touch(key, live);
