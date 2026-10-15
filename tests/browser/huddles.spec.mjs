@@ -7,6 +7,8 @@ import { readFile } from "node:fs/promises";
 let server, origin;
 test.beforeAll(async () => {
   server = await createServer({
+    configFile: false,
+    envDir: false,
     root: fileURLToPath(new URL("../../", import.meta.url)),
     server: { host: "127.0.0.1", port: 0 },
   });
