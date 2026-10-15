@@ -377,9 +377,12 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const external = screen.getByRole("complementary", {
     name: "External helper details",
   });
-  expect(
-    within(external).getByRole("switch", { name: "Enable External helper" }),
-  ).toBeVisible();
+  const disable = within(external).getByRole("button", { name: "Disable" });
+  expect(disable).toHaveAttribute("data-variant", "subtle");
+  expect(within(external).queryByRole("switch")).toBeNull();
+  vi.mocked(plugins.change).mockClear();
+  fireEvent.click(disable);
+  expect(plugins.change).toHaveBeenCalledWith("disable", "example.helper");
   for (const value of ["example.helper", "abc123", "Signed"])
     expect(within(external).getByText(value)).toBeVisible();
   expect(within(external).getAllByText("publisher-public-key")).toHaveLength(2);
@@ -391,6 +394,27 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(
     screen.queryByRole("complementary", { name: "External helper details" }),
   ).toBeNull();
+
+  const helper = snapshot.configuration.catalog.plugins[1];
+  if (!helper) throw new Error("Expected External helper fixture");
+  helper.enabled = false;
+  fireEvent.click(externalCard);
+  const enable = within(
+    screen.getByRole("complementary", { name: "External helper details" }),
+  ).getByRole("button", { name: "Enable" });
+  expect(enable).toHaveAttribute("data-variant", "prominent");
+  fireEvent.click(enable);
+  expect(plugins.change).toHaveBeenLastCalledWith("enable", "example.helper");
+  fireEvent.keyDown(enable, { key: "Escape" });
+  snapshot.busy = true;
+  fireEvent.click(externalCard);
+  const pending = within(
+    screen.getByRole("complementary", { name: "External helper details" }),
+  ).getByRole("button", { name: "Enable" });
+  expect(pending).toHaveAttribute("aria-disabled", "true");
+  vi.mocked(plugins.change).mockClear();
+  fireEvent.click(pending);
+  expect(plugins.change).not.toHaveBeenCalled();
 });
 
 it("uses contributed icons in community and account navigation", () => {

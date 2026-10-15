@@ -224,20 +224,21 @@ function PluginDetails({
           {plugin.manifest.id === "buzz.channels" ? (
             <span className="text-caption text-secondary">Required</span>
           ) : (
-            <Switch
-              aria-label={`Enable ${plugin.manifest.name}`}
-              checked={plugin.enabled}
-              readOnly={busy}
-              aria-disabled={busy}
-              onClick={(event) => event.currentTarget.focus()}
-              onCheckedChange={() => {
+            <Button
+              variant={plugin.enabled ? "subtle" : "prominent"}
+              size="sm"
+              disabled={busy}
+              focusableWhenDisabled
+              onClick={() => {
                 if (busy) return;
                 void plugins.change(
                   plugin.enabled ? "disable" : "enable",
                   plugin.manifest.id,
                 );
               }}
-            />
+            >
+              {plugin.enabled ? "Disable" : "Enable"}
+            </Button>
           )}
         </div>
       </section>
