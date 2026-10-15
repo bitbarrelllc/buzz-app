@@ -1600,7 +1600,7 @@ it("bounds reply participants and projects artwork with fallback initials", () =
     expect(trigger.querySelector('[title="p3"]')).toHaveTextContent("P");
     expect(trigger).toHaveTextContent("+2");
     expect(media).toHaveBeenCalledWith("https://safe/avatar", "small");
-    expect(media).toHaveBeenCalledWith("http://unsafe", "small");
+    expect(media).not.toHaveBeenCalledWith("http://unsafe", "small");
   } finally {
     view.unmount();
   }
@@ -2385,6 +2385,11 @@ it("shows a message for agents as one line from its author to whom it addresses"
       name: "Morgarita to Rivet: **run** the suite…",
     });
     expect(line).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByText(/(?:1969|1970) at /, {
+        selector: 'time > span[aria-hidden="true"]',
+      }),
+    ).toBeVisible();
     // Reveal focuses the scroll anchor with tabIndex -1; on the button, that
     // would take the only toggle out of the Tab order.
     expect(line).not.toHaveAttribute("data-message-id");
@@ -2393,11 +2398,17 @@ it("shows a message for agents as one line from its author to whom it addresses"
     fireEvent.click(line);
     expect(line).toHaveAttribute("aria-expanded", "true");
     expect(
+      screen.getByText(/(?:1969|1970) at /, {
+        selector: 'time > span[aria-hidden="true"]',
+      }),
+    ).toBeVisible();
+    expect(
       screen.queryByRole("button", { name: "View Morgarita profile" }),
     ).toBeNull();
     const expanded = screen.getByText("run").closest("[data-message-id]");
     expect(expanded?.querySelector('[class*="messageBubble"]')).toBeNull();
     expect(expanded?.querySelector("[data-own]")).toBeNull();
+
     // The body keeps later mentions but drops the one the line shows.
     expect(screen.getByText(/Then report back/)).toBeInTheDocument();
     expect(screen.queryByText("@Rivet,")).toBeNull();
@@ -2405,6 +2416,11 @@ it("shows a message for agents as one line from its author to whom it addresses"
     // Anywhere in the open box folds it back.
     fireEvent.click(screen.getByText(/Then report back/));
     expect(line).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByText(/(?:1969|1970) at /, {
+        selector: 'time > span[aria-hidden="true"]',
+      }),
+    ).toBeVisible();
   } finally {
     cleanup();
   }

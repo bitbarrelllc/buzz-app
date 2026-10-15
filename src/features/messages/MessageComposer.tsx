@@ -104,6 +104,7 @@ import type {
   ComposerFormat,
 } from "./composer-dom";
 import { TargetOpenerProvider } from "../conversation/opener";
+import { avatarMedia } from "../../shared/avatar-source";
 
 const noChannels: ReturnType<ComposerSession["channels"]["list"]> = {
   status: "idle",
@@ -1036,7 +1037,9 @@ function Composer({
               .selectable.some((agent) => agent.pubkey === key),
         )
       )
-        throw new Error("Only your available agents can be mentioned in Me.");
+        throw new Error(
+          "Only your available agents can be mentioned in Solo chats.",
+        );
       await session.workSessions.addAgents(
         channelId,
         missing,
@@ -1050,7 +1053,7 @@ function Composer({
   function requireCompletedSessionStart() {
     if (pendingSessionDraft(scope, channelId))
       throw new Error(
-        "Finish setting up this conversation in Me before sending messages.",
+        "Finish setting up this conversation in Solo before sending messages.",
       );
   }
   async function send() {
@@ -1131,7 +1134,7 @@ function Composer({
         )
       )
         throw new Error(
-          "Only your available agents can be mentioned in Me. Remove the unavailable recipient and retry.",
+          "Only your available agents can be mentioned in Solo chats. Remove the unavailable recipient and retry.",
         );
       if (submission) {
         submission.submit(captured);
@@ -1624,7 +1627,6 @@ function Composer({
                   !event.shiftKey &&
                   !event.altKey &&
                   !event.ctrlKey &&
-                  !event.metaKey &&
                   !event.repeat &&
                   !event.defaultPrevented &&
                   !editingDisabled &&
@@ -1918,7 +1920,7 @@ function RecipientAvatars({
                 <Avatar
                   alt=""
                   fallback={recipient.name}
-                  src={session.media(profile?.picture ?? "", "small")}
+                  src={avatarMedia(profile?.picture, session.media)}
                   size="small"
                   shape={
                     agentPubkeys.has(recipient.pubkey) ? "squircle" : "circle"

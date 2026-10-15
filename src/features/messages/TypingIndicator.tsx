@@ -25,6 +25,7 @@ import type { RelaySession } from "../relay/session";
 import type { ComposerSession } from "./composer-session";
 import type { MessageLinkOrigin } from "./MessageRow";
 import styles from "./TypingIndicator.module.css";
+import { avatarMedia } from "../../shared/avatar-source";
 
 const noSubscribe = () => () => {};
 const noActivity = () => undefined;
@@ -110,7 +111,7 @@ export function TypingIndicator({
           fallback={name(pubkey)}
           shape="squircle"
           size="fill"
-          src={picture ? session.media(picture, "small") : undefined}
+          src={avatarMedia(picture, session.media)}
         />
       </span>
     );
@@ -163,7 +164,7 @@ export function TypingIndicator({
     return (
       <AgentActivityRow
         name={name(pubkey)}
-        picture={picture ? session.media(picture, "small") : undefined}
+        picture={avatarMedia(picture, session.media)}
         status={detail.label}
         scope={scopeLabel(pubkey)}
         openLabel={`Open ${conversationRoot ? "thread" : "conversation"} for ${name(pubkey)}`}
