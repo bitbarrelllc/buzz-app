@@ -696,11 +696,12 @@ test.describe("signed newest-first Inbox windows", () => {
   });
 });
 
-// Browser boundary: shared top-level head cannot reveal a row it does not contain.
-// The exact thread fallback must own focus/scroll and canonical origin, not a mock DOM.
+// Browser boundary: the shared top-level head cannot reveal a row it does not
+// contain, so the DM pages back to it. The real timeline must own focus/scroll
+// and canonical origin, not a mock DOM or the newest head.
 test.describe("DM exact opening outside the head", () => {
   test.use({ inboxDmOldAnchor: true });
-  test("retains and focuses the selected old DM instead of silently substituting the newest head", async ({
+  test("pages back to and focuses the selected old DM instead of silently substituting the newest head", async ({
     page,
     app,
   }) => {
@@ -717,11 +718,27 @@ test.describe("DM exact opening outside the head", () => {
     const target = detail.locator(
       `[data-message-id="${app.inboxDmAnchor.id}"]`,
     );
+    // The fixture holds each older page until released.
+    await expect
+      .poll(async () => {
+        for (const held of app.pending.filter(
+          ({ channel }) => channel === "dm-peer",
+        )) {
+          app.pending.splice(app.pending.indexOf(held), 1);
+          held.release();
+        }
+        return target.count();
+      })
+      .toBe(1);
     await expect(target).toBeInViewport();
     await expect(target).toBeFocused();
+    const preview = detail.getByRole("region", {
+      name: "Conversation preview",
+    });
+    await expect(preview).toBeVisible();
     await expect(
       detail.getByRole("complementary", { name: "Thread" }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(detail.getByRole("form")).toHaveCount(1);
     await expect(detail.getByRole("button", { name: /^Close / })).toHaveCount(
       1,
@@ -730,13 +747,6 @@ test.describe("DM exact opening outside the head", () => {
       .poll(() =>
         app.report.queries.some(
           ({ filter }) => filter.top_level && filter["#h"]?.includes("dm-peer"),
-        ),
-      )
-      .toBe(true);
-    await expect
-      .poll(() =>
-        app.report.queries.some(({ filter }) =>
-          filter.ids?.includes(app.inboxDmAnchor.id),
         ),
       )
       .toBe(true);
@@ -754,9 +764,7 @@ test.describe("DM exact opening outside the head", () => {
       await retainedTarget.evaluate((element) => element.isConnected),
     ).toBe(true);
     await expect(target).toBeInViewport();
-    await expect(
-      detail.getByRole("complementary", { name: "Thread" }),
-    ).toBeVisible();
+    await expect(preview).toBeVisible();
     await retainedTarget.dispose();
     await detail.getByRole("button", { name: "Open in channel" }).click();
     const origin = await page.evaluate(
