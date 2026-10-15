@@ -3,5 +3,8 @@
   "name": "Sessions",
   "apiVersion": 1,
   "description": "Keep legacy Sessions links working through the Me workspace.",
-  "discovery": { "category": "productivity", "tags": ["agent-sessions"] }
+  "discovery": {
+    "category": "productivity",
+    "tags": ["agent-sessions", "Essentials"]
+  }
 }

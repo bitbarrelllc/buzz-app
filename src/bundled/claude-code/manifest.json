@@ -3,7 +3,10 @@
   "name": "Claude",
   "apiVersion": 1,
   "description": "Run local Claude coding agents in Buzz.",
-  "discovery": { "category": "agents", "tags": ["code", "coding-agents"] },
+  "discovery": {
+    "category": "agents",
+    "tags": ["code", "coding-agents", "Essentials"]
+  },
   "host": {
     "networkOrigins": ["https://downloads.claude.ai"],
     "processes": [
@@ -22,7 +25,10 @@
         "program": "base64",
         "args": ["-i"]
       },
-      { "id": "workspace", "program": "pwd" },
+      {
+        "id": "workspace",
+        "program": "pwd"
+      },
       {
         "id": "find",
         "program": "grep",

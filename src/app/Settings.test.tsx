@@ -116,11 +116,10 @@ const host = {
   },
 } as unknown as Parameters<typeof Settings>[0];
 
-it("groups plugin cards by known categories and keeps unknown ones under Other", () => {
-  const { cards } = registry([]);
+it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
   const ready = {
     configuration: {
-      status: "ready" as const,
+      status: "ready",
       externalPluginsPaused: false,
       catalog: {
         profile: "test",
@@ -128,13 +127,34 @@ it("groups plugin cards by known categories and keeps unknown ones under Other",
         plugins: [
           {
             manifest: {
+              id: "buzz.voice-notes",
+              name: "Voice Notes",
+              apiVersion: 1,
+              description: "Record voice notes and play them in conversations.",
+              discovery: {
+                category: "communication",
+                ...(essentials ? { tags: ["  essentials  "] } : {}),
+              },
+            },
+            source: "bundled",
+            enabled: true,
+            revision: "bundled",
+            previous: null,
+            reloadable: false,
+            error: null,
+          },
+          {
+            manifest: {
               id: "buzz.channels",
               name: "Channels",
-              apiVersion: 1 as const,
+              apiVersion: 1,
               description: "Navigate channels and hold conversations in Buzz.",
-              discovery: { category: "communication" },
+              discovery: {
+                category: "communication",
+                ...(essentials ? { tags: ["Essentials"] } : {}),
+              },
             },
-            source: "bundled" as const,
+            source: "bundled",
             enabled: true,
             revision: "bundled",
             previous: null,
@@ -145,11 +165,14 @@ it("groups plugin cards by known categories and keeps unknown ones under Other",
             manifest: {
               id: "buzz.codex",
               name: "Codex",
-              apiVersion: 1 as const,
+              apiVersion: 1,
               description: "Run local Codex coding agents in Buzz.",
-              discovery: { category: "agents" },
+              discovery: {
+                category: "agents",
+                ...(essentials ? { tags: ["Essentials"] } : {}),
+              },
             },
-            source: "bundled" as const,
+            source: "bundled",
             enabled: true,
             revision: "bundled",
             previous: null,
@@ -160,11 +183,11 @@ it("groups plugin cards by known categories and keeps unknown ones under Other",
             manifest: {
               id: "example.invoices",
               name: "Invoices",
-              apiVersion: 1 as const,
+              apiVersion: 1,
               description: "Reconcile invoices without leaving Buzz.",
               discovery: { category: "finance" },
             },
-            source: "external" as const,
+            source: "external",
             enabled: false,
             revision: "one",
             previous: null,
@@ -179,83 +202,114 @@ it("groups plugin cards by known categories and keeps unknown ones under Other",
     error: null,
     refreshError: null,
   };
-  const plugins = {
-    subscribe: () => () => {},
-    snapshot: () => ready,
-    change: vi.fn(),
-    reload: vi.fn(),
-    dismissError: vi.fn(),
-  } as unknown as Parameters<typeof Settings>[0]["plugins"];
-
-  const channel = ready.configuration.catalog.plugins[0];
-  if (!channel) throw new Error("Expected Channels fixture");
-  ready.configuration.catalog.plugins.unshift(
-    ...(
-      [
-        ["example.chat-z", "Chat Z"],
-        ["buzz.diffs", "Diff viewer"],
-        ["buzz.voice-notes", "Voice Notes"],
-        ["buzz.emoji", "Emoji"],
-        ["buzz.links", "Links"],
-        ["buzz.mentions", "Mentions"],
-        ["example.chat-a", "Chat A"],
-      ] as const
-    ).map(([id, name]) => ({
-      ...channel,
-      manifest: {
-        ...channel.manifest,
-        id,
-        name,
-        description: `${name} description.`,
-      },
-    })),
+  const { cards } = registry([]);
+  ready.configuration.catalog.plugins.unshift({
+    source: "bundled",
+    enabled: true,
+    revision: "bundled",
+    previous: null,
+    reloadable: false,
+    error: null,
+    manifest: {
+      id: "example.messages",
+      name: "Messages",
+      apiVersion: 1,
+      description: "Read messages.",
+      discovery: { category: "communication" },
+    },
+  });
+  render(
+    <Settings
+      {...host}
+      cards={cards}
+      plugins={
+        {
+          subscribe: () => () => {},
+          snapshot: () => ready,
+          change: vi.fn(async () => true),
+          reload: vi.fn(async () => true),
+          dismissError: vi.fn(),
+        } as unknown as Parameters<typeof Settings>[0]["plugins"]
+      }
+    />,
   );
 
-  render(<Settings {...host} cards={cards} plugins={plugins} />);
   fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
-
   const content = screen.getByRole("region", { name: "Plugins" });
   expect(
     within(content)
       .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent),
-  ).toEqual(["Communication", "Agents", "Other"]);
+  ).toEqual(["Communication3 plugins", "Agents1 plugins", "Other1 plugins"]);
+  const communication = within(content)
+    .getByRole("heading", {
+      name: /^Communication/,
+    })
+    .closest("section");
+  expect(communication).not.toBeNull();
   expect(
-    within(content)
-      .getAllByRole("button", { name: /^View .* details$/ })
-      .map((button) => button.getAttribute("aria-label")),
+    within(communication as HTMLElement)
+      .getAllByRole("article")
+      .map(
+        (row) =>
+          within(row).getByText(/^(Channels|Voice Notes|Messages)$/)
+            .textContent,
+      ),
   ).toEqual(
-    [
-      "Channels",
-      "Mentions",
-      "Links",
-      "Emoji",
-      "Voice Notes",
-      "Diff viewer",
-      "Chat Z",
-      "Chat A",
-      "Codex",
-      "Invoices",
-    ].map((name) => `View ${name} details`),
+    essentials
+      ? ["Channels", "Voice Notes", "Messages"]
+      : ["Channels", "Messages", "Voice Notes"],
   );
-  for (const description of [
+  expect(within(content).getAllByRole("article")).toHaveLength(5);
+  expect(
+    within(content).queryAllByRole("img", { name: "Essential" }),
+  ).toHaveLength(essentials ? 3 : 0);
+  expect(within(content).queryByText("Essential")).toBeNull();
+  if (essentials) {
+    const voiceRow = within(content)
+      .getByText("Voice Notes")
+      .closest("article");
+    expect(voiceRow).not.toBeNull();
+    const row = within(voiceRow as HTMLElement);
+    expect(row.getByRole("img", { name: "Essential" }).nextElementSibling).toBe(
+      row.getByRole("switch", { name: "Enable Voice Notes" }),
+    );
+  }
+  expect(
+    within(content).queryByRole("switch", { name: "Enable Channels" }),
+  ).toBeNull();
+  expect(
+    within(communication as HTMLElement).getByRole("switch", {
+      name: "Enable Voice Notes",
+    }),
+  ).toBeEnabled();
+  expect(content).toHaveTextContent(
     "Navigate channels and hold conversations in Buzz.",
-    "Run local Codex coding agents in Buzz.",
-    "Reconcile invoices without leaving Buzz.",
-  ])
-    expect(within(content).getByText(description)).toBeVisible();
+  );
+  expect(content).toHaveTextContent("Run local Codex coding agents in Buzz.");
 
   const other = within(content)
-    .getByRole("heading", { name: "Other" })
+    .getByRole("heading", { name: /^Other/ })
     .closest("section");
   expect(other).not.toBeNull();
+  expect(within(other as HTMLElement).getByText("Invoices")).toBeVisible();
   expect(
-    within(other as HTMLElement).getByRole("button", {
-      name: "View Invoices details",
+    within(other as HTMLElement).getByText(
+      "Reconcile invoices without leaving Buzz.",
+    ),
+  ).toBeVisible();
+  expect(
+    within(other as HTMLElement).getByRole("switch", {
+      name: "Enable Invoices",
     }),
   ).toBeVisible();
   expect(
     within(content).queryByRole("heading", { name: "Finance" }),
+  ).toBeNull();
+  expect(
+    within(content).queryByRole("button", {
+      name: "Essentials only",
+    }),
   ).toBeNull();
 });
 

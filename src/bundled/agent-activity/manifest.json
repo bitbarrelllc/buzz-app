@@ -5,6 +5,6 @@
   "description": "Show live and recent agent work alongside conversations.",
   "discovery": {
     "category": "agents",
-    "tags": ["coding-agents", "agent-sessions"]
+    "tags": ["coding-agents", "agent-sessions", "Essentials"]
   }
 }

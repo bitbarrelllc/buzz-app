@@ -58,14 +58,24 @@ const pluginCategoryDefinitions = [
   { id: "people-and-communities", label: "People & communities" },
 ] as const;
 
-const communicationPluginOrder = [
-  "buzz.channels",
-  "buzz.mentions",
-  "buzz.links",
-  "buzz.emoji",
-  "buzz.voice-notes",
-  "buzz.diffs",
-];
+function isRequiredPlugin(plugin: PluginInfo) {
+  return plugin.manifest.id === "buzz.channels";
+}
+
+function isEssentialPlugin(plugin: PluginInfo) {
+  return (
+    plugin.manifest.discovery?.tags?.some(
+      (tag) => tag.trim().toLowerCase() === "essentials",
+    ) ?? false
+  );
+}
+
+function comparePlugins(a: PluginInfo, b: PluginInfo) {
+  return (
+    Number(isRequiredPlugin(b)) - Number(isRequiredPlugin(a)) ||
+    Number(isEssentialPlugin(b)) - Number(isEssentialPlugin(a))
+  );
+}
 
 function groupPlugins(plugins: readonly PluginInfo[]) {
   const known = new Map<string, PluginInfo[]>(
@@ -76,13 +86,8 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
     const group = known.get(plugin.manifest.discovery?.category ?? "");
     (group ?? other).push(plugin);
   }
-  const communicationRank = (plugin: PluginInfo) => {
-    const index = communicationPluginOrder.indexOf(plugin.manifest.id);
-    return index < 0 ? communicationPluginOrder.length : index;
-  };
-  known
-    .get("communication")
-    ?.sort((a, b) => communicationRank(a) - communicationRank(b));
+  for (const entries of known.values()) entries.sort(comparePlugins);
+  other.sort(comparePlugins);
   return [
     ...pluginCategoryDefinitions.flatMap(({ id, label }) => {
       const entries = known.get(id) ?? [];
@@ -598,11 +603,31 @@ export function Settings({
                       >
                         <InlineHeader
                           id={`plugin-category-${group.id}`}
-                          title={group.label}
+                          title={
+                            <span className={styles.pluginCategoryTitle}>
+                              <span>{group.label}</span>
+                              <span className={styles.pluginCount}>
+                                {group.plugins.length}
+                                <span className="sr-only"> plugins</span>
+                              </span>
+                            </span>
+                          }
                         />
                         <div className={styles.pluginList}>
                           {group.plugins.map((plugin) => {
                             const id = plugin.manifest.id;
+                            const essentialMarker = isEssentialPlugin(
+                              plugin,
+                            ) && (
+                              <span
+                                className="text-caption"
+                                role="img"
+                                aria-label="Essential"
+                                title="Essential"
+                              >
+                                ✨
+                              </span>
+                            );
                             const active = id === selectedPluginId;
                             return (
                               <article className={styles.plugin} key={id}>
@@ -647,28 +672,33 @@ export function Settings({
                                   )}
                                 </button>
                                 <div className={styles.pluginRowToggle}>
-                                  {id === "buzz.channels" ? (
-                                    <span className="text-caption text-secondary">
-                                      Required
-                                    </span>
-                                  ) : (
-                                    <Switch
-                                      aria-label={`Enable ${plugin.manifest.name}`}
-                                      checked={plugin.enabled}
-                                      readOnly={busy}
-                                      aria-disabled={busy}
-                                      onClick={(event) =>
-                                        event.currentTarget.focus()
-                                      }
-                                      onCheckedChange={() => {
-                                        if (busy) return;
-                                        void plugins.change(
-                                          plugin.enabled ? "disable" : "enable",
-                                          id,
-                                        );
-                                      }}
-                                    />
-                                  )}
+                                  <span className={styles.pluginControls}>
+                                    {essentialMarker}
+                                    {isRequiredPlugin(plugin) ? (
+                                      <span className="text-caption text-secondary">
+                                        Required
+                                      </span>
+                                    ) : (
+                                      <Switch
+                                        aria-label={`Enable ${plugin.manifest.name}`}
+                                        checked={plugin.enabled}
+                                        readOnly={busy}
+                                        aria-disabled={busy}
+                                        onClick={(event) =>
+                                          event.currentTarget.focus()
+                                        }
+                                        onCheckedChange={() => {
+                                          if (busy) return;
+                                          void plugins.change(
+                                            plugin.enabled
+                                              ? "disable"
+                                              : "enable",
+                                            id,
+                                          );
+                                        }}
+                                      />
+                                    )}
+                                  </span>
                                 </div>
                               </article>
                             );
