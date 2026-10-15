@@ -1,22 +1,9 @@
 # Emoji
 
-Adds emoji, GIFs and custom emoji to your messages and reactions.
+Adds emoji, GIFs, and your community's custom emoji to messages and reactions.
 
-## Where you'll find it
+## Getting started
 
-- **Emoji and GIFS** in the composer, with **Emoji** and **GIF** tabs.
-- Type : followed by at least two letters, like :smile, to get emoji suggestions.
-- **Add reaction** on a message opens the full emoji picker.
-- **Settings → Custom emoji** to upload an image and name it (**Add emoji**, **My emojis**).
-
-## If you turn it off
-
-- The emoji picker, GIF search, emoji suggestions, the full reaction picker and **Settings → Custom emoji** go away.
-- Quick reactions on messages still work.
-- Custom emoji in messages show as their :name: text.
-
-## Good to know
-
-- Custom emoji you add are shared with everyone in the community.
-- The **GIF** tab appears only if your community supports GIF search. When you open it or search, your search text, your language setting and a random ID made for this install are sent through your community's server to KLIPY.
-- GIF previews load from KLIPY, and a GIF you send is a link to KLIPY's copy of it.
+1. Choose **Emoji and GIFS** in the composer, or type : and a couple of letters, like :smile.
+2. Choose **Add reaction** on a message to react with any emoji.
+3. Add your own in **Settings → Custom emoji**.

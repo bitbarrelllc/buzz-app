@@ -1,24 +1,12 @@
 # Builderlab
 
-Connect your Builderlab account so you can create agents that Builderlab runs for you, instead of on your computer.
+Create agents that Builderlab hosts for you, so they keep working even when Buzz is closed.
 
-## Where you'll find it
+## Getting started
 
-- **Settings → Integrations → Builderlab**: **Sign in with Builderlab**, **Sign out**, and a list of your **Remote agents**.
-- On the Agents page, choose **Builderlab (hosted)** as the **Harness** when you create a **New agent**. Its **Instructions** tab lets you change what it does.
-
-## If you turn it off
-
-- The Builderlab card and the **Builderlab (hosted)** harness disappear, and you're signed out.
-- Agents you already created keep running on Builderlab, but Buzz can't edit or delete them until you turn it back on.
-
-## Good to know
-
-- Builderlab creates and keeps each hosted agent's key, so the agent keeps working while Buzz is closed.
-- Sign-in opens your browser and needs the Buzz desktop app. Your Builderlab credential stays in memory until you sign out or close Buzz.
-- Signing in links this device's Buzz identity to your Builderlab account. If the account is already linked to a different identity, Buzz never replaces that link; creating an agent shows an error instead.
-- Instructions are saved in Builderlab and aren't posted to your community.
-- Some Buzz builds aren't set up for Builderlab. The card then says sign-in isn't configured, and the harness isn't offered.
+1. Go to **Settings → Integrations → Builderlab** and choose **Sign in with Builderlab**.
+2. In **Agents**, choose **New agent** and pick **Builderlab (hosted)** as the **Harness**.
+3. Use the agent's **Instructions** tab to tell it what to do.
 
 ---
 

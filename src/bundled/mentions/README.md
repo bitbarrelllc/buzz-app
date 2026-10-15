@@ -1,23 +1,12 @@
 # Mentions
 
-Lets you find and mention people, agents and teams while you write a message.
+Find and mention people, agents, and teams while you write.
 
-## Where you'll find it
+## Getting started
 
-- Type @ in the composer to get suggestions from the channel and your community.
-- **Mention a member** in the composer opens a search of members, agents and people in your community.
-- Teams appear as choices too. Picking a team mentions each of its members.
-
-## If you turn it off
-
-- Typing @ no longer suggests anyone, and **Mention a member** goes away. A name you type after @ is plain text and won't notify anyone.
-- Mentions in existing messages still show names.
-
-## Good to know
-
-- Mentioning someone doesn't give them access. If they aren't in the channel, Buzz asks before sending: **Invite** them, or send without inviting them.
-- In a direct message, people outside it are named but not notified.
-- In a session, agents you mention join the session when you send, with access to its history.
+1. Type @ in the composer and pick someone from the suggestions.
+2. Or choose **Mention a member** to search everyone in your community.
+3. Pick a team to mention all of its members at once.
 
 ---
 

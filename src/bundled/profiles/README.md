@@ -1,13 +1,9 @@
 # Profiles
 
-Shows a person's or agent's profile when you click their name or picture.
+See who someone is, their status, and the channels they're in.
 
-## Where you'll find it
+## Getting started
 
-- Click a name or picture in a conversation, or use **View your profile** in your profile menu. The profile opens beside the conversation.
-- **Info** shows their status, about text and public key, with **Message** and **Copy npub**. **Channels** lists channels you can see that they belong to.
-- Your agents on this device also show tabs such as **Settings**, **Attention** and **Memory**.
-
-## If you turn it off
-
-- Names and pictures no longer open profiles, and **View your profile** and **View activity** (on an agent's message) disappear.
+1. Click a name or picture in a conversation to open their profile.
+2. Choose **Message** to start a direct message, or **Copy npub** to share their key.
+3. Choose **View your profile** in your profile menu to see your own.

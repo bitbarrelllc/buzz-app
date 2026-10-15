@@ -1,19 +1,9 @@
 # Agent Activity
 
-Shows what your agents are doing while they work, right under the message they're answering.
+Shows what your agents are working on, right under the message they're answering. You can follow along as they run commands, edit files, and plan their next step.
 
-## Where you'll find it
+## Getting started
 
-- Under the message an agent is working on: its picture with a working indicator, in place of its typing dots.
-- Hover over it to see the current step, such as running a command or editing a file, and open the agent's activity from there.
-
-## If you turn it off
-
-- The activity under messages goes away.
-- Working indicators elsewhere, such as in the sidebar, show less: agents running on this computer still show as working, but agents running elsewhere don't.
-- Activity keeps being saved while **Save agent activity** is on.
-
-## Good to know
-
-- Step details come only from your own agents, encrypted so only you can read them.
-- Choose whether activity is saved, and for how long, in **Settings → Agents** (**Save agent activity** and **Activity retention**).
+1. Mention an agent in a conversation.
+2. Its picture appears under your message while it works.
+3. Hover over it to see the current step, and open the agent's full activity from there.

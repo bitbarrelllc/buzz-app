@@ -1,21 +1,10 @@
 # Identity Naming
 
-When people or agents share a name, this plugin gives each one a distinct label so you can tell them apart.
+Helps you tell people and agents apart when they share a name, by adding a short label like “Sam’s Helper” or “(agent)”.
 
-## Where you'll find it
+## Getting started
 
-- It has no screen or setting of its own. It changes the names you see across Buzz, such as in channels, member lists and the mention picker.
-- People keep their plain name where possible. An agent gets its owner's name (like “Sam’s Helper”) or “(agent)” added, and any remaining look-alikes get the last few characters of their key (like “Helper · 4prr”).
-
-## If you turn it off
-
-- Buzz shows each profile's own name with no extra labels, so people or agents with the same name look the same.
-
-## Good to know
-
-- Labels only change what you see. Mentions and other actions still go to the exact person or agent you picked.
-- An agent's owner comes from the agent's own profile and isn't verified, so don't treat it as proof of who runs the agent.
-- It doesn't catch names that only look alike, such as ones using look-alike characters.
+Nothing to set up. Names across Buzz are labeled automatically.
 
 ---
 

@@ -26,7 +26,7 @@ vi.mock("../bundled/readmes", () => ({
   bundledReadmes: new Map([
     [
       "buzz.channels",
-      "# Channels\n\nHold conversations.\n\n## Good to know\n\n- Read [the spec](../mentions/README.md) or [the site](https://example.com).\n- <b>Raw</b> markup is dropped.\n",
+      "# Channels\n\nHold conversations.\n\n## Getting started\n\n- Read [the spec](../mentions/README.md) or [the site](https://example.com).\n- <b>Raw</b> markup is dropped.\n",
     ],
     ["example.helper", "# Helper\n\nNot from Buzz.\n"],
   ]),
@@ -666,7 +666,7 @@ it("renders a bundled plugin's README below its status, never an external one's"
   expect(within(bundled).queryByText("One-line description.")).toBeNull();
   expect(within(about).getByText("Hold conversations.")).toBeVisible();
   expect(
-    within(about).getByRole("heading", { name: "Good to know", level: 4 }),
+    within(about).getByRole("heading", { name: "Getting started", level: 4 }),
   ).toBeVisible();
   expect(within(about).getByRole("link", { name: "the site" })).toHaveAttribute(
     "href",

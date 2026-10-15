@@ -1,18 +1,9 @@
 # Pair mobile
 
-Signs the Buzz mobile app in to your account and connects it to your community.
+Sign in to Buzz on your phone with your desktop account.
 
-## Where you'll find it
+## Getting started
 
-- **Settings → Account → Pair mobile**. Scan the QR code with Buzz on your phone, then enter the six-digit code shown on your desktop into your phone.
-
-## If you turn it off
-
-- **Pair mobile** disappears from Settings and any pairing in progress stops. A phone you've already paired stays signed in.
-
-## Good to know
-
-- Pairing sends your account's private key to the phone, so the phone signs in as you. The transfer is end-to-end encrypted and protected by the code.
-- Don't pair while sharing or recording your screen: someone who can see both the QR code and the code could pair their own phone first.
-- **Phone paired** can show before your phone finishes saving the account. Check that you're signed in on your phone.
-- Available only in the Buzz desktop app.
+1. Go to **Settings → Account → Pair mobile**.
+2. Scan the QR code with Buzz on your phone.
+3. Enter the six-digit code shown on your desktop. Pair from a screen only you can see, since this signs the phone in as you.
