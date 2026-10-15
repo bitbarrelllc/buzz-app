@@ -14,7 +14,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { flushSync } from "react-dom";
 import { RecoveryScreen } from "./RecoveryScreen";
 import styles from "./Settings.module.css";
 import {
@@ -93,23 +92,6 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
   ];
 }
 
-// Shared tags mark related topics, not compatibility. Only plugins from the
-// same source relate, so an external plugin never sits beside Buzz's own.
-function relatedPlugins(
-  plugin: PluginInfo,
-  groups: ReturnType<typeof groupPlugins>,
-) {
-  const tags = new Set(plugin.manifest.discovery?.tags);
-  return groups
-    .flatMap((group) => group.plugins)
-    .filter(
-      (other) =>
-        other.manifest.id !== plugin.manifest.id &&
-        other.source === plugin.source &&
-        other.manifest.discovery?.tags?.some((tag) => tags.has(tag)),
-    );
-}
-
 function PluginIcon({
   plugin,
   size = 24,
@@ -156,19 +138,14 @@ function PluginDetails({
   failure,
   busy,
   plugins,
-  related,
-  onSelect,
   onClose,
 }: {
   plugin: PluginInfo;
   failure: string | null;
   busy: boolean;
   plugins: PluginManager;
-  related: readonly PluginInfo[];
-  onSelect(id: string): void;
   onClose(): void;
 }) {
-  const heading = useRef<HTMLHeadingElement>(null);
   // READMEs ship with Buzz; never attach one to an external plugin.
   const readme =
     plugin.source === "bundled" && bundledReadmes.get(plugin.manifest.id);
@@ -186,9 +163,7 @@ function PluginDetails({
       <div className={styles.pluginAsideHeader}>
         <div className={styles.pluginAsideIdentity}>
           <PluginIcon plugin={plugin} size={48} />
-          <h2 ref={heading} tabIndex={-1}>
-            {plugin.manifest.name}
-          </h2>
+          <h2>{plugin.manifest.name}</h2>
           {plugin.source === "bundled" ? (
             <span className={styles.pluginInstallBadge}>
               <CheckCircleIcon size={14} aria-hidden="true" />
@@ -249,29 +224,6 @@ function PluginDetails({
           aria-label={`${plugin.manifest.name} README`}
         >
           <PluginReadme text={readme} />
-        </section>
-      )}
-      {related.length > 0 && (
-        <section
-          className={styles.pluginAsideSection}
-          aria-labelledby="plugin-related-title"
-        >
-          <h3 id="plugin-related-title">Related plugins</h3>
-          <div className={styles.pluginRelated}>
-            {related.map((other) => (
-              <Button
-                key={other.manifest.id}
-                size="sm"
-                onClick={() => {
-                  // The pressed button leaves with the old list.
-                  flushSync(() => onSelect(other.manifest.id));
-                  heading.current?.focus();
-                }}
-              >
-                {other.manifest.name}
-              </Button>
-            ))}
-          </div>
         </section>
       )}
       <section
@@ -727,8 +679,6 @@ export function Settings({
               failure={selectedFailure}
               busy={busy}
               plugins={plugins}
-              related={relatedPlugins(selectedPlugin, pluginGroups)}
-              onSelect={setSelectedPluginId}
               onClose={closePluginDetails}
             />
           )}

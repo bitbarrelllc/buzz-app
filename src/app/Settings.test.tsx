@@ -351,6 +351,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const required = within(bundled).getByRole("button", { name: "Required" });
   expect(required).toBeDisabled();
   expect(required).toHaveAttribute("data-variant", "outline");
+  expect(required).toHaveAttribute("data-size", "sm");
   fireEvent.click(required);
   expect(plugins.change).not.toHaveBeenCalled();
   const details = within(bundled).getByRole("table", { name: "Details" });
@@ -397,6 +398,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     within(external).queryByRole("heading", { name: "Status" }),
   ).toBeNull();
   expect(disable).toHaveAttribute("data-variant", "subtle");
+  expect(disable).toHaveAttribute("data-size", "sm");
   expect(within(external).queryByRole("switch")).toBeNull();
   vi.mocked(plugins.change).mockClear();
   fireEvent.click(disable);
@@ -421,6 +423,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     screen.getByRole("complementary", { name: "External helper details" }),
   ).getByRole("button", { name: "Enable" });
   expect(enable).toHaveAttribute("data-variant", "prominent");
+  expect(enable).toHaveAttribute("data-size", "sm");
   fireEvent.click(enable);
   expect(plugins.change).toHaveBeenLastCalledWith("enable", "example.helper");
   fireEvent.keyDown(enable, { key: "Escape" });
@@ -799,7 +802,7 @@ it("renders a bundled plugin's README below its status, never an external one's"
   expect(within(external).getByText("One-line description.")).toBeVisible();
 });
 
-it("relates plugins that share a tag and moves focus to the one chosen", () => {
+it("keeps related plugins out of the pane even when tags overlap", () => {
   const { cards } = registry([]);
   const plugin = (
     id: string,
@@ -877,14 +880,12 @@ it("relates plugins that share a tag and moves focus to the one chosen", () => {
   fireEvent.click(
     screen.getByRole("button", { name: "View Channels details" }),
   );
-  // An external plugin's tags never place it beside Buzz's own.
-  expect(related("Channels")).toEqual(["Mentions"]);
+  expect(related("Channels")).toEqual([]);
 
-  fireEvent.click(screen.getByRole("button", { name: "Mentions" }));
-  expect(
-    screen.getByRole("heading", { name: "Mentions", level: 2 }),
-  ).toHaveFocus();
-  expect(related("Mentions")).toEqual(["Channels", "Profiles"]);
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Mentions details" }),
+  );
+  expect(related("Mentions")).toEqual([]);
   expect(
     screen.getByRole("button", { name: "View Mentions details" }),
   ).toHaveAttribute("aria-expanded", "true");
