@@ -22,6 +22,12 @@ import type { RelayData } from "../features/relay/service";
 import type { Contribution } from "../plugins/contributions";
 
 afterEach(cleanup);
+vi.mock("../bundled/icons", () => ({
+  bundledIcons: new Map([
+    ["buzz.channels", "/channels-icon.png"],
+    ["example.helper", "/bundled-helper-icon.png"],
+  ]),
+}));
 vi.mock("../bundled/readmes", () => ({
   bundledReadmes: new Map([
     [
@@ -271,6 +277,12 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const bundledCard = screen.getByRole("button", {
     name: "View Channels details",
   });
+  const artwork = bundledCard.querySelector("img");
+  expect(artwork).toHaveAttribute("src", "/channels-icon.png");
+  if (!artwork) throw new Error("Expected bundled plugin artwork");
+  fireEvent.error(artwork);
+  expect(bundledCard.querySelector("img")).toBeNull();
+  expect(bundledCard.querySelectorAll("svg")).toHaveLength(2);
   const verifiedLabel = within(bundledCard).getByText("Buzz");
   expect(verifiedLabel).toBeVisible();
   expect(verifiedLabel.parentElement?.querySelector("svg")).not.toBeNull();
@@ -305,6 +317,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     name: "View External helper details",
   });
   const externalAuthor = within(externalCard).getByText("publisher-public-key");
+  expect(externalCard.querySelector("img")).toBeNull();
   expect(externalAuthor.parentElement?.querySelector("svg")).toBeNull();
   fireEvent.click(externalCard);
   const external = screen.getByRole("complementary", {

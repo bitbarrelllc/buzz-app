@@ -16,13 +16,18 @@ import {
 } from "react";
 import { RecoveryScreen } from "./RecoveryScreen";
 import styles from "./Settings.module.css";
-import { CheckCircleIcon, XIcon } from "../shared/design-system/icons/index";
+import {
+  CheckCircleIcon,
+  SquaresFourIcon,
+  XIcon,
+} from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
 import type { PluginInfo } from "../plugins/types";
 import type { Communities } from "../features/communities/service";
 import { PluginImport } from "./PluginImport";
 import { PluginReadme } from "./PluginReadme";
 import { bundledReadmes } from "../bundled/readmes";
+import { bundledIcons } from "../bundled/icons";
 import type { Identity } from "../features/identity/service";
 import { ProfileSettings } from "./ProfileSettings";
 
@@ -69,6 +74,23 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
     }),
     ...(other.length ? [{ id: "other", label: "Other", plugins: other }] : []),
   ];
+}
+
+function PluginIcon({ plugin }: { plugin: PluginInfo }) {
+  const url =
+    plugin.source === "bundled"
+      ? bundledIcons.get(plugin.manifest.id)
+      : undefined;
+  const [failedUrl, setFailedUrl] = useState<string>();
+  return (
+    <span className={styles.pluginIcon} aria-hidden="true">
+      {url && url !== failedUrl ? (
+        <img src={url} alt="" onError={() => setFailedUrl(url)} />
+      ) : (
+        <SquaresFourIcon size={24} />
+      )}
+    </span>
+  );
 }
 
 function PluginProvenance({
@@ -120,6 +142,7 @@ function PluginDetails({
       }}
     >
       <div className={styles.pluginAsideHeader}>
+        <PluginIcon plugin={plugin} />
         <div className={styles.pluginAsideIdentity}>
           <h2>{plugin.manifest.name}</h2>
           {plugin.source === "bundled" ? (
@@ -573,6 +596,7 @@ export function Settings({
                                   }}
                                 >
                                   <ChoiceRow
+                                    leading={<PluginIcon plugin={plugin} />}
                                     label={plugin.manifest.name}
                                     description={plugin.manifest.description}
                                   />
