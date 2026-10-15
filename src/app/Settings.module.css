@@ -9,7 +9,7 @@
 }
 .root > [data-buzz-surface] {
   height: 100%;
-  overflow-y: auto;
+  overflow: hidden;
 }
 .layout {
   position: relative;
@@ -138,6 +138,7 @@
 .navigationPane .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
 }
 .navigationPane .detail {
   overflow-y: auto;
