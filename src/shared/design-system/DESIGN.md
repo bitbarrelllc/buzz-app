@@ -313,7 +313,7 @@ role for their active completion highlight.
 
 The interface uses shared color, type, spacing and shape roles. Primary actions
 are neutral. Text uses Inter for reading and labels, and JetBrains Mono for code
-and identifiers. Regular (400) supports reading; Medium (500) marks labels and
+and identifiers. Regular (400) supports reading and form labels; Medium (500) marks actions and
 structure. The Typography page documents each role’s complete setting.
 
 Panel padding is 24px, control inset 16px, group gap 32px and page-section gap
@@ -954,7 +954,7 @@ changes only size, not modal ownership or dismissal behavior.
 Use `text-label` (16px, 500 weight at the default scale) for the shared Dialog
 title. Group the title and optional description with `--space-2` (8px), beside
 the close button so its hit area does not enlarge the text gap. The body owns
-vertical padding matching the dialog's horizontal padding: `--space-6` (24px),
+vertical padding matching the dialog's horizontal padding: `--space-5` (20px),
 or `--space-4` (16px) at the compact breakpoint. Do not add an outer flex gap
 on top of that body padding. Create/Edit channel forms opt into
 `headerGap="compact"` for a 12px heading-to-body gap at every breakpoint;
@@ -1174,8 +1174,8 @@ Values scale with the host interface-size preference.
   each utility’s semantic role and complete setting alongside the size ladder.
 - A role carries size, leading, tracking and weight together. Display, title,
   and heading roles use unitless 1.1 leading so wrapped headings have breathing room.
-- Regular (400) is for reading; Medium (500) is for labels and structure.
-  Existing `font-semibold` consumers resolve to Medium.
+- Regular (400) is for reading and form labels; Medium (500) is for actions and
+  structure. Existing `font-semibold` consumers resolve to Medium.
 - Mono uses `detail/body-xsmall` at 12/16 with 0.03em tracking.
   `--type-xsmall-size` points to the existing 12px step, keeping the semantic
   independent from caption even though their sizes currently match. `text-mono-lg` and
@@ -1558,3 +1558,16 @@ on a contrasting modal surface, retaining the shared field focus treatment.
 Proposed: `Dialog chromeSpacing="padded"` keeps a 12px bottom gutter on the
 fixed header and a footer top gutter matching the modal bottom padding. The
 body omits its vertical gutters; agent creation uses this for scrolling steps.
+
+### Form-label and picker additions
+
+Field labels, choice labels, PreferenceRow titles and Switch labels use the complete
+`text-body-sm` role (14px, Regular). `Field optional` appends “Optional” in the
+same role with `text-metadata` color and normal word spacing, including in the
+accessible label. Required validation
+remains the control's responsibility. Use `FieldButton dropdown={false}` for a
+system picker, not a dropdown; its single-line value ellipsizes.
+
+`SettingsGroup layout="cards"` gives each child a separate bordered surface and
+a shared small gap, rather than drawing dividers across one group. Feature owners
+may bound a card list's height and scrolling without repainting its cards.

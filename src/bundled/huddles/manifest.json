@@ -1,1 +1,12 @@
-{ "id": "buzz.huddles", "name": "Huddles", "apiVersion": 1 }
+{
+  "id": "buzz.huddles",
+  "name": "Huddles",
+  "apiVersion": 1,
+  "description": "Start audio conversations with people in your channels.",
+  "discovery": {
+    "category": "communication",
+    "tags": [
+      "Audio"
+    ]
+  }
+}

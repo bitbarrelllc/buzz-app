@@ -5759,6 +5759,7 @@ it("rejects a known archived recipient at send entry without clearing the draft"
         ensure: async () => {},
         refresh: async () => {},
         writable: false,
+        supported: true,
         consent: vi.fn(),
         request: vi.fn(),
       },
