@@ -156,12 +156,17 @@
   gap: var(--space-section-gap);
 }
 
+.pluginCategories [data-layout="rows"] {
+  overflow: hidden;
+}
+
 .plugin {
   display: grid;
   align-items: center;
   min-width: 0;
+  margin-inline: calc(-1 * var(--settings-group-inset));
   border: 1px solid transparent;
-  border-radius: var(--radius-control);
+  border-radius: 0;
   transition:
     background-color var(--duration-fast, 160ms) var(--ease-out, ease-out),
     border-color var(--duration-fast, 160ms) var(--ease-out, ease-out);
@@ -172,7 +177,7 @@
   z-index: 1;
   grid-area: 1 / 1;
   justify-self: end;
-  padding: var(--space-3) 0;
+  padding: var(--space-3) var(--settings-group-inset);
   pointer-events: none;
 }
 
@@ -203,10 +208,10 @@
   min-width: 0;
   align-items: center;
   gap: var(--space-5);
-  padding: var(--space-3) 0;
-  padding-right: calc(var(--space-16) + var(--space-4));
+  padding: var(--space-3) var(--settings-group-inset);
+  padding-right: calc(var(--space-16) + var(--settings-group-inset));
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: 0;
   color: var(--text-standard);
   background: transparent;
   text-align: left;
@@ -226,7 +231,7 @@
 
 .pluginRow:focus-visible {
   outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .pluginProvenance {
