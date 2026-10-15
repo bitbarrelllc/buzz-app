@@ -1,5 +1,5 @@
 import { checkDurationConsumer } from "./duration-layout.mjs";
-import { pluginAction, setPluginEnabled } from "./plugin-settings.mjs";
+import { pluginAction } from "./plugin-settings.mjs";
 import { openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
