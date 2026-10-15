@@ -48,17 +48,9 @@ impl Record {
         config: &Config,
         subject: &str,
         enrollment: &Enrollment,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.matches_identity(config, subject, &enrollment.nostr_pubkey)?;
-        let recovered = self.envelope.is_none()
-            && self.owner.is_empty()
-            && self.recipient_id.is_empty()
-            && self.recipient_key.is_empty();
-        if !recovered
-            && (self.owner != enrollment.owner_id
-                || self.recipient_id != enrollment.recipient_key_id
-                || self.recipient_key != enrollment.recipient_public_key)
-        {
+        if self.owner != enrollment.owner_id {
             return Err(FAILED.into());
         }
         if let Some(envelope) = self.envelope.as_ref() {
@@ -75,9 +67,15 @@ impl Record {
                 return Err(FAILED.into());
             }
         }
-        Ok(())
+        Ok(self.recipient_id == enrollment.recipient_key_id
+            && self.recipient_key == enrollment.recipient_public_key)
     }
-    fn matches_identity(&self, config: &Config, subject: &str, pubkey: &str) -> Result<()> {
+    pub(super) fn matches_identity(
+        &self,
+        config: &Config,
+        subject: &str,
+        pubkey: &str,
+    ) -> Result<()> {
         if self.version != 1
             || self.service != config.service_url
             || self.namespace != config.namespace
