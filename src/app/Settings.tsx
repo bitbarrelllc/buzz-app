@@ -5,7 +5,6 @@ import { NavigationItem } from "../shared/design-system/ui/NavigationItem";
 import { NavigationSection } from "../shared/design-system/ui/NavigationSection";
 import { Button } from "../shared/design-system/ui/Button";
 import { IconButton } from "../shared/design-system/ui/IconButton";
-import { Switch } from "../shared/design-system/ui/Switch";
 import { ChoiceRow } from "../shared/design-system/ui/ChoiceRow";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
 import {
@@ -693,21 +692,23 @@ export function Settings({
                                       />
                                     )}
                                   </button>
-                                  <div className={styles.pluginRowToggle}>
+                                  <div className={styles.pluginRowAction}>
                                     {isRequiredPlugin(plugin) ? (
                                       <span className="text-caption text-secondary">
                                         Required
                                       </span>
                                     ) : (
-                                      <Switch
-                                        aria-label={`Enable ${plugin.manifest.name}`}
-                                        checked={plugin.enabled}
-                                        readOnly={busy}
-                                        aria-disabled={busy}
-                                        onClick={(event) =>
-                                          event.currentTarget.focus()
+                                      <Button
+                                        variant={
+                                          plugin.enabled
+                                            ? "subtle"
+                                            : "prominent"
                                         }
-                                        onCheckedChange={() => {
+                                        size="sm"
+                                        aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.manifest.name}`}
+                                        disabled={busy}
+                                        focusableWhenDisabled
+                                        onClick={() => {
                                           if (busy) return;
                                           void plugins.change(
                                             plugin.enabled
@@ -716,7 +717,9 @@ export function Settings({
                                             id,
                                           );
                                         }}
-                                      />
+                                      >
+                                        {plugin.enabled ? "Disable" : "Enable"}
+                                      </Button>
                                     )}
                                   </div>
                                 </article>

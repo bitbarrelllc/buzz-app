@@ -280,11 +280,11 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
     within(content).queryAllByRole("region", { name: "Essentials" }),
   ).toHaveLength(0);
   expect(
-    within(content).queryByRole("switch", { name: "Enable Channels" }),
+    within(content).queryByRole("button", { name: "Disable Channels" }),
   ).toBeNull();
   expect(
-    within(content).getByRole("switch", {
-      name: "Enable Voice Notes",
+    within(content).getByRole("button", {
+      name: "Disable Voice Notes",
     }),
   ).toBeEnabled();
   expect(content).toHaveTextContent(
@@ -309,7 +309,7 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
     ),
   ).toBeVisible();
   expect(
-    within(other as HTMLElement).getByRole("switch", {
+    within(other as HTMLElement).getByRole("button", {
       name: "Enable Invoices",
     }),
   ).toBeVisible();
@@ -395,7 +395,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(
     within(bundledCard).getByText("Channels").querySelector("svg"),
   ).not.toBeNull();
-  expect(screen.queryByRole("switch", { name: "Enable Channels" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Disable Channels" })).toBeNull();
   expect(screen.queryByText("buzz.channels")).toBeNull();
 
   fireEvent.click(bundledCard);
@@ -456,12 +456,13 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const externalAuthor = within(externalCard).getByText("publisher-public-key");
   expect(externalCard.querySelector("img")).toBeNull();
   expect(externalAuthor.parentElement?.querySelector("svg")).toBeNull();
-  const rowToggle = screen.getByRole("switch", {
-    name: "Enable External helper",
+  const rowAction = screen.getByRole("button", {
+    name: "Disable External helper",
   });
-  expect(rowToggle).toBeChecked();
-  expect(externalCard).not.toContainElement(rowToggle);
-  fireEvent.click(rowToggle);
+  expect(rowAction).toHaveAttribute("data-variant", "subtle");
+  expect(rowAction).toHaveAttribute("data-size", "sm");
+  expect(externalCard).not.toContainElement(rowAction);
+  fireEvent.click(rowAction);
   expect(plugins.change).toHaveBeenCalledWith("disable", "example.helper");
   expect(
     screen.queryByRole("complementary", { name: "External helper details" }),
@@ -504,6 +505,12 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   ).getByRole("button", { name: "Enable" });
   expect(enable).toHaveAttribute("data-variant", "prominent");
   expect(enable).toHaveAttribute("data-size", "sm");
+  const rowEnable = screen.getByRole("button", {
+    name: "Enable External helper",
+  });
+  expect(rowEnable).toHaveAttribute("data-variant", "prominent");
+  fireEvent.click(rowEnable);
+  expect(plugins.change).toHaveBeenLastCalledWith("enable", "example.helper");
   fireEvent.click(enable);
   expect(plugins.change).toHaveBeenLastCalledWith("enable", "example.helper");
   fireEvent.keyDown(enable, { key: "Escape" });
@@ -515,6 +522,11 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(pending).toHaveAttribute("aria-disabled", "true");
   vi.mocked(plugins.change).mockClear();
   fireEvent.click(pending);
+  const pendingRow = screen.getByRole("button", {
+    name: "Enable External helper",
+  });
+  expect(pendingRow).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(pendingRow);
   expect(plugins.change).not.toHaveBeenCalled();
 });
 
