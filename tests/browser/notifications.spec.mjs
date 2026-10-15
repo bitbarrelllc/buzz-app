@@ -1,3 +1,4 @@
+import { pluginAction } from "./plugin-settings.mjs";
 import { test, expect } from "./fixture.mjs";
 import { end, open, settle } from "./timeline.mjs";
 import { finalizeEvent, generateSecretKey } from "nostr-tools";
@@ -477,9 +478,7 @@ test("an installed producer shares policy and OS click navigation, including aft
       section: "plugins",
     }),
   );
-  await page
-    .getByRole("switch", { name: "Enable Notification fixture", exact: true })
-    .click();
+  await pluginAction(page, "Notification fixture").click();
   expect(
     await page.evaluate((input) => window.fixtureNotify(input), {
       ...input,

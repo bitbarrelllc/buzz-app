@@ -198,9 +198,7 @@ export function PluginImport({
               const current = lifetime.current;
               void load(async () => {
                 if (!entry?.isDirectory)
-                  throw new Error(
-                    "Drop one folder, or choose Add from folder.",
-                  );
+                  throw new Error("Drop one folder, or choose Browse.");
                 const upload = await readPluginFolder(entry);
                 if (!current.active) return null;
                 return imports.files(upload.source, upload.files);
@@ -210,15 +208,17 @@ export function PluginImport({
             <FolderOpenIcon size={32} aria-hidden="true" />
             <p className="m-0 text-body-sm">Drop a plugin folder here</p>
             <Button
+              size="sm"
+              aria-label="Browse plugin folder"
               disabled={blocked}
               onClick={() => void load(imports.folder)}
             >
-              Add from folder
+              Browse
             </Button>
           </section>
           <form
             aria-label="Add from Git"
-            className="min-w-0"
+            className={styles.git}
             onSubmit={(event) => {
               event.preventDefault();
               if (repository.trim())
@@ -255,8 +255,13 @@ export function PluginImport({
                 with your account.
               </p>
               <div className="justify-self-start">
-                <Button type="submit" disabled={blocked || !repository.trim()}>
-                  Find plugins
+                <Button
+                  type="submit"
+                  size="sm"
+                  aria-label="Find plugins"
+                  disabled={blocked || !repository.trim()}
+                >
+                  Find
                 </Button>
               </div>
             </SettingsGroup>

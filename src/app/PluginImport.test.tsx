@@ -39,7 +39,7 @@ it("opens both sources and the safety hint only inside Add, and restores focus o
   ).toBeVisible();
   expect(within(dialog).getByText(/plugins aren’t sandboxed/)).toBeVisible();
   expect(
-    within(dialog).getByRole("button", { name: "Add from folder" }),
+    within(dialog).getByRole("button", { name: "Browse plugin folder" }),
   ).toBeVisible();
   fireEvent.keyDown(dialog, { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -68,7 +68,7 @@ it("blocks dismissal and duplicate acquisition while loading, then discards the 
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   const dialog = screen.getByRole("dialog");
   const browse = within(dialog).getByRole("button", {
-    name: "Add from folder",
+    name: "Browse plugin folder",
   });
   fireEvent.click(browse);
   try {
@@ -210,7 +210,7 @@ it("shows exact declared access and changes before an enabled update", async () 
   } as unknown as PluginManager;
   render(<PluginImport plugins={manager} catalog={catalog} busy={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
-  fireEvent.click(screen.getByRole("button", { name: "Add from folder" }));
+  fireEvent.click(screen.getByRole("button", { name: "Browse plugin folder" }));
   await waitFor(() =>
     expect(
       screen.getByText(
@@ -331,7 +331,9 @@ it.each([
     } as unknown as PluginManager;
     render(<PluginImport plugins={manager} catalog={catalog} busy={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add from folder" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Browse plugin folder" }),
+    );
     const access = within(
       await screen.findByRole("region", { name: "Declared host access" }),
     );

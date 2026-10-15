@@ -99,6 +99,7 @@
 }
 
 .pluginCategoryTitle {
+  max-inline-size: 100%;
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
@@ -288,6 +289,23 @@
   max-width: 30%;
   flex: none;
   @apply text-caption font-medium;
+}
+
+@container (max-width: 18rem) {
+  .detail {
+    padding-inline: var(--space-1);
+  }
+}
+
+@container (max-width: 12rem) {
+  .pluginCategories [data-layout="rows"],
+  .pluginCategories [class~="buzz-content-header"] {
+    --settings-group-inset: var(--space-1);
+  }
+
+  .pluginRowAction {
+    padding-inline: 0;
+  }
 }
 
 @container (max-width: 32rem) {

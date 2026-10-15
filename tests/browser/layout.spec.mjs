@@ -1,3 +1,4 @@
+import { pluginAction } from "./plugin-settings.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import {
   openPage,
@@ -464,11 +465,8 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
   ).toHaveValue("Fixture Reader");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await selectSettingsSection(page, "Plugins");
-  // Channels has no off switch; use another page to exercise UI activation.
-  const projects = page.getByRole("switch", {
-    name: "Enable Projects",
-    exact: true,
-  });
+  // Channels is required; use another page to exercise UI activation.
+  const projects = pluginAction(page, "Projects");
   const search = page.getByRole("dialog", { name: "Search Buzz", exact: true });
   const expectProjectsChoice = async (count) => {
     const choices = await pageChoices(page);
@@ -483,10 +481,10 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
     await expect(search).toHaveCount(0);
   };
   await projects.click();
-  await expect(projects).toHaveAttribute("aria-checked", "false");
+  await expect(projects).toHaveAccessibleName(/^Enable /);
   await expectProjectsChoice(0);
   await projects.click();
-  await expect(projects).toHaveAttribute("aria-checked", "true");
+  await expect(projects).toHaveAccessibleName(/^Disable /);
   await expectProjectsChoice(1);
 });
 
@@ -799,10 +797,7 @@ companionTest(
     await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
     await selectSettingsSection(page, "Plugins");
     await expect(companion).toHaveCount(1);
-    const enabled = page.getByRole("switch", {
-      name: "Enable Companion fixture",
-      exact: true,
-    });
+    const enabled = pluginAction(page, "Companion fixture");
     await enabled.click();
     await expect(launch).toHaveCount(0);
     await expect(companion).toHaveCount(0);
@@ -912,7 +907,7 @@ companionTest(
     // Settings details own scrolling independently of the sidebar.
     const settingsPage = page
       .getByRole("region", { name: "Settings", exact: true })
-      .locator(":scope > div");
+      .locator(".buzz-settings-page");
     await expect(enabled).not.toBeInViewport();
     const viewport = await box(settingsPage);
     await page.mouse.move(
@@ -947,7 +942,7 @@ companionTest(
     }
     await expect(enabled).toBeInViewport({ ratio: 1 });
     await enabled.click();
-    await expect(enabled).toHaveAttribute("aria-checked", "false");
+    await expect(enabled).toHaveAccessibleName(/^Enable /);
     await expect(enabled).toBeFocused();
     await expect(launch).toHaveCount(0);
   },
@@ -966,9 +961,7 @@ todosOverlapTest(
     await button(page, "Your profile").click();
     await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
     await selectSettingsSection(page, "Plugins");
-    await page
-      .getByRole("switch", { name: "Enable Todos", exact: true })
-      .click();
+    await pluginAction(page, "Todos").click();
     await openPage(page, "Multiplayer");
     const todos = page.getByRole("region", {
       name: "Todos panel",
@@ -1271,12 +1264,9 @@ test("Projects directory fits the workspace and page navigation survives plugin 
   await button(page, "Your profile").click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
   await selectSettingsSection(page, "Plugins");
-  const projects = page.getByRole("switch", {
-    name: "Enable Projects",
-    exact: true,
-  });
+  const projects = pluginAction(page, "Projects");
   await projects.click();
-  await expect(projects).toHaveAttribute("aria-checked", "false");
+  await expect(projects).toHaveAccessibleName(/^Enable /);
   await expectPageOrder([
     "Solo",
     "Multiplayer",
@@ -1289,7 +1279,7 @@ test("Projects directory fits the workspace and page navigation survives plugin 
   ]);
   await closeSearch();
   await projects.click();
-  await expect(projects).toHaveAttribute("aria-checked", "true");
+  await expect(projects).toHaveAccessibleName(/^Disable /);
   // Re-enabled Projects registered last; navigation surfaces must still sort it.
   await expectPageOrder(titles);
   await selectPage(page, "Projects");

@@ -26,4 +26,13 @@
   .columns {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .folder {
+    padding: var(--space-2);
+  }
+}
+
+.git {
+  min-width: 0;
+  container-type: inline-size;
 }
