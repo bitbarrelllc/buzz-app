@@ -2,6 +2,7 @@ import { HuddleAvatarMotion } from "./HuddleAvatarMotion";
 import { useEffect, useSyncExternalStore, type CSSProperties } from "react";
 import type { RelayData } from "../../features/relay/service";
 import { formatPublicKey } from "../../shared/identity/public-key";
+import { avatarMedia } from "../../shared/avatar-source";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import styles from "./Huddles.module.css";
 
@@ -57,11 +58,7 @@ export function HuddleAvatarStack({
             <HuddleAvatarMotion participant={key} enabled={transition}>
               <Avatar
                 size="fill"
-                src={
-                  profile?.picture
-                    ? session.media(profile.picture, "small")
-                    : undefined
-                }
+                src={avatarMedia(profile?.picture, session.media)}
                 fallback={name(key)}
                 alt=""
               />

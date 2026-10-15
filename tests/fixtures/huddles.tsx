@@ -72,7 +72,7 @@ const profiles = new Map<string, Profile>([
     peer,
     {
       name: "Alex",
-      picture: "/tests/fixtures/design-system/assets/avatar.png",
+      picture: "https://fixture.example/media/avatar.png",
     },
   ],
   ...guestKeys.map((key, index): [string, Profile] => [

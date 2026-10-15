@@ -1,4 +1,5 @@
-import { test, expect, chromium } from "@playwright/test";
+import { chromium } from "@playwright/test";
+import { test, expect } from "./playwright-test.mjs";
 import { createServer } from "./vite-server.mjs";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
