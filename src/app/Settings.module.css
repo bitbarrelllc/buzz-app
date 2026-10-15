@@ -140,14 +140,27 @@
 }
 
 .plugin {
-  display: flex;
+  display: grid;
   align-items: center;
   min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  transition:
+    background-color var(--duration-fast, 160ms) var(--ease-out, ease-out),
+    border-color var(--duration-fast, 160ms) var(--ease-out, ease-out);
 }
 
 .pluginRowToggle {
-  flex: none;
+  position: relative;
+  z-index: 1;
+  grid-area: 1 / 1;
+  justify-self: end;
   padding: var(--space-3);
+  pointer-events: none;
+}
+
+.pluginRowToggle > [role="switch"] {
+  pointer-events: auto;
 }
 
 .pluginName {
@@ -164,13 +177,14 @@
 
 .pluginRow {
   display: flex;
-  flex: 1;
+  grid-area: 1 / 1;
   width: 100%;
   min-width: 0;
   align-items: center;
   gap: var(--space-5);
   padding: var(--space-3);
-  border: 1px solid transparent;
+  padding-right: calc(3 * var(--space-6));
+  border: 0;
   border-radius: var(--radius-control);
   color: var(--text-standard);
   background: transparent;
@@ -178,16 +192,13 @@
   @apply text-label-sm;
   cursor: pointer;
   user-select: none;
-  transition:
-    background-color var(--duration-fast, 160ms) var(--ease-out, ease-out),
-    border-color var(--duration-fast, 160ms) var(--ease-out, ease-out);
 }
 
-.pluginRow:hover {
+.plugin:hover {
   background: var(--surface-hover);
 }
 
-.pluginRow[aria-expanded="true"] {
+.plugin:has(.pluginRow[aria-expanded="true"]) {
   background: var(--surface-control);
   border-color: var(--border-focus);
 }
@@ -407,7 +418,7 @@
     animation: none;
   }
 
-  .pluginRow {
+  .plugin {
     transition: none;
   }
 }
