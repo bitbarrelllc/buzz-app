@@ -1,6 +1,7 @@
 @reference "../shared/styles/globals.css";
 
 .disclosure {
+  position: relative;
   min-width: 0;
 }
 
@@ -17,9 +18,15 @@
 }
 
 .more {
-  display: grid;
+  display: flex;
+  justify-content: center;
   margin-top: var(--space-2);
-  border-top: 1px solid var(--border-standard);
+}
+
+.more[data-collapsed] {
+  position: absolute;
+  inset: auto 0 0;
+  margin-top: 0;
 }
 
 .readme {

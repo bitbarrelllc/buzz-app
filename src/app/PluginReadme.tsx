@@ -87,9 +87,9 @@ export function PluginReadme({ text }: { text: string }) {
         </div>
       </motion.div>
       {overflow && (
-        <div className={styles.more}>
+        <div className={styles.more} data-collapsed={!expanded || undefined}>
           <Button
-            variant="ghost"
+            variant="subtle"
             size="sm"
             aria-expanded={!!expanded}
             aria-controls={id}
