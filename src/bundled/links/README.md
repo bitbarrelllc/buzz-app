@@ -1,14 +1,6 @@
 # Links
 
-Makes links in messages easier to scan. Each link gets an icon for where it goes, and long web addresses are shortened.
-
-- **Buzz:** channels (with a lock for private ones), messages, and threads
-- **Google:** Drive, Docs, Sheets, and Slides
-- **Code:** GitHub and GitLab
-- **Files and design:** Dropbox, OneDrive, Notion, and Figma
-- **Calls and video:** Zoom, Microsoft Teams, Loom, and YouTube
-- **Chat:** Slack
-- **Everything else:** a globe for any other web link
+Makes links in messages easier to scan. Links to **Buzz**, **GitHub**, **Google Drive**, **Figma**, **Notion**, **Slack**, **Zoom**, and more each get an icon for where they go, and long web addresses are shortened.
 
 ## Getting started
 
