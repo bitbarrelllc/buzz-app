@@ -28,6 +28,8 @@ struct FixtureState {
     mapping_status: u16,
     mapping_body: Option<serde_json::Value>,
     owner: String,
+    recipient_id: String,
+    recipient_key: Option<String>,
     subject: String,
     receipt_stored: bool,
     receipt_matches: bool,
@@ -61,6 +63,8 @@ impl Service {
             mapping_status: 200,
             mapping_body: None,
             owner: "subject:synthetic-account".into(),
+            recipient_id: "backup-key-2026-09".into(),
+            recipient_key: None,
             subject: "synthetic-account".into(),
             receipt_stored: true,
             receipt_matches: true,
@@ -118,7 +122,7 @@ impl Service {
     }
     fn session(&self) -> Session {
         Session {
-            source: Some(Source::Hosted),
+            source: Source::Hosted,
             credential: Zeroizing::new("synthetic-cli-credential".into()),
         }
     }
@@ -191,9 +195,9 @@ async fn serve(
             "/v1/buzz/nsec-backups/enrollment" => {
                 let fixture: serde_json::Value = serde_json::from_str(include_str!("fixtures/hpke_nsec_backup_v1.json")).unwrap();
                 (200, serde_json::json!({"version":1,"suite":{"kem_id":16,"kdf_id":1,"aead_id":2},
-                    "recipient_key_id":"backup-key-2026-09","service_namespace":"backup/staging","owner_id":state.owner,
+                    "recipient_key_id":state.recipient_id,"service_namespace":"backup/staging","owner_id":state.owner,
                     "backup_id":uuid::Uuid::new_v4().to_string(),"nostr_pubkey":state.mapping,
-                    "recipient_public_key":URL_SAFE_NO_PAD.encode(hex::decode(fixture["recipient_public_key_sec1_hex"].as_str().unwrap()).unwrap())}))
+                    "recipient_public_key":state.recipient_key.clone().unwrap_or_else(||URL_SAFE_NO_PAD.encode(hex::decode(fixture["recipient_public_key_sec1_hex"].as_str().unwrap()).unwrap()))}))
             },
             "/v1/buzz/nsec-backups" => {
                 let envelope: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -229,7 +233,7 @@ async fn overlapping_binding_triggers_back_up_after_a_stale_missing_mapping_resp
     let identity = IdentityHost::fixture();
     service.state.lock().unwrap().mapping = None;
     service.pause_current.store(true, Ordering::SeqCst);
-    host.state.lock().unwrap().session = Some(service.session());
+    host.state.lock().unwrap().sessions.push(service.session());
     host.trigger(identity.clone());
     service.upload_started.notified().await;
     service.state.lock().unwrap().mapping = Some(pubkey([1; 32]));
@@ -269,7 +273,7 @@ async fn retirement_cancels_a_queued_binding_pass_without_recreating_erased_reco
         service.enable(&host).await;
         let identity = IdentityHost::fixture();
         service.pause_current.store(true, Ordering::SeqCst);
-        host.state.lock().unwrap().session = Some(service.session());
+        host.state.lock().unwrap().sessions.push(service.session());
         host.trigger(identity.clone());
         service.upload_started.notified().await;
         host.trigger(identity.clone());
@@ -307,7 +311,7 @@ async fn retirement_cancels_a_queued_binding_pass_without_recreating_erased_reco
 
 #[tokio::test]
 async fn restart_retry_reuses_persisted_ciphertext_and_completion_prevents_more_slots() {
-    // A server acceptance with a lost acknowledgment must not cause enrollment/reseal on retry.
+    // A lost acknowledgment retains ciphertext while the authenticated recipient is unchanged.
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
@@ -342,6 +346,7 @@ async fn restart_retry_reuses_persisted_ciphertext_and_completion_prevents_more_
     let state = service.state.lock().unwrap();
     assert_eq!(state.uploads, vec![first.clone(), first]);
     assert_eq!(state.rows.len(), 1);
+    assert_eq!(state.requests["/v1/buzz/nsec-backups/enrollment"], 2);
 }
 
 #[tokio::test]
@@ -646,20 +651,26 @@ async fn known_missing_mapping_accepts_omitted_identity_but_malformed_success_is
 
 #[tokio::test]
 async fn canceled_recovery_drops_candidates_and_a_late_response_cannot_publish_them() {
-    let service = Service::new().await;
-    let directory = tempfile::tempdir().unwrap();
-    let host = service.host(directory.path());
-    service.pause_upload.store(true, Ordering::SeqCst);
-    let recovering = recover_with(&service, &host);
-    tokio::pin!(recovering);
-    tokio::select! {
-        _ = service.upload_started.notified() => {},
-        _ = &mut recovering => panic!("recovery completed before the fixture released it"),
+    for action in ["cancel", "reload", "close"] {
+        let service = Service::new().await;
+        let directory = tempfile::tempdir().unwrap();
+        let host = service.host(directory.path());
+        service.pause_upload.store(true, Ordering::SeqCst);
+        let recovering = recover_with(&service, &host);
+        tokio::pin!(recovering);
+        tokio::select! {
+            _ = service.upload_started.notified() => {},
+            _ = &mut recovering => panic!("recovery completed before the fixture released it"),
+        }
+        match action {
+            "cancel" => host.cancel("synthetic-attempt"),
+            "reload" => host.document_load(),
+            _ => host.close(),
+        }
+        service.release_upload.add_permits(1);
+        assert_eq!(recovering.await.err().as_deref(), Some(CANCELED));
+        assert!(host.state.lock().unwrap().restore.is_none());
     }
-    host.cancel("synthetic-attempt");
-    service.release_upload.add_permits(1);
-    assert_eq!(recovering.await.err().as_deref(), Some(CANCELED));
-    assert!(host.state.lock().unwrap().restore.is_none());
 }
 
 #[tokio::test]
@@ -739,7 +750,7 @@ async fn saving_consent_after_login_wakes_the_existing_uploader_and_disable_fenc
     let service = Service::new().await;
     let directory = tempfile::tempdir().unwrap();
     let host = service.host(directory.path());
-    host.state.lock().unwrap().session = Some(service.session());
+    host.state.lock().unwrap().sessions.push(service.session());
     host.trigger(IdentityHost::fixture());
     finish_background(&host).await;
     assert!(service.state.lock().unwrap().requests.is_empty());
@@ -800,7 +811,7 @@ fn source_generations_and_teardown_fence_retired_work_without_another_sources_lo
     host.session(Source::Hosted, 4, None, IdentityHost::fixture())
         .unwrap();
     assert!(host.valid(epoch).is_err());
-    assert!(host.state.lock().unwrap().session.is_none());
+    assert!(host.state.lock().unwrap().sessions.is_empty());
     host.session(
         Source::Hosted,
         5,
@@ -809,17 +820,9 @@ fn source_generations_and_teardown_fence_retired_work_without_another_sources_lo
     )
     .unwrap();
     let epoch = host.state.lock().unwrap().epoch;
-    // An allowed caller's logout cannot retire a separately owned native recovery session.
-    host.state.lock().unwrap().session = Some(Session {
-        source: None,
-        credential: Zeroizing::new("synthetic-native-session".into()),
-    });
-    host.session(Source::Hosted, 6, None, IdentityHost::fixture())
-        .unwrap();
-    assert!(host.valid(epoch).is_ok());
     host.document_load();
     assert!(host.valid(epoch).is_err());
-    assert!(host.state.lock().unwrap().session.is_none());
+    assert!(host.state.lock().unwrap().sessions.is_empty());
     host.close();
     host.session(
         Source::Hosted,
@@ -828,7 +831,7 @@ fn source_generations_and_teardown_fence_retired_work_without_another_sources_lo
         IdentityHost::fixture(),
     )
     .unwrap();
-    assert!(host.state.lock().unwrap().session.is_none());
+    assert!(host.state.lock().unwrap().sessions.is_empty());
 }
 
 async fn finish_background(host: &NsecBackupHost) {
@@ -863,6 +866,7 @@ async fn explicit_current_and_historical_install_commit_selected_key_and_durable
             host.wait("synthetic-attempt").await.err().as_deref(),
             Some(CANCELED)
         );
+        assert!(host.state.lock().unwrap().sessions.is_empty());
         finish_background(&host).await;
         let config = host.config.as_ref().as_ref().unwrap();
         let record = persistence::LockedRecord::open(
@@ -1019,4 +1023,169 @@ async fn cancel_during_install_mapping_wait_fences_a_late_response_and_invalidat
             .as_deref(),
         Some(CANCELED)
     );
+}
+
+#[tokio::test]
+async fn pending_backup_reseals_when_the_authenticated_recipient_rotates() {
+    for change_key in [false, true] {
+        let service = Service::new().await;
+        let directory = tempfile::tempdir().unwrap();
+        let host = service.host(directory.path());
+        service.enable(&host).await;
+        service.state.lock().unwrap().upload_status = 503;
+        assert!(host
+            .backup(&IdentityHost::fixture(), &service.session(), 0)
+            .await
+            .is_err());
+        {
+            let mut state = service.state.lock().unwrap();
+            if change_key {
+                let fixture: serde_json::Value =
+                    serde_json::from_str(include_str!("fixtures/hpke_nsec_backup_v1.json"))
+                        .unwrap();
+                state.recipient_key = Some(fixture["envelope"]["enc"].as_str().unwrap().into());
+            } else {
+                state.recipient_id = "backup-key-rotated".into();
+            }
+            state.upload_status = 200;
+        }
+        let restarted = service.host(directory.path());
+        restarted
+            .backup(&IdentityHost::fixture(), &service.session(), 0)
+            .await
+            .unwrap();
+        restarted
+            .backup(&IdentityHost::fixture(), &service.session(), 0)
+            .await
+            .unwrap();
+        let state = service.state.lock().unwrap();
+        assert_eq!(state.uploads.len(), 2);
+        let old: serde_json::Value = serde_json::from_slice(&state.uploads[0]).unwrap();
+        let new: serde_json::Value = serde_json::from_slice(&state.uploads[1]).unwrap();
+        assert_ne!(old["backup_id"], new["backup_id"]);
+        assert_ne!(old["ciphertext"], new["ciphertext"]);
+        assert_eq!(new["recipient_key_id"], state.recipient_id);
+        assert_eq!(new["owner_id"], old["owner_id"]);
+        assert_eq!(new["nostr_pubkey"], old["nostr_pubkey"]);
+        assert_eq!(state.requests["/v1/buzz/nsec-backups/enrollment"], 2);
+    }
+}
+
+#[test]
+fn signing_out_the_latest_source_retains_the_other_sources_session() {
+    let host = NsecBackupHost {
+        state: Default::default(),
+        root: None,
+        config: Arc::new(Some(Config {
+            service_url: "https://app.builderlab.xyz/api/goose".into(),
+            namespace: "backup/staging".into(),
+        })),
+    };
+    assert!(host.source_allowed(Source::Builderlab));
+    for source in [Source::Hosted, Source::Builderlab] {
+        host.session(
+            source,
+            1,
+            Some("synthetic-session".into()),
+            IdentityHost::fixture(),
+        )
+        .unwrap();
+    }
+    host.session(Source::Builderlab, 2, None, IdentityHost::fixture())
+        .unwrap();
+    assert!(host
+        .state
+        .lock()
+        .unwrap()
+        .sessions
+        .last()
+        .is_some_and(|s| s.source == Source::Hosted));
+    host.session(
+        Source::Builderlab,
+        3,
+        Some("synthetic-builderlab-session".into()),
+        IdentityHost::fixture(),
+    )
+    .unwrap();
+    host.retry(Source::Hosted, IdentityHost::fixture());
+    let epoch = host.state.lock().unwrap().epoch;
+    host.session(Source::Builderlab, 4, None, IdentityHost::fixture())
+        .unwrap();
+    assert!(host.valid(epoch).is_ok());
+    assert!(host.state.lock().unwrap().sessions.last().is_some_and(
+        |s| s.source == Source::Hosted && s.credential.as_str() == "synthetic-session"
+    ));
+}
+
+#[tokio::test]
+async fn login_session_changes_leave_recovery_and_selected_installation_alive() {
+    for during_install in [false, true] {
+        let service = Service::new().await;
+        let directory = tempfile::tempdir().unwrap();
+        let host = service.host(directory.path());
+        // Admit normal source events on the configured origin; HTTP stays on the loopback fixture.
+        let login = NsecBackupHost {
+            state: host.state.clone(),
+            root: None,
+            config: Arc::new(Some(Config {
+                service_url: "https://app.builderlab.xyz/api/goose".into(),
+                namespace: "backup/staging".into(),
+            })),
+        };
+        let identity = crate::identity::tests::missing_fixture();
+        if during_install {
+            let recovered = recover_with(&service, &host).await.unwrap();
+            service.pause_current.store(true, Ordering::SeqCst);
+            let installing = host.install(
+                identity.clone(),
+                "synthetic-attempt",
+                &recovered.candidates[0].handle,
+            );
+            tokio::pin!(installing);
+            tokio::select! {
+                _ = service.upload_started.notified() => {},
+                _ = &mut installing => panic!("install completed before the fixture released it"),
+            }
+            let changed = login.session(
+                Source::Hosted,
+                1,
+                Some("synthetic-plugin-session".into()),
+                identity.clone(),
+            );
+            service.release_upload.add_permits(1);
+            changed.unwrap();
+            assert_eq!(installing.await.unwrap(), pubkey([1; 32]));
+            assert_eq!(identity.viewer().await.unwrap(), pubkey([1; 32]));
+            let state = host.state.lock().unwrap();
+            assert_eq!(state.sessions.len(), 1);
+            assert_eq!(
+                state.sessions[0].credential.as_str(),
+                "synthetic-plugin-session"
+            );
+        } else {
+            service.pause_upload.store(true, Ordering::SeqCst);
+            let recovering = recover_with(&service, &host);
+            tokio::pin!(recovering);
+            tokio::select! {
+                _ = service.upload_started.notified() => {},
+                _ = &mut recovering => panic!("recovery completed before the fixture released it"),
+            }
+            let changes: Vec<_> = [
+                (1, Some("synthetic-plugin-session".into())),
+                (2, None),
+                (3, Some("synthetic-refreshed-session".into())),
+            ]
+            .into_iter()
+            .map(|(generation, credential)| {
+                login.session(Source::Hosted, generation, credential, identity.clone())
+            })
+            .collect();
+            service.release_upload.add_permits(1);
+            for changed in changes {
+                changed.unwrap();
+            }
+            assert_eq!(recovering.await.unwrap().candidates.len(), 1);
+            host.cancel("synthetic-attempt");
+        }
+    }
 }
