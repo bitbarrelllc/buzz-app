@@ -8,10 +8,7 @@ import { readPluginFolder } from "./plugin-folder-drop";
 import styles from "./PluginImport.module.css";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  FolderOpenIcon,
-  GitBranchIcon,
-} from "../shared/design-system/icons/index";
+import { FolderOpenIcon } from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
 import type { Catalog, ImportPreview } from "../plugins/types";
 import type { PluginManifest } from "../plugins/api";
@@ -217,6 +214,7 @@ export function PluginImport({
             </Button>
           </section>
           <form
+            aria-label="Add from Git"
             className="min-w-0"
             onSubmit={(event) => {
               event.preventDefault();
@@ -230,9 +228,6 @@ export function PluginImport({
             }}
           >
             <SettingsGroup layout="form">
-              <h3 className="m-0 text-label">
-                <GitBranchIcon size={16} aria-hidden="true" /> Add from Git
-              </h3>
               <Field label="Git or GitHub repository">
                 <Input
                   required
