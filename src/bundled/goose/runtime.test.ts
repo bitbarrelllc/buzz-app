@@ -3,7 +3,11 @@ import type { BuzzClient } from "../../buzz-mcp/client";
 import { callTool } from "../../buzz-mcp/tools";
 import { createAgentMemories } from "../../features/agents/memory";
 import { TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
-import type { Agent, Delivery } from "../../features/agents/service";
+import type {
+  Agent,
+  Delivery,
+  SessionPlace,
+} from "../../features/agents/service";
 import type { Host } from "../../features/host/service";
 import type { EventData, RelayEvent } from "../../features/relay/events";
 import type { RelayData } from "../../features/relay/service";
@@ -276,6 +280,42 @@ describe("GooseRuntime", () => {
     );
     expect(core).toHaveBeenCalledWith(self);
     expect(memoryOpen).not.toHaveBeenCalled();
+  });
+
+  it("compacts a thread's session or closes it, but not while it works", async () => {
+    const { agent, deliver, goose, runtime } = setup({ hold: true });
+    const one = message("1", "@Gander look");
+    await deliver(one);
+    await flush(100);
+    const process = goose();
+    const place: SessionPlace = { channelId: channel, root: one.id };
+    const session = (action: "compact" | "new", where = place) =>
+      runtime.session(agent as unknown as Agent, where, action);
+    await expect(session("compact")).rejects.toThrow(
+      "Gander is working here; try when it finishes",
+    );
+    process?.turns[0]?.finish();
+    await flush(100);
+    const compacted = session("compact");
+    await flush(100);
+    expect(process?.turns[1]?.text).toBe("/compact");
+    process?.update("session-1", {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Compaction complete" },
+    });
+    await flush(100);
+    process?.turns[1]?.finish();
+    await expect(compacted).resolves.toBeUndefined();
+    await session("new");
+    await flush(100);
+    expect(process?.closed).toEqual(["session-1"]);
+    // A channel's top level has no session to keep.
+    await expect(
+      session("new", { channelId: channel }),
+    ).resolves.toBeUndefined();
+    await expect(session("compact", { channelId: channel })).rejects.toThrow(
+      "There is no session here to compact yet",
+    );
   });
 
   it("posts goose's own text in the thread, or at a Me chat's top level", async () => {

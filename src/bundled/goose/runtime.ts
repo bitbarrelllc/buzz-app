@@ -21,6 +21,8 @@ import {
   type AgentHandle,
   type Agents,
   type Delivery,
+  type SessionAction,
+  type SessionPlace,
   type StandaloneTurn,
   type TurnResult,
 } from "../../features/agents/service";
@@ -303,6 +305,39 @@ export class GooseRuntime {
       .finally(() => this.notify());
   }
 
+  /** Compacts the agent's session for the conversation at `place`, or
+   * closes it so the next message there opens a new one. */
+  async session(
+    agent: Agent,
+    { channelId, root }: SessionPlace,
+    action: SessionAction,
+  ) {
+    const entry = this.agents.get(agent.pubkey);
+    if (!entry) throw new Error(`${agent.name} is not running here`);
+    const topLevel = await meChat(
+      () => this.relay(agent.pubkey),
+      agent.owner,
+      channelId,
+      AbortSignal.timeout(NAMES_TIMEOUT_MS * 2),
+    );
+    const key =
+      topLevel ||
+      this.channel(agent.pubkey, channelId).dm ||
+      entry.config.scope === "channel"
+        ? channelId
+        : root && `${channelId}/${root}`;
+    if (!key) {
+      // Each message at a channel's top level opens a new session already.
+      if (action === "new") return;
+      throw new Error("There is no session here to compact yet");
+    }
+    if (entry.sessions.busy(key))
+      throw new Error(`${agent.name} is working here; try when it finishes`);
+    if (action === "new") return entry.sessions.forget(key);
+    const result = await entry.sessions.compact(key);
+    if (!result.ok) throw new Error(result.error);
+  }
+
   /** Runs a standalone turn, such as a watch's or a timer's, in a one-off
    * session that joins no conversation. */
   async runOnce({
@@ -378,6 +413,16 @@ export class GooseRuntime {
       .catch((failure) => console.warn("goose could not post", failure));
   }
 
+  /** The agent's relay session, and `channelId` in it. */
+  private channel(self: string, channelId: string) {
+    const snapshot = this.relay(self)?.snapshot();
+    const session = snapshot?.status === "ready" ? snapshot.session : undefined;
+    const summary =
+      session?.channels.list().channels.find((item) => item.id === channelId) ??
+      session?.channels.get?.(channelId);
+    return { session, summary, dm: summary?.channelType === "dm" };
+  }
+
   /** Where the event's turn goes, and what its prompt needs. */
   private async turn(
     entry: Entry,
@@ -387,12 +432,7 @@ export class GooseRuntime {
     topLevel: boolean,
     fresh = false,
   ) {
-    const snapshot = this.relay(self)?.snapshot();
-    const session = snapshot?.status === "ready" ? snapshot.session : undefined;
-    const summary =
-      session?.channels.list().channels.find((item) => item.id === channelId) ??
-      session?.channels.get?.(channelId);
-    const dm = summary?.channelType === "dm";
+    const { session, summary, dm } = this.channel(self, channelId);
     const thread = threadReference(event);
     const rootId = thread?.rootId ?? event.id;
     // A Me chat is one conversation, as a DM is.

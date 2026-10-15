@@ -271,6 +271,38 @@ export class AgentSessions {
     }
   }
 
+  /** Whether the conversation's session is opening or working. */
+  busy(key: string) {
+    return this.opening.has(key) || !!this.live.get(key)?.session.busy;
+  }
+  /** Compacts the conversation's open session. A message meanwhile waits for
+   * it rather than steering into it. */
+  async compact(key: string): Promise<Settled> {
+    const live = this.live.get(key);
+    if (this.disposed || !live?.session.open)
+      return { ok: false, error: "There is no session here to compact yet" };
+    const settled = this.answer(key, live, "/compact", {}, undefined);
+    const held = settled.then(() => ({}));
+    this.opening.set(key, held);
+    void held.then(() => {
+      if (this.opening.get(key) === held) this.opening.delete(key);
+    });
+    const result = await settled;
+    // goose ends the turn either way, and says which in its text.
+    if (!result.ok) return result;
+    return result.text === "Compaction complete"
+      ? { ok: true }
+      : {
+          ok: false,
+          error: result.text || "goose could not compact the session",
+        };
+  }
+  /** Closes the conversation's session, so its next message opens a new one. */
+  forget(key: string) {
+    const live = this.live.get(key);
+    if (live) this.drop(key, live);
+  }
+
   /** Runs one turn in a new session, then closes it. `label` names it in the
    * snapshot. It gives up, and stops the turn, once `signal` aborts.
    * `prompt` is asked for the turn's text once the session is open, so a turn

@@ -314,6 +314,73 @@ describe("AgentSessions", () => {
     expect(goose?.killed).toBe(false);
   });
 
+  it("compacts a conversation's session, and a message meanwhile waits for it", async () => {
+    const { fake, sessions } = setup({}, true);
+    const first = sessions.deliver("a", "one", 1);
+    await flush(30);
+    const goose = fake.geese[0];
+    goose?.turns[0]?.finish();
+    await first;
+    const compacted = sessions.compact("a");
+    await flush(30);
+    expect(goose?.turns[1]?.text).toBe("/compact");
+    expect(sessions.busy("a")).toBe(true);
+    const next = sessions.deliver("a", "two", 2);
+    await flush(30);
+    expect(goose?.turns[1]?.steered).toEqual([]);
+    goose?.update("session-1", {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Compaction complete" },
+    });
+    await flush(30);
+    goose?.turns[1]?.finish();
+    await expect(compacted).resolves.toEqual({ ok: true });
+    await flush(30);
+    expect(goose?.turns[2]?.text).toBe("two");
+    goose?.turns[2]?.finish();
+    await expect(next).resolves.toEqual({ ok: true });
+  });
+
+  it("reports a compaction goose could not do, and has none without a session", async () => {
+    const { fake, sessions } = setup();
+    await expect(sessions.compact("a")).resolves.toEqual({
+      ok: false,
+      error: "There is no session here to compact yet",
+    });
+    await sessions.deliver("a", "one", 1);
+    const goose = fake.geese[0];
+    if (goose) goose.hold = true;
+    const compacted = sessions.compact("a");
+    await flush(30);
+    // goose ends a failed compaction like any turn, saying why in its text.
+    goose?.update("session-1", {
+      sessionUpdate: "agent_message_chunk",
+      content: {
+        type: "text",
+        text: "Request failed: Resource not found (404)",
+      },
+    });
+    await flush(30);
+    goose?.turns[1]?.finish();
+    await expect(compacted).resolves.toEqual({
+      ok: false,
+      error: "Request failed: Resource not found (404)",
+    });
+  });
+
+  it("closes a forgotten conversation's session, so its next message opens another", async () => {
+    const { fake, sessions } = setup();
+    await sessions.deliver("a", "one", 1);
+    sessions.forget("a");
+    await flush(30);
+    expect(fake.geese[0]?.closed).toEqual(["session-1"]);
+    await sessions.deliver("a", "two", 2);
+    expect(fake.geese[0]?.turns.map((turn) => turn.sessionId)).toEqual([
+      "session-1",
+      "session-2",
+    ]);
+  });
+
   it("closes a quiet conversation's session", async () => {
     vi.useFakeTimers();
     const { fake, sessions } = setup();
