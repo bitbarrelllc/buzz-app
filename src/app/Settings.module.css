@@ -219,6 +219,10 @@
   user-select: none;
 }
 
+.pluginRow[data-enabled="false"] {
+  color: var(--text-secondary);
+}
+
 .plugin:hover {
   background: var(--surface-hover);
 }

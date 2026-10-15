@@ -646,6 +646,7 @@ export function Settings({
                                     ref={active ? pluginTrigger : undefined}
                                     type="button"
                                     className={styles.pluginRow}
+                                    data-enabled={plugin.enabled}
                                     aria-label={`View ${plugin.manifest.name} details`}
                                     aria-expanded={active}
                                     aria-controls={

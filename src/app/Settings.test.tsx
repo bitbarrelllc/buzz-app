@@ -291,6 +291,12 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
     "Navigate channels and hold conversations in Buzz.",
   );
   expect(content).toHaveTextContent("Run local Codex coding agents in Buzz.");
+  expect(
+    within(content).getByRole("button", { name: "View Voice Notes details" }),
+  ).toHaveAttribute("data-enabled", "true");
+  expect(
+    within(content).getByRole("button", { name: "View Invoices details" }),
+  ).toHaveAttribute("data-enabled", "false");
 
   const other = within(content)
     .getByRole("heading", { name: /^Other/ })
