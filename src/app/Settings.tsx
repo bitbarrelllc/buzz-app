@@ -674,6 +674,7 @@ export function Settings({
                                             aria-hidden={false}
                                             role="img"
                                             aria-label="Essential"
+                                            data-essential
                                           />
                                         )}
                                       </span>

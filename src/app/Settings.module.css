@@ -197,6 +197,10 @@
   color: var(--text-secondary);
 }
 
+.pluginName svg[data-essential] {
+  color: var(--text-accent);
+}
+
 .pluginRow {
   display: flex;
   grid-area: 1 / 1;
