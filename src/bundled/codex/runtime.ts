@@ -7,6 +7,8 @@ import type {
   Agents,
   Delivery,
   Models,
+  SessionAction,
+  SessionPlace,
   StandaloneTurn,
   TurnResult,
 } from "../../features/agents/service";
@@ -608,6 +610,103 @@ export class CodexRuntime {
     this.start(request, text, key, lane, entry);
   }
 
+  /** Compacts or forgets the agent's thread for the conversation at `place`.
+   * Compaction runs in the conversation's lane, so a mention meanwhile waits
+   * for it; both are refused while anything there runs or waits to. */
+  async session(
+    agent: Agent,
+    { channelId, root }: SessionPlace,
+    action: SessionAction,
+  ) {
+    const reads = this.reads(agent.pubkey);
+    if (!reads) throw new Error("Connect to the agent's community first");
+    const settings = this.resolveConfig(agent.config);
+    const entry = this.entry(agent.pubkey, reads.scope);
+    const [channel, topLevel] = await Promise.all([
+      reads.channel(channelId),
+      reads.meChat(agent.owner, channelId, AbortSignal.timeout(10_000)),
+    ]);
+    // A stop during the reads deleted the entry; it stays stopped.
+    if (this.entries.get(agent.pubkey) !== entry)
+      throw new Error("Codex was stopped");
+    const whole = channel?.dm || topLevel || settings.scope === "channel";
+    // Each message at a channel's top level starts a new thread already.
+    if (!whole && !root && action === "new") return;
+    const key = JSON.stringify([channelId, whole ? "channel" : root]);
+    const saved = whole || root ? entry.saved[key] : undefined;
+    // A lane lasts while anything in the conversation runs or waits to.
+    if (entry.lanes.has(key))
+      throw new Error(`${agent.name} is working here; try when it finishes`);
+    if (action === "new") {
+      if (!saved) return;
+      delete entry.saved[key];
+      this.storage.setItem(entry.storageKey, JSON.stringify(entry.saved));
+      return;
+    }
+    if (!saved) throw new Error("There is no session here to compact yet");
+    const current: Lane = { tail: entry.after, queued: 0 };
+    entry.lanes.set(key, current);
+    const job = current.tail
+      .catch(() => undefined)
+      .then(() => this.compact(agent, settings, saved, key, entry));
+    current.tail = job;
+    void job
+      .catch(() => undefined)
+      .finally(() => {
+        if (current.tail === job && !current.active) entry.lanes.delete(key);
+      });
+    return job;
+  }
+  private async compact(
+    agent: Agent,
+    settings: Config,
+    saved: Saved,
+    key: string,
+    entry: Entry,
+  ) {
+    const { signal } = entry.abort;
+    signal.throwIfAborted();
+    const server = this.open();
+    const rpc = await server.opening;
+    const workspace = await this.workspace(settings.workspace);
+    // A turn in another workspace starts a new thread rather than resuming it.
+    if (saved.workspace !== workspace)
+      throw new Error("There is no session here to compact yet");
+    const { params } = await this.prepare(rpc, agent, settings, workspace, {});
+    signal.throwIfAborted();
+    const { threadId } = saved;
+    const turn: { threadId: string; turnId?: string; finished: boolean } = {
+      threadId,
+      finished: false,
+    };
+    const followed = follow(rpc, signal, turn);
+    try {
+      await rpc.request("thread/resume", {
+        ...params,
+        threadId,
+        excludeTurns: true,
+      });
+      this.status(agent.pubkey, key, "Compacting");
+      // Compaction runs as a turn of its own on the thread.
+      await rpc.request("thread/compact/start", { threadId });
+      await followed.completed;
+      this.status(agent.pubkey, key, "Idle");
+    } catch (error) {
+      // A stopped agent's compaction stops too, so nothing resumes it mid-way.
+      if (signal.aborted && turn.turnId && !turn.finished)
+        await rpc
+          .request("turn/interrupt", { threadId, turnId: turn.turnId })
+          .catch(() => rpc.close());
+      this.status(agent.pubkey, key, "Needs attention", message(error));
+      throw error;
+    } finally {
+      followed.stop();
+      await rpc
+        .request("thread/unsubscribe", { threadId })
+        .catch(() => rpc.close());
+    }
+  }
+
   /** Runs a standalone turn, such as a watch's or a timer's: a new
    * ephemeral thread that joins no conversation and is not saved, stopped
    * when the turn's signal aborts. Asks for its prompt once the thread can
@@ -925,7 +1024,7 @@ export class CodexRuntime {
    * model and effort its turn runs on: `pick`'s when available. */
   private async prepare(
     rpc: AppServer,
-    agent: AgentHandle,
+    agent: Pick<AgentHandle, "name" | "pubkey">,
     settings: Config,
     workspace: string,
     pick: Readonly<{ model?: string; effort?: string }>,

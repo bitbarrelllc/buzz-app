@@ -95,6 +95,14 @@ records. Codex uses an inherited thinking choice only when the effective model
 supports it, otherwise that model's default applies. Transient process/session
 state may appear in the Activity tab, but is not durable history.
 
+A type with a `session` hook (Claude and Codex) also offers its owner two
+session actions in the composer's model popover, behind each agent's **…**
+menu: **Compact session** summarizes the conversation's session in place, and
+**New session** forgets it, so the next message there starts a new session
+primed as any new one is. They act only in the copy of the app that runs the
+agent, and are refused while that conversation is working. At a channel's top
+level, where each message starts its own thread, there is no session to act on.
+
 Codex's provider model menu offers **Codex recommended** (the catalog's
 recommendation) and specific models. Blank model preferences follow the
 recommendation; blank thinking preferences follow the selected model's default

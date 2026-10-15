@@ -418,6 +418,7 @@ async function setup({
   timeoutMs = 60_000,
   runOnce = undefined as AgentType<Config>["runOnce"],
   jev = undefined as ClassifierNative | undefined,
+  session = undefined as AgentType<Config>["session"],
 } = {}) {
   const ctx = new Context();
   ctx.provide("pluginStatus", {
@@ -502,6 +503,7 @@ async function setup({
     }),
     run,
     ...(runOnce ? { runOnce } : {}),
+    ...(session ? { session } : {}),
   };
   plugin.agents.register(type);
   await vi.waitFor(() => expect(service.snapshot().status).toBe("ready"));
@@ -1554,6 +1556,32 @@ it("drops its events while another copy of the app holds the agent, and runs onc
   native.claim.mockRejectedValue(new Error("unreadable"));
   emit({ events: [event("3", { tags: [["p", bot]] })] });
   await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+});
+
+it("acts on an agent's session only in the copy of the app that runs it", async () => {
+  const session = vi.fn<NonNullable<AgentType<Config>["session"]>>(
+    async () => {},
+  );
+  const { service, native, emit } = await setup({ session });
+  await service.create({ type: "example/echo", name: "Echo" });
+  await vi.waitFor(() => expect(native.claim).toHaveBeenCalledWith(bot));
+  const place = { channelId: channel, root: "root" };
+  await service.session(bot, place, "compact");
+  expect(session).toHaveBeenCalledWith(
+    expect.objectContaining({ pubkey: bot }),
+    place,
+    "compact",
+  );
+  // Another copy takes the agent: this one finds out at its next claim.
+  native.claim.mockClear();
+  native.claim.mockResolvedValue(false);
+  emit({ events: [event("1", { tags: [["p", bot]] })] });
+  await vi.waitFor(() => expect(native.claim).toHaveBeenCalledWith(bot));
+  await settle();
+  await expect(service.session(bot, place, "new")).rejects.toThrow(
+    "Echo isn't running in this copy of Buzz",
+  );
+  expect(session).toHaveBeenCalledTimes(1);
 });
 
 it("lets another copy of the app run an agent it cannot run", async () => {

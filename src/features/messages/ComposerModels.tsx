@@ -1,6 +1,7 @@
 import { Popover } from "@base-ui/react/popover";
 import { Slider } from "@base-ui/react/slider";
 import {
+  useContext,
   useLayoutEffect,
   useRef,
   useState,
@@ -8,12 +9,13 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { useMentionModels } from "../agents/react";
+import { AgentsContext, useMentionModels } from "../agents/react";
 import type { MentionModelChoice } from "../agents/react";
-import type { Effort } from "../agents/service";
+import type { Effort, SessionAction, SessionPlace } from "../agents/service";
 import type { MentionPicks, RunPick } from "../relay/messages";
 import {
   CaretDownIcon,
+  DotsThreeIcon,
   GaugeIcon,
 } from "../../shared/design-system/icons/index";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
@@ -22,21 +24,27 @@ import {
   MenuRoot,
   MenuTrigger,
   MenuPopup,
+  MenuItem,
   MenuRadioGroup,
   MenuRadioItem,
 } from "../../shared/design-system/ui/Menu";
+import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import styles from "./ComposerModels.module.css";
 
 /** Model and effort for the next run of each mentioned agent of the viewer's
- * that offers a choice. Unpicked agents run with their own. */
+ * that offers a choice. Unpicked agents run with their own. An agent whose
+ * type supports it also has its session for `place` here, to compact or
+ * start over. */
 export function ComposerModels({
   pubkeys,
+  place,
   value,
   disabled,
   onChange,
   onResolved,
 }: {
   pubkeys: readonly string[];
+  place: SessionPlace;
   value: MentionPicks;
   disabled: boolean;
   onChange(value: MentionPicks): void;
@@ -124,6 +132,7 @@ export function ComposerModels({
               <AgentChoice
                 key={choice.pubkey}
                 choice={choice}
+                place={place}
                 named={choices.length > 1}
                 value={value[choice.pubkey] ?? {}}
                 disabled={disabled}
@@ -146,6 +155,7 @@ const runModel = (choice: MentionModelChoice, picked: string | undefined) =>
 
 function AgentChoice({
   choice,
+  place,
   named,
   value,
   disabled,
@@ -153,6 +163,7 @@ function AgentChoice({
   thumb,
 }: {
   choice: MentionModelChoice;
+  place: SessionPlace;
   named: boolean;
   value: RunPick;
   disabled: boolean;
@@ -207,6 +218,9 @@ function AgentChoice({
   ) : (
     <span className={styles.about}>{runs.label}</span>
   );
+  const session = choice.session && (
+    <SessionMenu choice={choice} place={place} disabled={disabled} />
+  );
   return (
     <div className={styles.agent}>
       {named && <span className={styles.about}>{choice.name}</span>}
@@ -214,6 +228,7 @@ function AgentChoice({
         <EffortSlider
           name={choice.name}
           model={model}
+          session={session}
           efforts={runs.efforts}
           resting={runs.effort}
           value={value.effort}
@@ -228,7 +243,10 @@ function AgentChoice({
         />
       ) : (
         // Without a slider the model sits on its own tab, not on the thread.
-        <div className={styles.solo}>{model}</div>
+        <div className={styles.solo}>
+          {model}
+          {session}
+        </div>
       )}
     </div>
   );
@@ -237,6 +255,7 @@ function AgentChoice({
 function EffortSlider({
   name,
   model,
+  session,
   efforts,
   resting,
   value,
@@ -246,6 +265,7 @@ function EffortSlider({
 }: {
   name: string;
   model: ReactNode;
+  session: ReactNode;
   efforts: readonly Effort[];
   /** The effort the run uses without a pick, when known. */
   resting: string | undefined;
@@ -284,6 +304,7 @@ function EffortSlider({
       <div className={styles.tab}>
         {model}
         <span aria-hidden="true">{level}</span>
+        {session}
       </div>
       <Slider.Control className={styles.control}>
         <Slider.Track className={styles.track}>
@@ -304,5 +325,64 @@ function EffortSlider({
         </Slider.Track>
       </Slider.Control>
     </Slider.Root>
+  );
+}
+
+/** Expert actions on the agent's session for this conversation. */
+function SessionMenu({
+  choice,
+  place,
+  disabled,
+}: {
+  choice: MentionModelChoice;
+  place: SessionPlace;
+  disabled: boolean;
+}) {
+  const agents = useContext(AgentsContext);
+  const notify = useToastNotification();
+  const [pending, setPending] = useState(false);
+  const act = (action: SessionAction) => {
+    if (!agents || pending) return;
+    setPending(true);
+    // Compacting takes a while: say it started, and again when it ends.
+    if (action === "compact")
+      notify(`Compacting ${choice.name}'s session…`, "info");
+    void agents
+      .session(choice.pubkey, place, action)
+      .then(
+        () =>
+          notify(
+            action === "compact"
+              ? `Compacted ${choice.name}'s session`
+              : `${choice.name} starts a new session with your next message`,
+            "success",
+          ),
+        (error: unknown) =>
+          notify(
+            error instanceof Error ? error.message : String(error),
+            "error",
+          ),
+      )
+      .finally(() => setPending(false));
+  };
+  return (
+    <MenuRoot>
+      <MenuTrigger
+        disabled={disabled || pending}
+        render={
+          <IconButton
+            size="xs"
+            type="button"
+            aria-label={`${choice.name}'s session`}
+            title={`${choice.name}'s session`}
+            icon={<DotsThreeIcon aria-hidden="true" />}
+          />
+        }
+      />
+      <MenuPopup size="compact" side="top" align="end">
+        <MenuItem onClick={() => act("compact")}>Compact session</MenuItem>
+        <MenuItem onClick={() => act("new")}>New session</MenuItem>
+      </MenuPopup>
+    </MenuRoot>
   );
 }

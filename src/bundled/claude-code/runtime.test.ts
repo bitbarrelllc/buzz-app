@@ -287,6 +287,52 @@ it("hands a mention to its thread's session", async () => {
   expect(published).toEqual([]);
 });
 
+it("compacts a thread's session or starts it over, but not while it works", async () => {
+  const root = message("1", "Build is red");
+  const mention = message("2", "@Claude can you look?", {
+    created_at: 110,
+    tags: [
+      ["h", channel],
+      ["e", root.id, "", "reply"],
+      ["p", self],
+    ],
+  });
+  const { deliver, claudes, runtime, data } = setup([root, mention], {
+    hold: true,
+  });
+  const agent = {
+    pubkey: self,
+    owner: alice,
+    name: "Claude",
+    config: DEFAULT_CONFIG,
+  } as unknown as Agent;
+  const place = { channelId: channel, root: root.id };
+  const saved = () =>
+    JSON.parse(data.get("buzz.claude-code.sessions.v1") ?? "{}")[self] ?? {};
+  await deliver({ type: "mention", event: mention });
+  await flush(10);
+  const claude = claudes().find((process) => process.prompts.length);
+  await expect(runtime.session(agent, place, "new")).rejects.toThrow(
+    "Claude is working here",
+  );
+  claude?.finish();
+  await flush(10);
+  const compacted = runtime.session(agent, place, "compact");
+  await flush(10);
+  expect(claude?.prompts.at(-1)).toBe("/compact");
+  claude?.finish();
+  await expect(compacted).resolves.toBeUndefined();
+  expect(saved()).toHaveProperty(`${channel}/${root.id}`);
+  await runtime.session(agent, place, "new");
+  expect(claude?.killed).toBe(true);
+  expect(saved()).toEqual({});
+  // A channel's top level has no session to compact: each message there
+  // starts its own.
+  await expect(
+    runtime.session(agent, { channelId: channel }, "compact"),
+  ).rejects.toThrow("There is no session here to compact yet");
+});
+
 const EFFORTS = [
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium" },

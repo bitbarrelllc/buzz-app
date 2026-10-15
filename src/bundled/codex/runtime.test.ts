@@ -3074,3 +3074,83 @@ it("a converted stream uses threaded replies despite an agent owner's retained M
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledOnce());
   expect(tagsOf(f)[0]).toContainEqual(["e", root, "", "reply"]);
 });
+describe("session actions", () => {
+  const config = {
+    workspace: "/tmp/codex-test",
+    model: "test-model",
+    effort: "low",
+    instructions: "",
+  };
+  const place = { channelId: "channel", root };
+  const methods = (f: ReturnType<typeof fixture>) =>
+    f.sent.flatMap((wire) => (wire.method ? [wire.method] : []));
+
+  it("compacts a conversation's thread in its lane, then forgets it", async () => {
+    const f = fixture();
+    const self = { pubkey, owner, name: "Codex", config } as unknown as Agent;
+    await f.runtime.run(f.delivery("first"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.complete();
+    await vi.waitFor(() =>
+      expect(f.runtime.sessions(pubkey)[0]?.status).toBe("Idle"),
+    );
+    const compacted = f.runtime.session(self, place, "compact");
+    await vi.waitFor(() =>
+      expect(methods(f)).toContain("thread/compact/start"),
+    );
+    expect(f.runtime.sessions(pubkey)[0]?.status).toBe("Compacting");
+    // A mention meanwhile waits for the compaction.
+    await f.runtime.run(f.delivery("second"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(f.starts()).toHaveLength(1);
+    f.emit({
+      method: "turn/started",
+      params: { threadId: "thread-1", turn: { id: "compact" } },
+    });
+    f.emit({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "compact", status: "completed" },
+      },
+    });
+    await expect(compacted).resolves.toBeUndefined();
+    const compaction = methods(f).slice(
+      methods(f).indexOf("thread/compact/start") - 1,
+    );
+    expect(compaction.slice(0, 3)).toEqual([
+      "thread/resume",
+      "thread/compact/start",
+      "thread/unsubscribe",
+    ]);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    await f.complete();
+    await vi.waitFor(() =>
+      expect(f.runtime.sessions(pubkey)[0]?.status).toBe("Idle"),
+    );
+    await f.runtime.session(self, place, "new");
+    await f.runtime.run(f.delivery("third"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+    expect(methods(f).filter((method) => method === "thread/start")).toEqual([
+      "thread/start",
+      "thread/start",
+    ]);
+  });
+
+  it("refuses while the conversation is working, and has nothing to compact before it starts", async () => {
+    const f = fixture();
+    const self = { pubkey, owner, name: "Codex", config } as unknown as Agent;
+    await expect(f.runtime.session(self, place, "compact")).rejects.toThrow(
+      "There is no session here to compact yet",
+    );
+    await f.runtime.run(f.delivery("first"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await expect(f.runtime.session(self, place, "new")).rejects.toThrow(
+      "Codex is working here",
+    );
+    // A channel's top level has no session of its own to start over.
+    await expect(
+      f.runtime.session(self, { channelId: "channel" }, "new"),
+    ).resolves.toBeUndefined();
+  });
+});

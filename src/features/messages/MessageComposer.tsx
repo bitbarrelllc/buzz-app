@@ -1749,6 +1749,10 @@ function Composer({
                         ? [selectedAgent]
                         : []
                   }
+                  place={{
+                    channelId,
+                    ...(threadRootId ? { root: threadRootId } : {}),
+                  }}
                   value={picks}
                   disabled={editingDisabled}
                   onChange={setPicks}

@@ -62,9 +62,15 @@ export function useAgent(agents: Agents | undefined, pubkey: string) {
 export const AgentsContext = createContext<Agents | undefined>(undefined);
 
 export type MentionModelChoice = Models &
-  Readonly<{ pubkey: string; name: string; loading?: boolean }>;
+  Readonly<{
+    pubkey: string;
+    name: string;
+    loading?: boolean;
+    /** Its type can compact or forget its sessions. */
+    session?: true;
+  }>;
 /** The mentioned agents, of the viewer's own, whose type offers a choice of
- * model or effort. */
+ * model or effort, or session actions where the agent runs here. */
 export function useMentionModels(
   pubkeys: readonly string[],
 ): readonly MentionModelChoice[] {
@@ -96,7 +102,10 @@ export function useMentionModels(
         if (!agent || !type?.models) return [];
         try {
           const { current, models, sendDefaults } = await type.models(agent);
-          return models.length > 1 || models.some((m) => m.efforts.length)
+          const session = !!type.session && agent.place === "here";
+          return models.length > 1 ||
+            models.some((m) => m.efforts.length) ||
+            session
             ? [
                 {
                   pubkey,
@@ -104,6 +113,7 @@ export function useMentionModels(
                   current,
                   models,
                   ...(sendDefaults ? { sendDefaults: true } : {}),
+                  ...(session ? { session: true } : {}),
                 },
               ]
             : [];

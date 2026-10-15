@@ -2266,6 +2266,54 @@ it("opens the model picker while discovery is pending, then fills its controls",
   ).not.toBeInTheDocument();
 });
 
+it("offers session actions for an agent running here whose type has them", async () => {
+  const snapshot = {
+    status: "ready",
+    agents: [
+      {
+        pubkey: first.pubkey,
+        name: "Honey",
+        type: "test/agent",
+        place: "here",
+      },
+    ],
+  };
+  const session = vi.fn(async () => {});
+  const types = [
+    {
+      key: "test/agent",
+      models: () => ({
+        current: "fast",
+        models: [{ id: "fast", label: "Fast", efforts: [] }],
+      }),
+      session: () => Promise.resolve(),
+    },
+  ];
+  const agents = {
+    subscribe: () => () => {},
+    snapshot: () => snapshot,
+    types: () => types,
+    session,
+  } as unknown as Agents;
+  const h = mount({}, undefined, undefined, agents);
+  await h.user.click(screen.getByRole("button", { name: "First Honey" }));
+  // One model and no efforts is no choice of its own; the session still is.
+  await h.user.click(
+    screen.getByRole("button", { name: "Model and effort for the next run" }),
+  );
+  await h.user.click(
+    await screen.findByRole("button", { name: "Honey's session" }),
+  );
+  await h.user.click(
+    await screen.findByRole("menuitem", { name: "Compact session" }),
+  );
+  expect(session).toHaveBeenCalledWith(
+    first.pubkey,
+    { channelId: "channel" },
+    "compact",
+  );
+});
+
 it.each([
   "claude-sonnet-4-5@20250929",
   "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5",
