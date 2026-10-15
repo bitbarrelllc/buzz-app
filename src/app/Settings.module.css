@@ -306,7 +306,11 @@
 
 .pluginAsideIdentity h2 {
   overflow-wrap: anywhere;
-  @apply text-heading;
+  @apply text-body-lg font-medium;
+}
+
+.pluginAsideIdentity > .pluginIcon {
+  justify-self: start;
 }
 
 .pluginAsideIdentity .pluginProvenance {
@@ -315,7 +319,7 @@
 
 .pluginAsideDescription {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--text-subtle);
   @apply text-body-sm;
 }
 
@@ -344,7 +348,6 @@
 .pluginStatus {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
 }
 
@@ -355,29 +358,30 @@
 }
 
 .pluginMetadata {
-  display: grid;
-  gap: var(--space-1);
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
   margin: 0;
   color: var(--text-subtle);
   @apply text-body-sm;
 }
 
-.pluginMetadata > div {
-  min-width: 0;
-}
-
-.pluginMetadata dt {
+.pluginMetadata th {
+  width: 35%;
+  font-weight: var(--type-weight-normal);
   color: var(--text-secondary);
 }
 
-.pluginMetadata dd {
-  margin: 0;
+.pluginMetadata td {
   color: var(--text-standard);
   overflow-wrap: anywhere;
 }
 
-.pluginMetadata > div + div {
-  margin-block-start: var(--space-2);
+.pluginMetadata :is(th, td) {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-standard);
+  text-align: left;
+  vertical-align: top;
 }
 
 .pluginMetadata code {

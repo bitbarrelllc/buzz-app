@@ -178,8 +178,8 @@ function PluginDetails({
       }}
     >
       <div className={styles.pluginAsideHeader}>
-        <PluginIcon plugin={plugin} />
         <div className={styles.pluginAsideIdentity}>
+          <PluginIcon plugin={plugin} />
           <h2 ref={heading} tabIndex={-1}>
             {plugin.manifest.name}
           </h2>
@@ -193,6 +193,11 @@ function PluginDetails({
               source={plugin.source}
               publisher={plugin.publisher}
             />
+          )}
+          {plugin.manifest.description && (
+            <p className={styles.pluginAsideDescription}>
+              {plugin.manifest.description}
+            </p>
           )}
         </div>
         <IconButton
@@ -208,46 +213,33 @@ function PluginDetails({
           Installed
         </span>
       )}
-      {!readme && plugin.manifest.description && (
-        <p className={styles.pluginAsideDescription}>
-          {plugin.manifest.description}
-        </p>
-      )}
-      <section
-        className={styles.pluginAsideSection}
-        aria-labelledby="plugin-status-title"
-      >
-        <h3 id="plugin-status-title">Status</h3>
-        <div className={styles.pluginStatus}>
-          <span>{plugin.enabled ? "Enabled" : "Disabled"}</span>
-          {/* Channels is required and has no enable/disable control. */}
-          {plugin.manifest.id === "buzz.channels" ? (
-            <span className="text-caption text-secondary">Required</span>
-          ) : (
-            <Button
-              variant={plugin.enabled ? "subtle" : "prominent"}
-              size="sm"
-              disabled={busy}
-              focusableWhenDisabled
-              onClick={() => {
-                if (busy) return;
-                void plugins.change(
-                  plugin.enabled ? "disable" : "enable",
-                  plugin.manifest.id,
-                );
-              }}
-            >
-              {plugin.enabled ? "Disable" : "Enable"}
-            </Button>
-          )}
-        </div>
-      </section>
+      <div className={styles.pluginStatus}>
+        {/* Channels is required and has no enable/disable control. */}
+        {plugin.manifest.id === "buzz.channels" ? (
+          <span className="text-caption text-secondary">Required</span>
+        ) : (
+          <Button
+            variant={plugin.enabled ? "subtle" : "prominent"}
+            size="sm"
+            disabled={busy}
+            focusableWhenDisabled
+            onClick={() => {
+              if (busy) return;
+              void plugins.change(
+                plugin.enabled ? "disable" : "enable",
+                plugin.manifest.id,
+              );
+            }}
+          >
+            {plugin.enabled ? "Disable" : "Enable"}
+          </Button>
+        )}
+      </div>
       {readme && (
         <section
           className={styles.pluginAsideSection}
-          aria-labelledby="plugin-readme-title"
+          aria-label={`${plugin.manifest.name} README`}
         >
-          <h3 id="plugin-readme-title">About</h3>
           <PluginReadme text={readme} />
         </section>
       )}
@@ -279,40 +271,45 @@ function PluginDetails({
         aria-labelledby="plugin-metadata-title"
       >
         <h3 id="plugin-metadata-title">Details</h3>
-        <dl className={styles.pluginMetadata}>
-          <div>
-            <dt>Identifier</dt>
-            <dd>
-              <code>{plugin.manifest.id}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>Plugin API</dt>
-            <dd>{plugin.manifest.apiVersion}</dd>
-          </div>
-          {plugin.source === "external" && (
-            <>
-              <div>
-                <dt>Revision</dt>
-                <dd>
-                  <code>{plugin.revision}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>Signature</dt>
-                <dd>{plugin.hasSignature ? "Signed" : "Unsigned"}</dd>
-              </div>
-              {plugin.publisher && (
-                <div>
-                  <dt>Publisher</dt>
-                  <dd>
-                    <code title={plugin.publisher}>{plugin.publisher}</code>
-                  </dd>
-                </div>
-              )}
-            </>
-          )}
-        </dl>
+        <table
+          className={styles.pluginMetadata}
+          aria-labelledby="plugin-metadata-title"
+        >
+          <tbody>
+            <tr>
+              <th scope="row">Identifier</th>
+              <td>
+                <code>{plugin.manifest.id}</code>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Plugin API</th>
+              <td>{plugin.manifest.apiVersion}</td>
+            </tr>
+            {plugin.source === "external" && (
+              <>
+                <tr>
+                  <th scope="row">Revision</th>
+                  <td>
+                    <code>{plugin.revision}</code>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Signature</th>
+                  <td>{plugin.hasSignature ? "Signed" : "Unsigned"}</td>
+                </tr>
+                {plugin.publisher && (
+                  <tr>
+                    <th scope="row">Publisher</th>
+                    <td>
+                      <code title={plugin.publisher}>{plugin.publisher}</code>
+                    </td>
+                  </tr>
+                )}
+              </>
+            )}
+          </tbody>
+        </table>
       </section>
       {failure && (
         <p role="alert" className="error text-body-sm">

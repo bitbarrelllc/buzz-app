@@ -348,6 +348,15 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     within(bundled).getByRole("heading", { name: "Channels" }),
   );
   expect(within(bundled).queryByText("Installed")).toBeNull();
+  const details = within(bundled).getByRole("table", { name: "Details" });
+  expect(
+    within(details)
+      .getAllByRole("rowheader")
+      .map((cell) => cell.textContent),
+  ).toEqual(["Identifier", "Plugin API"]);
+  expect(
+    within(details).getByRole("cell", { name: "buzz.channels" }),
+  ).toBeVisible();
 
   fireEvent.click(
     within(bundled).getByRole("button", { name: "Close plugin details" }),
@@ -378,6 +387,10 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     name: "External helper details",
   });
   const disable = within(external).getByRole("button", { name: "Disable" });
+  expect(within(external).queryByText("Enabled")).toBeNull();
+  expect(
+    within(external).queryByRole("heading", { name: "Status" }),
+  ).toBeNull();
   expect(disable).toHaveAttribute("data-variant", "subtle");
   expect(within(external).queryByRole("switch")).toBeNull();
   vi.mocked(plugins.change).mockClear();
@@ -744,20 +757,24 @@ it("renders a bundled plugin's README below its status, never an external one's"
   const bundled = screen.getByRole("complementary", {
     name: "Channels details",
   });
-  const about = within(bundled)
-    .getByRole("heading", { name: "About", level: 3 })
-    .closest("section") as HTMLElement;
+  const about = within(bundled).getByRole("region", {
+    name: "Channels README",
+  });
   expect(
     within(bundled)
       .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent),
-  ).toEqual(["Status", "About", "Details"]);
-  // The pane already names the plugin, and the README replaces the one-liner.
+  ).toEqual(["Getting started", "Details"]);
+  // The title is not repeated; the summary stays beneath the author badge.
   expect(within(bundled).getAllByText("Channels")).toHaveLength(1);
-  expect(within(bundled).queryByText("One-line description.")).toBeNull();
+  const summary = within(bundled).getByText("One-line description.");
+  expect(summary).toBeVisible();
+  expect(summary.parentElement).toContainElement(
+    within(bundled).getByText("Made by Buzz"),
+  );
   expect(within(about).getByText("Hold conversations.")).toBeVisible();
   expect(
-    within(about).getByRole("heading", { name: "Getting started", level: 4 }),
+    within(about).getByRole("heading", { name: "Getting started", level: 3 }),
   ).toBeVisible();
   expect(within(about).getByRole("link", { name: "the site" })).toHaveAttribute(
     "href",
