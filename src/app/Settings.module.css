@@ -120,15 +120,23 @@
 }
 
 .pluginEssentials {
-  margin-bottom: var(--space-2);
+  position: relative;
+  margin-bottom: var(--space-6);
   padding-block: var(--space-4);
+  padding-block-start: var(--space-1);
   border-radius: var(--radius-container);
   background: var(--surface-inset);
 }
 
 .pluginEssentialsLabel {
-  margin: 0 0 var(--space-2);
-  padding-inline: var(--space-4);
+  position: absolute;
+  inset-inline-start: var(--space-4);
+  bottom: 0;
+  transform: translateY(50%);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-capsule);
+  background: var(--surface-inset);
   color: var(--text-subtle);
   @apply text-caption font-medium uppercase tracking-wider;
 }
