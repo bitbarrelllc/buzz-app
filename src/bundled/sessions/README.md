@@ -4,4 +4,4 @@ Keeps older Sessions links working by opening them in **Me**, where your agent c
 
 ## Getting started
 
-Nothing to set up. Old Sessions links open in **Me**.
+Old Sessions links open in **Me**.

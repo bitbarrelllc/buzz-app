@@ -4,4 +4,4 @@ Makes links in messages easier to scan. Links to **Buzz**, **GitHub**, **Google 
 
 ## Getting started
 
-Nothing to set up. Paste a link into a message and it picks up its icon automatically.
+Paste a link into a message and it picks up its icon automatically.
