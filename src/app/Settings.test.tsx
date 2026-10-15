@@ -326,6 +326,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
               id: "buzz.channels",
               name: "Channels",
               apiVersion: 1 as const,
+              discovery: { tags: ["  Essentials  ", "messaging"] },
             },
             source: "bundled" as const,
             enabled: true,
@@ -339,6 +340,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
               id: "example.helper",
               name: "External helper",
               apiVersion: 1 as const,
+              discovery: { tags: ["tasks"] },
             },
             source: "external" as const,
             enabled: true,
@@ -376,7 +378,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   if (!artwork) throw new Error("Expected bundled plugin artwork");
   fireEvent.error(artwork);
   expect(bundledCard.querySelector("img")).toBeNull();
-  expect(bundledCard.querySelectorAll("svg")).toHaveLength(2);
+  expect(bundledCard.querySelectorAll("svg")).toHaveLength(3);
   expect(within(bundledCard).queryByText("Buzz")).toBeNull();
   expect(
     within(bundledCard).getByText("Channels").querySelector("svg"),
@@ -396,9 +398,11 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(within(bundled).queryByText("Signature")).toBeNull();
   const badge = within(bundled).getByText("Made by Buzz");
   expect(badge).toBeVisible();
-  expect(badge.parentElement).toContainElement(
+  expect(badge.parentElement?.parentElement).toContainElement(
     within(bundled).getByRole("heading", { name: "Channels" }),
   );
+  expect(badge.nextElementSibling).toHaveTextContent("Essentials");
+  expect(within(bundled).getByText("messaging")).toBeVisible();
   expect(within(bundled).queryByText("Installed")).toBeNull();
   const required = within(bundled).getByRole("button", { name: "Required" });
   expect(required).toBeDisabled();
@@ -460,6 +464,8 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(within(external).getAllByText("publisher-public-key")).toHaveLength(2);
   expect(within(external).getByText("Installed")).toBeVisible();
   expect(within(external).queryByText("Made by Buzz")).toBeNull();
+  expect(within(external).getByText("tasks")).toBeVisible();
+  expect(within(external).queryByText("Essentials")).toBeNull();
 
   fireEvent.keyDown(external, { key: "Escape" });
   expect(externalCard).toHaveFocus();

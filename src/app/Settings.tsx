@@ -170,17 +170,31 @@ function PluginDetails({
         <div className={styles.pluginAsideIdentity}>
           <PluginIcon plugin={plugin} size={48} />
           <h2>{plugin.manifest.name}</h2>
-          {plugin.source === "bundled" ? (
-            <span className={styles.pluginInstallBadge}>
-              <CheckCircleIcon size={14} aria-hidden="true" />
-              Made by Buzz
-            </span>
-          ) : (
-            <PluginProvenance
-              source={plugin.source}
-              publisher={plugin.publisher}
-            />
-          )}
+          <div className={styles.pluginBadges}>
+            {plugin.source === "bundled" ? (
+              <span className={styles.pluginInstallBadge}>
+                <CheckCircleIcon size={14} aria-hidden="true" />
+                Made by Buzz
+              </span>
+            ) : (
+              <PluginProvenance
+                source={plugin.source}
+                publisher={plugin.publisher}
+              />
+            )}
+            {plugin.manifest.discovery?.tags?.map((tag) => {
+              const essential = tag.trim().toLowerCase() === "essentials";
+              return (
+                <span
+                  className={`${styles.pluginInstallBadge} ${styles.pluginTag}`}
+                  key={tag}
+                >
+                  {essential && <SparklesIcon size={14} aria-hidden="true" />}
+                  {essential ? "Essentials" : tag}
+                </span>
+              );
+            })}
+          </div>
           {plugin.manifest.description && (
             <p className={styles.pluginAsideDescription}>
               {plugin.manifest.description}
