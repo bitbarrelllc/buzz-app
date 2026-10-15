@@ -222,7 +222,7 @@ function PluginDetails({
       <div className={styles.pluginStatus}>
         {/* Channels is required and has no enable/disable control. */}
         {plugin.manifest.id === "buzz.channels" ? (
-          <Button variant="prominent" size="sm" disabled>
+          <Button variant="outline" size="sm" disabled>
             Required
           </Button>
         ) : (

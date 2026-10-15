@@ -350,7 +350,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(within(bundled).queryByText("Installed")).toBeNull();
   const required = within(bundled).getByRole("button", { name: "Required" });
   expect(required).toBeDisabled();
-  expect(required).toHaveAttribute("data-variant", "prominent");
+  expect(required).toHaveAttribute("data-variant", "outline");
   fireEvent.click(required);
   expect(plugins.change).not.toHaveBeenCalled();
   const details = within(bundled).getByRole("table", { name: "Details" });
