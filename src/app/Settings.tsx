@@ -155,6 +155,9 @@ function PluginDetails({
   // READMEs ship with Buzz; never attach one to an external plugin.
   const readme =
     plugin.source === "bundled" && bundledReadmes.get(plugin.manifest.id);
+  const otherTags = (plugin.manifest.discovery?.tags ?? []).filter(
+    (tag) => tag.trim().toLowerCase() !== "essentials",
+  );
   return (
     <aside
       id="plugin-details"
@@ -182,25 +185,15 @@ function PluginDetails({
                 publisher={plugin.publisher}
               />
             )}
-            {[...(plugin.manifest.discovery?.tags ?? [])]
-              .sort(
-                (a, b) =>
-                  Number(b.trim().toLowerCase() === "essentials") -
-                  Number(a.trim().toLowerCase() === "essentials"),
-              )
-              .map((tag) => {
-                const essential = tag.trim().toLowerCase() === "essentials";
-                return (
-                  <span
-                    className={`${styles.pluginInstallBadge} ${styles.pluginTag}`}
-                    data-essential={essential || undefined}
-                    key={tag}
-                  >
-                    {essential && <SparklesIcon size={14} aria-hidden="true" />}
-                    {essential ? "Essentials" : tag}
-                  </span>
-                );
-              })}
+            {isEssentialPlugin(plugin) && (
+              <span
+                className={`${styles.pluginInstallBadge} ${styles.pluginTag}`}
+                data-essential
+              >
+                <SparklesIcon size={14} aria-hidden="true" />
+                Essentials
+              </span>
+            )}
           </div>
           {plugin.manifest.description && (
             <p className={styles.pluginAsideDescription}>
@@ -273,6 +266,12 @@ function PluginDetails({
               <th scope="row">Plugin API</th>
               <td>{plugin.manifest.apiVersion}</td>
             </tr>
+            {otherTags.length > 0 && (
+              <tr>
+                <th scope="row">Tags</th>
+                <td>{otherTags.join(", ")}</td>
+              </tr>
+            )}
             {plugin.source === "external" && (
               <>
                 <tr>

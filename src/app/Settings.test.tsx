@@ -407,6 +407,12 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     "data-essential",
   );
   expect(within(bundled).getByText("messaging")).toBeVisible();
+  expect(
+    within(bundled).getByText("messaging").closest("tr"),
+  ).toHaveTextContent("Tags");
+  expect(badge.parentElement).not.toContainElement(
+    within(bundled).getByText("messaging"),
+  );
   expect(within(bundled).queryByText("Installed")).toBeNull();
   const required = within(bundled).getByRole("button", { name: "Required" });
   expect(required).toBeDisabled();
@@ -419,7 +425,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     within(details)
       .getAllByRole("rowheader")
       .map((cell) => cell.textContent),
-  ).toEqual(["Identifier", "Plugin API"]);
+  ).toEqual(["Identifier", "Plugin API", "Tags"]);
   expect(
     within(details).getByRole("cell", { name: "buzz.channels" }),
   ).toBeVisible();
