@@ -77,34 +77,34 @@ test("short narrow Settings keeps plugin copy and controls reachable at 200% int
     .click();
   const content = page.getByRole("region", { name: "Plugins", exact: true });
   const row = content.getByRole("article").filter({
-    has: page.getByRole("switch", { name: "Enable GitHub", exact: true }),
+    has: page.getByRole("button", { name: "View GitHub details", exact: true }),
   });
-  const toggle = row.getByRole("switch", {
-    name: "Enable GitHub",
-    exact: true,
+  const toggle = row.getByRole("button", {
+    name: /^(Enable|Disable) GitHub$/,
   });
   const title = row.getByText("GitHub", { exact: true });
   const description = row.getByText(
     "View GitHub repositories, pull requests, issues, and commits.",
     { exact: true },
   );
-  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(toggle).toHaveAccessibleName("Disable GitHub");
   await page.evaluate(() => document.fonts.ready);
   await expect(page.locator("html")).toHaveCSS("--buzz-text-scale", "2");
+  await title.scrollIntoViewIfNeeded();
+  await expect(title).toBeInViewport({ ratio: 1 });
   await description.scrollIntoViewIfNeeded();
   await expect(description).toBeInViewport({ ratio: 1 });
   await toggle.scrollIntoViewIfNeeded();
-  await expect(title).toBeInViewport({ ratio: 1 });
   await expect(toggle).toBeInViewport({ ratio: 1 });
   await page.screenshot({
     path: testInfo.outputPath("settings-short-200-percent.png"),
   });
   await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(toggle).toHaveAccessibleName("Enable GitHub");
   await expect(toggle).toBeFocused();
-  await expect(toggle).toHaveAttribute("aria-disabled", "false");
+  await expect(toggle).toBeEnabled();
   await toggle.press("Space");
-  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(toggle).toHaveAccessibleName("Disable GitHub");
   await expect(toggle).toBeInViewport({ ratio: 1 });
   // The replacement Settings pane remains reachable by disclosure at narrow
   // widths and is persistent at desktop widths.
@@ -447,7 +447,7 @@ confirmedPresence(
       await expect(profileContent).toHaveCount(0);
       await expect(pluginContent).toBeVisible();
       await expect(
-        page.getByRole("switch", { name: "Enable Projects" }),
+        page.getByRole("button", { name: "Disable Projects", exact: true }),
       ).toBeVisible();
       const settingsRegion = page.getByRole("region", {
         name: "Settings",
