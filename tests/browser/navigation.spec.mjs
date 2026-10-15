@@ -50,7 +50,7 @@ test("a retired contributed Settings destination fails promptly on Back", async 
   await pairing.click();
   await expect(pairing).toHaveAttribute("aria-current", "page");
   await sections.getByRole("button", { name: "Plugins", exact: true }).click();
-  await pairingEnabled.click();
+  await setPluginEnabled(page, "Pair mobile", false);
   await expect(pairing).toHaveCount(0);
   await button(page, "Go back").click();
   await expect(
