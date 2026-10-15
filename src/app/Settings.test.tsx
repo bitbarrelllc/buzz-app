@@ -22,6 +22,15 @@ import type { RelayData } from "../features/relay/service";
 import type { Contribution } from "../plugins/contributions";
 
 afterEach(cleanup);
+vi.mock("../bundled/readmes", () => ({
+  bundledReadmes: new Map([
+    [
+      "buzz.channels",
+      "# Channels\n\nHold conversations.\n\n## Good to know\n\n- Read [the spec](../mentions/README.md) or [the site](https://example.com).\n- <b>Raw</b> markup is dropped.\n",
+    ],
+    ["example.helper", "# Helper\n\nNot from Buzz.\n"],
+  ]),
+}));
 
 function registry(initial: Contribution<SettingsCard>[]) {
   let entries: readonly Contribution<SettingsCard>[] = initial;
@@ -596,3 +605,83 @@ it.each(["primary", null])(
     expect(hosted(shell as HTMLElement).querySelector("svg")).not.toBeNull();
   },
 );
+
+it("renders a bundled plugin's README below its status, never an external one's", () => {
+  const { cards } = registry([]);
+  const plugin = (source: "bundled" | "external") => ({
+    manifest: {
+      id: source === "bundled" ? "buzz.channels" : "example.helper",
+      name: source === "bundled" ? "Channels" : "Helper",
+      apiVersion: 1 as const,
+      description: "One-line description.",
+    },
+    source,
+    enabled: true,
+    revision: source,
+    previous: null,
+    reloadable: false,
+    error: null,
+  });
+  const snapshot = {
+    configuration: {
+      status: "ready" as const,
+      externalPluginsPaused: false,
+      catalog: {
+        profile: "test",
+        location: "test",
+        plugins: [plugin("bundled"), plugin("external")],
+      },
+    },
+    activation: {},
+    busy: false,
+    error: null,
+    refreshError: null,
+  };
+  const plugins = {
+    subscribe: () => () => {},
+    snapshot: () => snapshot,
+    change: vi.fn(),
+    reload: vi.fn(),
+    dismissError: vi.fn(),
+  } as unknown as Parameters<typeof Settings>[0]["plugins"];
+
+  render(<Settings {...host} cards={cards} plugins={plugins} />);
+  fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Channels details" }),
+  );
+  const bundled = screen.getByRole("complementary", {
+    name: "Channels details",
+  });
+  const about = within(bundled)
+    .getByRole("heading", { name: "About", level: 3 })
+    .closest("section") as HTMLElement;
+  expect(
+    within(bundled)
+      .getAllByRole("heading", { level: 3 })
+      .map((heading) => heading.textContent),
+  ).toEqual(["Status", "About", "Details"]);
+  // The pane already names the plugin, and the README replaces the one-liner.
+  expect(within(bundled).getAllByText("Channels")).toHaveLength(1);
+  expect(within(bundled).queryByText("One-line description.")).toBeNull();
+  expect(within(about).getByText("Hold conversations.")).toBeVisible();
+  expect(
+    within(about).getByRole("heading", { name: "Good to know", level: 4 }),
+  ).toBeVisible();
+  expect(within(about).getByRole("link", { name: "the site" })).toHaveAttribute(
+    "href",
+    "https://example.com/",
+  );
+  expect(within(about).queryByRole("link", { name: "the spec" })).toBeNull();
+  expect(about).toHaveTextContent("Read the spec or the site.");
+  expect(about).toHaveTextContent("Raw markup is dropped.");
+  expect(about.querySelector("b")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "View Helper details" }));
+  const external = screen.getByRole("complementary", {
+    name: "Helper details",
+  });
+  expect(within(external).queryByRole("heading", { name: "About" })).toBeNull();
+  expect(within(external).queryByText("Not from Buzz.")).toBeNull();
+  expect(within(external).getByText("One-line description.")).toBeVisible();
+});

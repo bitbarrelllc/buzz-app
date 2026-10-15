@@ -21,6 +21,8 @@ import type { PluginManager } from "../plugins/manager";
 import type { PluginInfo } from "../plugins/types";
 import type { Communities } from "../features/communities/service";
 import { PluginImport } from "./PluginImport";
+import { PluginReadme } from "./PluginReadme";
+import { bundledReadmes } from "../bundled/readmes";
 import type { Identity } from "../features/identity/service";
 import { ProfileSettings } from "./ProfileSettings";
 
@@ -103,6 +105,9 @@ function PluginDetails({
   plugins: PluginManager;
   onClose(): void;
 }) {
+  // READMEs ship with Buzz; never attach one to an external plugin.
+  const readme =
+    plugin.source === "bundled" && bundledReadmes.get(plugin.manifest.id);
   return (
     <aside
       id="plugin-details"
@@ -142,7 +147,7 @@ function PluginDetails({
           Installed
         </span>
       )}
-      {plugin.manifest.description && (
+      {!readme && plugin.manifest.description && (
         <p className={styles.pluginAsideDescription}>
           {plugin.manifest.description}
         </p>
@@ -175,6 +180,15 @@ function PluginDetails({
           )}
         </div>
       </section>
+      {readme && (
+        <section
+          className={styles.pluginAsideSection}
+          aria-labelledby="plugin-readme-title"
+        >
+          <h3 id="plugin-readme-title">About</h3>
+          <PluginReadme text={readme} />
+        </section>
+      )}
       <section
         className={styles.pluginAsideSection}
         aria-labelledby="plugin-metadata-title"
