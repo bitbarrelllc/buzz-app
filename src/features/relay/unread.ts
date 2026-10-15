@@ -1541,11 +1541,7 @@ export function createUnread({
       const ids = channels
         .list()
         .channels.filter(
-          (channel) =>
-            !channel.huddle &&
-            !channel.metadataPending &&
-            !channel.cached &&
-            channel.members?.includes(viewer),
+          (channel) => !channel.cached && channel.members?.includes(viewer),
         )
         .map((channel) => channel.id);
       if (!ids.length) {
