@@ -110,7 +110,13 @@ function relatedPlugins(
     );
 }
 
-function PluginIcon({ plugin }: { plugin: PluginInfo }) {
+function PluginIcon({
+  plugin,
+  size = 24,
+}: {
+  plugin: PluginInfo;
+  size?: number;
+}) {
   const url =
     plugin.source === "bundled"
       ? bundledIcons.get(plugin.manifest.id)
@@ -121,7 +127,7 @@ function PluginIcon({ plugin }: { plugin: PluginInfo }) {
       {url && url !== failedUrl ? (
         <img src={url} alt="" onError={() => setFailedUrl(url)} />
       ) : (
-        <SquaresFourIcon size={24} />
+        <SquaresFourIcon size={size} />
       )}
     </span>
   );
@@ -179,7 +185,7 @@ function PluginDetails({
     >
       <div className={styles.pluginAsideHeader}>
         <div className={styles.pluginAsideIdentity}>
-          <PluginIcon plugin={plugin} />
+          <PluginIcon plugin={plugin} size={48} />
           <h2 ref={heading} tabIndex={-1}>
             {plugin.manifest.name}
           </h2>
