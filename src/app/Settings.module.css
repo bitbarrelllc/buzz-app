@@ -167,9 +167,8 @@
   margin-inline: calc(-1 * var(--settings-group-inset));
   border: 1px solid transparent;
   border-radius: 0;
-  transition:
-    background-color var(--duration-fast, 160ms) var(--ease-out, ease-out),
-    border-color var(--duration-fast, 160ms) var(--ease-out, ease-out);
+  transition: background-color var(--duration-fast, 160ms)
+    var(--ease-out, ease-out);
 }
 
 .pluginRowToggle {
@@ -226,7 +225,6 @@
 
 .plugin:has(.pluginRow[aria-expanded="true"]) {
   background: var(--surface-control);
-  border-color: var(--border-focus);
 }
 
 .pluginRow:focus-visible {
