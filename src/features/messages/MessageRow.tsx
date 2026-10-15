@@ -304,6 +304,8 @@ function MessageRowContent({
     !row.agentEnvelope &&
     row.attachments.length > 0 &&
     row.attachments.every((attachment) => !!safeMessageUrl(attachment.url));
+  // Own-message surface colours apply to a bubble, never to a shown thread root.
+  const ownBubble = !shownRow && !!viewer && row.authorId === viewer;
   const emojiOnly = usesLargeEmojiPresentation(displayRow.content, row.emoji);
   const canReact = !!(
     extensions &&
@@ -513,6 +515,7 @@ function MessageRowContent({
         data-viewer-message={
           alignViewer && row.authorId === viewer ? "" : undefined
         }
+        data-own={(!attachmentOnly && ownBubble) || undefined}
       >
         <span className={styles.messageGutter} />
 
@@ -548,7 +551,10 @@ function MessageRowContent({
               onDismiss={() => setReporting(undefined)}
             />
           )}
-          <div className={styles.messageContent}>
+          <div
+            className={styles.messageContent}
+            data-bubble={(!attachmentOnly && !shownRow) || undefined}
+          >
             {/* A live append must not remove the reader's current focus target. */}
             {(!stackNext || avatarFocused) && (
               <div className={styles.messageAvatar}>{avatar}</div>
@@ -703,15 +709,13 @@ function MessageRowContent({
             )}
             <MessageTimestampHint
               createdAt={stackPrevious ? row.createdAt : undefined}
+              attachments={attachmentGroups.length > 0}
             >
               {!attachmentOnly && (
                 <div
                   className={shownRow ? undefined : styles.messageBubble}
                   data-message-action-anchor
-                  data-own={
-                    (!shownRow && !!viewer && row.authorId === viewer) ||
-                    undefined
-                  }
+                  data-own={ownBubble || undefined}
                   data-long-text={
                     row.content.length > 160 ||
                     row.content.includes("\n") ||
