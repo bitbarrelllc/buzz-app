@@ -313,6 +313,7 @@
   justify-self: start;
   width: calc(2 * var(--space-6));
   height: calc(2 * var(--space-6));
+  margin-block: var(--space-2) var(--space-3);
 }
 
 .pluginAsideIdentity .pluginProvenance {
