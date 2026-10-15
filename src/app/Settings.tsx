@@ -700,7 +700,7 @@ export function Settings({
                                     ) : (
                                       <Button
                                         variant={
-                                          plugin.enabled ? "outline" : "subtle"
+                                          plugin.enabled ? "ghost" : "subtle"
                                         }
                                         size="sm"
                                         aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.manifest.name}`}
