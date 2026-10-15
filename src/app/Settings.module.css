@@ -156,12 +156,6 @@
   gap: var(--space-section-gap);
 }
 
-.pluginList {
-  display: grid;
-  align-content: start;
-  gap: var(--space-1);
-}
-
 .plugin {
   display: grid;
   align-items: center;
@@ -178,7 +172,7 @@
   z-index: 1;
   grid-area: 1 / 1;
   justify-self: end;
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3) 0;
   pointer-events: none;
 }
 
@@ -209,7 +203,7 @@
   min-width: 0;
   align-items: center;
   gap: var(--space-5);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-3) 0;
   padding-right: calc(var(--space-16) + var(--space-4));
   border: 0;
   border-radius: var(--radius-control);

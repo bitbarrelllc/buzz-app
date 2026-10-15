@@ -247,6 +247,12 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
     })
     .closest("section");
   expect(communication).not.toBeNull();
+  const categoryGroup = communication?.querySelector(".buzz-settings-group");
+  expect(categoryGroup).not.toBeNull();
+  expect(categoryGroup?.children).toHaveLength(3);
+  for (const row of Array.from(categoryGroup?.children ?? [])) {
+    expect(row.querySelector("article")).not.toBeNull();
+  }
   expect(
     within(communication as HTMLElement)
       .getAllByRole("article")
