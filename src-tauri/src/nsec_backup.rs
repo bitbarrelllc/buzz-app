@@ -46,7 +46,7 @@ impl Source {
 
 #[derive(Clone)]
 struct Session {
-    source: Option<Source>,
+    source: Source,
     credential: Zeroizing<String>,
 }
 struct Candidate {
@@ -100,6 +100,7 @@ struct State {
     worker: Option<JoinHandle<()>>,
     rerun: bool,
     restore: Option<Restore>,
+    restore_epoch: u64,
 }
 impl State {
     fn retire(&mut self) {
@@ -108,6 +109,9 @@ impl State {
         if let Some(worker) = self.worker.take() {
             worker.abort();
         }
+    }
+    fn retire_restore(&mut self) {
+        self.restore_epoch = self.restore_epoch.wrapping_add(1);
         self.restore.take();
     }
 }
@@ -152,6 +156,7 @@ impl NsecBackupHost {
     pub(crate) fn document_load(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.retire();
+        state.retire_restore();
         state.sessions.clear();
         // Source counters restart with each renderer document.
         state.generations = [None, None];
@@ -160,11 +165,13 @@ impl NsecBackupHost {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.closed = true;
         state.retire();
+        state.retire_restore();
         state.sessions.clear();
     }
     pub(crate) fn local_key_installed(&self, identity: IdentityHost) {
         if let Ok(mut state) = self.state.lock() {
             state.retire();
+            state.retire_restore();
         }
         self.trigger(identity);
     }
@@ -214,20 +221,14 @@ impl NsecBackupHost {
             return Ok(());
         }
         state.generations[source.index()] = Some(generation);
-        let active = state
-            .sessions
-            .last()
-            .is_some_and(|s| s.source == Some(source));
-        state.sessions.retain(|s| s.source != Some(source));
+        let active = state.sessions.last().is_some_and(|s| s.source == source);
+        state.sessions.retain(|s| s.source != source);
         if credential.is_none() && !active {
             return Ok(());
         }
         state.retire();
         if let Some(credential) = credential {
-            state.sessions.push(Session {
-                source: Some(source),
-                credential,
-            });
+            state.sessions.push(Session { source, credential });
         }
         drop(state);
         self.trigger(identity);
@@ -237,7 +238,7 @@ impl NsecBackupHost {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let Some(index) = state.sessions.iter().position(|s| s.source == Some(source)) else {
+        let Some(index) = state.sessions.iter().position(|s| s.source == source) else {
             return;
         };
         if index + 1 != state.sessions.len() {
@@ -386,6 +387,14 @@ impl NsecBackupHost {
         locked.write(&record)?;
         Ok(())
     }
+    fn valid_restore(&self, epoch: u64) -> Result<()> {
+        let state = self.state.lock().map_err(|_| CANCELED)?;
+        if state.closed || state.restore_epoch != epoch {
+            Err(CANCELED.into())
+        } else {
+            Ok(())
+        }
+    }
     async fn begin<R: tauri::Runtime>(
         &self,
         identity: IdentityHost,
@@ -397,7 +406,7 @@ impl NsecBackupHost {
             if state.closed {
                 return Err(CANCELED.into());
             }
-            state.epoch
+            state.restore_epoch
         };
         let config = self.config.as_ref().as_ref().ok_or(UNAVAILABLE)?;
         identity.require_missing().await?;
@@ -414,7 +423,7 @@ impl NsecBackupHost {
             .append_pair("code_challenge", &challenge)
             .append_pair("code_challenge_method", "S256");
         let mut state = self.state.lock().map_err(|_| RETRY)?;
-        if state.closed || state.epoch != epoch {
+        if state.closed || state.restore_epoch != epoch {
             return Err(CANCELED.into());
         }
         if state.restore.is_some() {
@@ -477,7 +486,7 @@ impl NsecBackupHost {
         verifier: Zeroizing<String>,
     ) -> Result<RestoreResult> {
         let parameters = callback.wait(&oauth_id).await.map_err(|_| RETRY)?;
-        self.valid(epoch)?;
+        self.valid_restore(epoch)?;
         if parameters
             .parameters
             .iter()
@@ -497,7 +506,7 @@ impl NsecBackupHost {
         let credential = Api::exchange(&config.service_url, code, &verifier, &redirect).await?;
         let api = Api::new(&config.service_url, &credential)?;
         let account = api.me().await?;
-        self.valid(epoch)?;
+        self.valid_restore(epoch)?;
         let current = api.current().await?;
         let client = Client::new(&config.service_url, &credential).map_err(|_| RETRY)?;
         let recovered = client.recover().await.map_err(|error| match error {
@@ -517,7 +526,7 @@ impl NsecBackupHost {
             failed_count,
         };
         let mut state = self.state.lock().map_err(|_| CANCELED)?;
-        if state.closed || state.epoch != epoch {
+        if state.closed || state.restore_epoch != epoch {
             return Err(CANCELED.into());
         }
         let attempt = state
@@ -559,7 +568,7 @@ impl NsecBackupHost {
             if state.closed {
                 return Err(CANCELED.into());
             }
-            let epoch = state.epoch;
+            let epoch = state.restore_epoch;
             let attempt = state
                 .restore
                 .as_mut()
@@ -589,7 +598,7 @@ impl NsecBackupHost {
             if api.current().await? != current {
                 return Err("Your account identity changed. Sign in again.".into());
             }
-            self.valid(epoch)?;
+            self.valid_restore(epoch)?;
             let secret = {
                 let state = self.state.lock().map_err(|_| CANCELED)?;
                 let attempt = state
@@ -615,7 +624,7 @@ impl NsecBackupHost {
                 }
                 Zeroizing::new(**key.secret)
             };
-            self.valid(epoch)?;
+            self.valid_restore(epoch)?;
             identity
                 .install_recovered(secret, pubkey.clone(), admission)
                 .await
@@ -624,17 +633,13 @@ impl NsecBackupHost {
         if result.is_ok() {
             let mut state = self.state.lock().map_err(|_| CANCELED)?;
             if !state.closed
-                && state.epoch == epoch
+                && state.restore_epoch == epoch
                 && state
                     .restore
                     .as_ref()
                     .is_some_and(|attempt| attempt.id == id)
             {
                 state.restore.take();
-                state.sessions.push(Session {
-                    source: None,
-                    credential,
-                });
             }
             drop(state);
             self.trigger(identity);
