@@ -740,3 +740,99 @@ it("renders a bundled plugin's README below its status, never an external one's"
   expect(within(external).queryByText("Not from Buzz.")).toBeNull();
   expect(within(external).getByText("One-line description.")).toBeVisible();
 });
+
+it("relates plugins that share a tag and moves focus to the one chosen", () => {
+  const { cards } = registry([]);
+  const plugin = (
+    id: string,
+    name: string,
+    category: string,
+    tags: string[],
+    source: "bundled" | "external" = "bundled",
+  ) => ({
+    manifest: {
+      id,
+      name,
+      apiVersion: 1 as const,
+      discovery: { category, tags },
+    },
+    source,
+    enabled: true,
+    revision: id,
+    previous: null,
+    reloadable: false,
+    error: null,
+  });
+  const snapshot = {
+    configuration: {
+      status: "ready" as const,
+      externalPluginsPaused: false,
+      catalog: {
+        profile: "test",
+        location: "test",
+        plugins: [
+          plugin("buzz.profiles", "Profiles", "people-and-communities", [
+            "people",
+          ]),
+          plugin("buzz.todos", "Todos", "productivity", ["tasks"]),
+          plugin("buzz.mentions", "Mentions", "communication", [
+            "messaging",
+            "people",
+          ]),
+          plugin("buzz.channels", "Channels", "communication", ["messaging"]),
+          plugin(
+            "example.helper",
+            "Helper",
+            "communication",
+            ["messaging"],
+            "external",
+          ),
+        ],
+      },
+    },
+    activation: {},
+    busy: false,
+    error: null,
+    refreshError: null,
+  };
+  const plugins = {
+    subscribe: () => () => {},
+    snapshot: () => snapshot,
+    change: vi.fn(),
+    reload: vi.fn(),
+    dismissError: vi.fn(),
+  } as unknown as Parameters<typeof Settings>[0]["plugins"];
+  const related = (name: string) => {
+    const pane = screen.getByRole("complementary", { name: `${name} details` });
+    const section = within(pane)
+      .queryByRole("heading", { name: "Related plugins" })
+      ?.closest("section");
+    return section
+      ? within(section as HTMLElement)
+          .getAllByRole("button")
+          .map((button) => button.textContent)
+      : [];
+  };
+
+  render(<Settings {...host} cards={cards} plugins={plugins} />);
+  fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Channels details" }),
+  );
+  // An external plugin's tags never place it beside Buzz's own.
+  expect(related("Channels")).toEqual(["Mentions"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Mentions" }));
+  expect(
+    screen.getByRole("heading", { name: "Mentions", level: 2 }),
+  ).toHaveFocus();
+  expect(related("Mentions")).toEqual(["Channels", "Profiles"]);
+  expect(
+    screen.getByRole("button", { name: "View Mentions details" }),
+  ).toHaveAttribute("aria-expanded", "true");
+
+  fireEvent.click(screen.getByRole("button", { name: "View Todos details" }));
+  expect(related("Todos")).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "View Helper details" }));
+  expect(related("Helper")).toEqual([]);
+});
