@@ -122,9 +122,8 @@
 .pluginEssentials {
   position: relative;
   isolation: isolate;
-  margin-bottom: var(--space-6);
+  margin-block: var(--space-3) var(--space-2);
   padding-block: var(--space-4);
-  padding-block-start: var(--space-1);
   border-radius: var(--radius-container);
   border: 1px solid var(--border-standard);
 }
@@ -141,8 +140,8 @@
     var(--space-row-gap) -
     var(--space-3)
   );
-  bottom: calc(-1 * var(--space-half));
-  transform: translateY(50%);
+  top: 0;
+  transform: translateY(-50%);
   margin: 0;
   padding: var(--space-1h) var(--space-3);
   border: 1px solid var(--border-standard);
