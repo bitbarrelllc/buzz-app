@@ -571,7 +571,8 @@ export function createTabs({
                 ],
               },
             ]}
-            disabled={state.modelsChecking}
+            // A choice made while saving would be lost when the dialog closes.
+            disabled={state.modelsChecking || savingDefault}
             valueLabel={
               state.modelsChecking
                 ? "Loading models…"

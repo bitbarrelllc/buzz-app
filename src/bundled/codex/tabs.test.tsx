@@ -529,6 +529,31 @@ it("keeps the provider dialog and its draft open while defaults could not be sav
   );
 });
 
+it("holds the defaults' choices while they save, so the dialog closes on what was saved", async () => {
+  let release = () => {};
+  const storage = fileBacked(
+    new Map(),
+    () => new Promise<void>((resolve) => (release = resolve)),
+  );
+  const f = fixture({ storage });
+  const onClose = vi.fn();
+  render(<f.tabs.ProviderDialogBody onClose={onClose} />);
+  await waitFor(() =>
+    expect(screen.getByLabelText("Default model")).toBeEnabled(),
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("combobox", { name: "Default model" }));
+  await user.click(await screen.findByRole("option", { name: "Model B" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Default model")).toBeDisabled(),
+  );
+  expect(screen.getByLabelText("Default thinking")).toBeDisabled();
+  release();
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(f.provider.resolve(defaults).model).toBe("model-b");
+});
+
 it("applies provider precedence without rewriting records and falls back for incompatible thinking", async () => {
   const f = fixture();
   await f.provider.check();

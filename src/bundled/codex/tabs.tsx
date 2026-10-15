@@ -515,7 +515,7 @@ export function createTabs(
             label="Default model"
             variant="preference"
             value={draft.model}
-            disabled={checking || !data}
+            disabled={checking || !data || savingDefaults}
             valueLabel={
               checking
                 ? "Loading models…"
@@ -570,7 +570,7 @@ export function createTabs(
             variant="preference"
             value={draft.effort}
             groups={[{ label: "", options: efforts }]}
-            disabled={checking || !selected}
+            disabled={checking || !selected || savingDefaults}
             onValueChange={(effort) => setDraft({ ...draft, effort })}
           />
           {saveError && (

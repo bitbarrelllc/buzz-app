@@ -709,6 +709,34 @@ it("keeps the provider dialog and its draft open while a default could not be sa
   );
 });
 
+it("holds the default model while it saves, so the dialog closes on what was saved", async () => {
+  let release = () => {};
+  const storage = fileBacked(
+    new Map(),
+    () => new Promise<void>((resolve) => (release = resolve)),
+  );
+  const { type } = installed({ storage });
+  const Provider = providerSetup(type);
+  const onClose = vi.fn();
+  render(<Provider onClose={onClose} />);
+  await waitFor(() =>
+    expect(screen.getByLabelText("Default model")).toHaveTextContent(
+      "Opus 5.5 · Default",
+    ),
+  );
+  await choose("Default model", "Fable 5.1");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Save defaults" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("Default model")).toBeDisabled(),
+  );
+  release();
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(storage.getItem("buzz.claude-code.provider-defaults.v1")).toContain(
+    "fable",
+  );
+});
+
 it("preserves native behavior for invalid defaults and keeps explicit agent models", async () => {
   localStorage.setItem("buzz.claude-code.provider-defaults.v1", "not json");
   const defaults = new ClaudeDefaults(localStorage);
