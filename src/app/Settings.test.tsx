@@ -101,7 +101,7 @@ const host = {
   },
 } as unknown as Parameters<typeof Settings>[0];
 
-it("groups plugins, sorts required ones first, and uses Other for unknown categories", () => {
+it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
   const ready = {
     configuration: {
       status: "ready",
@@ -116,7 +116,10 @@ it("groups plugins, sorts required ones first, and uses Other for unknown catego
               name: "Voice Notes",
               apiVersion: 1,
               description: "Record voice notes and play them in conversations.",
-              discovery: { category: "communication" },
+              discovery: {
+                category: essentials ? "productivity" : "communication",
+                ...(essentials ? { tags: ["  essentials  "] } : {}),
+              },
             },
             source: "bundled",
             enabled: true,
@@ -131,7 +134,10 @@ it("groups plugins, sorts required ones first, and uses Other for unknown catego
               name: "Channels",
               apiVersion: 1,
               description: "Navigate channels and hold conversations in Buzz.",
-              discovery: { category: "communication" },
+              discovery: {
+                category: "communication",
+                ...(essentials ? { tags: ["Essentials"] } : {}),
+              },
             },
             source: "bundled",
             enabled: true,
@@ -201,9 +207,11 @@ it("groups plugins, sorts required ones first, and uses Other for unknown catego
     within(content)
       .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent),
-  ).toEqual(["Communication", "Agents", "Other"]);
+  ).toEqual([essentials ? "Essentials" : "Communication", "Agents", "Other"]);
   const communication = within(content)
-    .getByRole("heading", { name: "Communication" })
+    .getByRole("heading", {
+      name: essentials ? "Essentials" : "Communication",
+    })
     .closest("section");
   expect(communication).not.toBeNull();
   expect(
@@ -213,6 +221,15 @@ it("groups plugins, sorts required ones first, and uses Other for unknown catego
         (row) => within(row).getByText(/^(Channels|Voice Notes)$/).textContent,
       ),
   ).toEqual(["Channels", "Voice Notes"]);
+  expect(within(content).getAllByRole("article")).toHaveLength(4);
+  expect(
+    within(content).queryByRole("switch", { name: "Enable Channels" }),
+  ).toBeNull();
+  expect(
+    within(communication as HTMLElement).getByRole("switch", {
+      name: "Enable Voice Notes",
+    }),
+  ).toBeEnabled();
   expect(content).toHaveTextContent(
     "Navigate channels and hold conversations in Buzz.",
   );
