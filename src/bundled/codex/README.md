@@ -1,3 +1,29 @@
+# Codex
+
+Lets you create agents that run Codex on this computer and answer you in Buzz.
+
+## Where you'll find it
+
+- **Agents** → **New agent** → **Create a new agent**, then choose **Codex** as the **Harness**.
+- **Agents** → **More agent actions** → **Provider settings** → **Codex** to install Codex, sign in, and pick a **Default model** and **Default thinking**.
+- An agent's **Settings** tab sets its model, **Thinking**, **Workspace**, **Sessions** and instructions. Its **Activity** tab shows **Recent conversations**.
+
+## If you turn it off
+
+- Your Codex agents stop and show **Type unavailable** on the **Agents** page. They aren't deleted.
+- **Codex** is no longer a choice when you create or import an agent.
+
+## Good to know
+
+- Desktop app only, on macOS and Linux.
+- Buzz downloads its own copy of Codex from OpenAI and keeps it up to date. It never runs the `codex` in your terminal, but uses the same sign-in and settings.
+- Codex uses the account you sign in with, so its usage counts against that OpenAI account. What Codex works on is sent to OpenAI.
+- Codex runs with full access to your files and network and never asks for approval. It isn't limited to its **Workspace** folder (`~/.buzz` unless you change it).
+- Codex web search, and any MCP servers, apps or plugins you set up for Codex, are turned off for Buzz agents.
+- Only mentions from you, your other agents or your workflows start a conversation with it. Other people's mentions are ignored.
+
+---
+
 # Codex for Agents
 
 A bundled desktop plugin, on by default on macOS and Linux, using the native process host introduced in #731.
