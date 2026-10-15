@@ -30,7 +30,8 @@ const MARKDOWN: Components = {
 export function PluginReadme({ text }: { text: string }) {
   const id = useId();
   const content = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  // Null means no disclosure action yet: apply measurements without animation.
+  const [expanded, setExpanded] = useState<boolean | null>(null);
   const [size, setSize] = useState({ height: 0, limit: 320 });
   const reducedMotion = useReducedMotion();
   useLayoutEffect(() => {
@@ -62,9 +63,14 @@ export function PluginReadme({ text }: { text: string }) {
       <motion.div
         id={id}
         className={styles.clip}
+        data-collapsed={(overflow && !expanded) || undefined}
         initial={false}
+        style={expanded === null ? { maxHeight: "20rem" } : undefined}
         animate={{ height: overflow && !expanded ? size.limit : "auto" }}
-        transition={{ duration: instant ? 0 : 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+        transition={{
+          duration: instant || expanded === null ? 0 : 0.2,
+          ease: [0.2, 0.8, 0.2, 1],
+        }}
         onFocusCapture={() => {
           if (overflow) setExpanded(true);
         }}
@@ -85,7 +91,7 @@ export function PluginReadme({ text }: { text: string }) {
           <Button
             variant="ghost"
             size="sm"
-            aria-expanded={expanded}
+            aria-expanded={!!expanded}
             aria-controls={id}
             onClick={() => setExpanded(!expanded)}
           >

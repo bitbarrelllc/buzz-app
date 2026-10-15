@@ -8,6 +8,14 @@
   overflow: hidden;
 }
 
+.clip[data-collapsed] {
+  mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - 2 * var(--space-6)),
+    transparent
+  );
+}
+
 .more {
   display: grid;
   margin-top: var(--space-2);

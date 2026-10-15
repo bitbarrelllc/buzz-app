@@ -53,18 +53,24 @@ it("expands and collapses long READMEs and remeasures on resize", () => {
   const view = render(<PluginReadme text="Long description." />);
   const more = screen.getByRole("button", { name: "View more" });
   expect(more).toHaveAttribute("aria-expanded", "false");
-  expect(
-    document.getElementById(more.getAttribute("aria-controls") ?? ""),
-  ).toContainElement(screen.getByText("Long description."));
+  const clip = document.getElementById(
+    more.getAttribute("aria-controls") ?? "",
+  );
+  expect(clip).toContainElement(screen.getByText("Long description."));
+  expect(clip).toHaveStyle({ "max-height": "320px" });
+  expect(clip).toHaveAttribute("data-collapsed", "true");
   fireEvent.click(more);
   expect(screen.getByRole("button", { name: "View less" })).toHaveAttribute(
     "aria-expanded",
     "true",
   );
+  expect(clip).not.toHaveAttribute("data-collapsed");
   fireEvent.click(more);
   expect(more).toHaveAttribute("aria-expanded", "false");
+  expect(clip).toHaveAttribute("data-collapsed", "true");
   size.resize(200);
   expect(screen.queryByRole("button")).toBeNull();
+  expect(clip).not.toHaveAttribute("data-collapsed");
   view.unmount();
   expect(size.disconnect).toHaveBeenCalledOnce();
 });
