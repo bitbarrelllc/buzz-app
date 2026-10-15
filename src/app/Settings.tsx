@@ -141,9 +141,6 @@ function PluginProvenance({
       <span>
         {source === "bundled" ? "Buzz" : publisher || "Unknown author"}
       </span>
-      {source === "bundled" && (
-        <CheckCircleIcon size={14} strokeWidth={2.5} aria-hidden="true" />
-      )}
     </span>
   );
 }
@@ -661,15 +658,52 @@ export function Settings({
                                 >
                                   <ChoiceRow
                                     leading={<PluginIcon plugin={plugin} />}
-                                    label={plugin.manifest.name}
+                                    label={
+                                      <span className={styles.pluginName}>
+                                        {plugin.manifest.name}
+                                        {plugin.source === "bundled" && (
+                                          <CheckCircleIcon
+                                            size={14}
+                                            strokeWidth={2.5}
+                                            aria-hidden="true"
+                                          />
+                                        )}
+                                      </span>
+                                    }
                                     description={plugin.manifest.description}
                                   />
-                                  <PluginProvenance
-                                    source={plugin.source}
-                                    publisher={plugin.publisher}
-                                    className={styles.pluginRowAuthor}
-                                  />
+                                  {plugin.source === "external" && (
+                                    <PluginProvenance
+                                      source={plugin.source}
+                                      publisher={plugin.publisher}
+                                      className={styles.pluginRowAuthor}
+                                    />
+                                  )}
                                 </button>
+                                <div className={styles.pluginRowToggle}>
+                                  {id === "buzz.channels" ? (
+                                    <span className="text-caption text-secondary">
+                                      Required
+                                    </span>
+                                  ) : (
+                                    <Switch
+                                      aria-label={`Enable ${plugin.manifest.name}`}
+                                      checked={plugin.enabled}
+                                      readOnly={busy}
+                                      aria-disabled={busy}
+                                      onClick={(event) =>
+                                        event.currentTarget.focus()
+                                      }
+                                      onCheckedChange={() => {
+                                        if (busy) return;
+                                        void plugins.change(
+                                          plugin.enabled ? "disable" : "enable",
+                                          id,
+                                        );
+                                      }}
+                                    />
+                                  )}
+                                </div>
                               </article>
                             );
                           })}

@@ -325,9 +325,11 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   fireEvent.error(artwork);
   expect(bundledCard.querySelector("img")).toBeNull();
   expect(bundledCard.querySelectorAll("svg")).toHaveLength(2);
-  const verifiedLabel = within(bundledCard).getByText("Buzz");
-  expect(verifiedLabel).toBeVisible();
-  expect(verifiedLabel.parentElement?.querySelector("svg")).not.toBeNull();
+  expect(within(bundledCard).queryByText("Buzz")).toBeNull();
+  expect(
+    within(bundledCard).getByText("Channels").querySelector("svg"),
+  ).not.toBeNull();
+  expect(screen.queryByRole("switch", { name: "Enable Channels" })).toBeNull();
   expect(screen.queryByText("buzz.channels")).toBeNull();
 
   fireEvent.click(bundledCard);
@@ -361,6 +363,16 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const externalAuthor = within(externalCard).getByText("publisher-public-key");
   expect(externalCard.querySelector("img")).toBeNull();
   expect(externalAuthor.parentElement?.querySelector("svg")).toBeNull();
+  const rowToggle = screen.getByRole("switch", {
+    name: "Enable External helper",
+  });
+  expect(rowToggle).toBeChecked();
+  expect(externalCard).not.toContainElement(rowToggle);
+  fireEvent.click(rowToggle);
+  expect(plugins.change).toHaveBeenCalledWith("disable", "example.helper");
+  expect(
+    screen.queryByRole("complementary", { name: "External helper details" }),
+  ).toBeNull();
   fireEvent.click(externalCard);
   const external = screen.getByRole("complementary", {
     name: "External helper details",
