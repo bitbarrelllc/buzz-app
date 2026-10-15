@@ -40,6 +40,10 @@ export type ImportPreview = {
 };
 export type PluginImports = {
   folder(): Promise<ImportPreview | null>;
+  files(
+    source: string,
+    files: { path: string; text: string }[],
+  ): Promise<ImportPreview | null>;
   /** `authorization` is a NIP-98 token signed for exactly `repository`. */
   git(
     repository: string,

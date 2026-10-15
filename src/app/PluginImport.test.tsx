@@ -12,8 +12,134 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { PluginManager } from "../plugins/manager";
 import type { Catalog, ImportPreview } from "../plugins/types";
 import { PluginImport } from "./PluginImport";
+import userEvent from "@testing-library/user-event";
 
 afterEach(cleanup);
+
+it("opens both sources and the safety hint only inside Add, and restores focus on close", async () => {
+  const user = userEvent.setup();
+  const manager = {
+    imports: { folder: vi.fn(), discard: vi.fn() },
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  const add = screen.getByRole("button", { name: "Add" });
+  expect(screen.queryByLabelText("Git or GitHub repository")).toBeNull();
+  expect(screen.queryByText(/plugins aren’t sandboxed/)).toBeNull();
+  fireEvent.click(add);
+  const dialog = screen.getByRole("dialog", { name: "Add a plugin" });
+  expect(
+    within(dialog).getByLabelText("Git or GitHub repository"),
+  ).toBeVisible();
+  expect(within(dialog).getByText(/plugins aren’t sandboxed/)).toBeVisible();
+  expect(
+    within(dialog).getByRole("button", { name: "Add from folder" }),
+  ).toBeVisible();
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await waitFor(() => expect(add).toHaveFocus());
+  await user.click(add);
+  await user.click(document.querySelector(".buzz-dialog-backdrop") as Element);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("blocks dismissal and duplicate acquisition while loading, then discards the preview on close", async () => {
+  const user = userEvent.setup();
+  let resolve!: (value: ImportPreview) => void;
+  const gate = new Promise<ImportPreview>((done) => {
+    resolve = done;
+  });
+  const folder = vi.fn(() => gate);
+  const discard = vi.fn(async () => {});
+  const manager = { imports: { folder, discard } } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  const dialog = screen.getByRole("dialog");
+  const browse = within(dialog).getByRole("button", {
+    name: "Add from folder",
+  });
+  fireEvent.click(browse);
+  try {
+    expect(folder).toHaveBeenCalledTimes(1);
+    expect(browse).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Close" }),
+    ).toBeDisabled();
+    fireEvent.click(browse);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await user.click(
+      document.querySelector(".buzz-dialog-backdrop") as Element,
+    );
+    expect(dialog).toBeVisible();
+    expect(folder).toHaveBeenCalledTimes(1);
+  } finally {
+    resolve({
+      token: "drop-preview",
+      source: "test",
+      candidates: [],
+      warnings: [],
+      commit: null,
+    });
+  }
+  await screen.findByRole("region", { name: "Plugin import preview" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(discard).toHaveBeenCalledWith("drop-preview"));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("routes folder-drop contents through preview without installing, and rejects a loose file", async () => {
+  const files = vi.fn(async () => ({
+    token: "uploaded",
+    source: "Dropped folder: example",
+    candidates: [],
+    warnings: [],
+    commit: null,
+  }));
+  const manager = {
+    imports: { files, discard: vi.fn(async () => {}) },
+    installImport: vi.fn(),
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  const zone = screen.getByRole("region", { name: "Add from folder" });
+  const entry = {
+    name: "example",
+    isDirectory: true,
+    createReader: () => ({
+      readEntries: (done: (entries: unknown[]) => void) => done([]),
+    }),
+  };
+  fireEvent.drop(zone, {
+    dataTransfer: { items: [{ webkitGetAsEntry: () => entry }] },
+  });
+  await waitFor(() => expect(files).toHaveBeenCalledWith("example", []));
+  await screen.findByRole("region", { name: "Plugin import preview" });
+  expect(manager.installImport).not.toHaveBeenCalled();
+  fireEvent.drop(zone, {
+    dataTransfer: {
+      items: [{ webkitGetAsEntry: () => ({ isDirectory: false }) }],
+    },
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Drop one folder");
+  expect(files).toHaveBeenCalledTimes(1);
+});
 
 it("shows exact declared access and changes before an enabled update", async () => {
   const preview: ImportPreview = {
@@ -82,7 +208,8 @@ it("shows exact declared access and changes before an enabled update", async () 
     installImport: vi.fn(async () => true),
   } as unknown as PluginManager;
   render(<PluginImport plugins={manager} catalog={catalog} busy={false} />);
-  fireEvent.click(screen.getByRole("button", { name: "Load from folder" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add from folder" }));
   await waitFor(() =>
     expect(
       screen.getByText(
@@ -202,7 +329,8 @@ it.each([
       installImport: vi.fn(),
     } as unknown as PluginManager;
     render(<PluginImport plugins={manager} catalog={catalog} busy={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "Load from folder" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add from folder" }));
     const access = within(
       await screen.findByRole("region", { name: "Declared host access" }),
     );
@@ -253,7 +381,7 @@ it("signs in only to repositories the community authorizes", async () => {
       authorizeGit={authorizeGit}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Load from Git" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
   const field = screen.getByLabelText("Git or GitHub repository");
   const find = screen.getByRole("button", { name: "Find plugins" });
   fireEvent.change(field, { target: { value: ` ${buzz} ` } });

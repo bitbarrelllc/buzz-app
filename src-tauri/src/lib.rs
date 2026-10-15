@@ -56,7 +56,7 @@ mod terminal;
 #[cfg(test)]
 mod test_executable;
 use buzzodz_plugins::{
-    imports::{prepare_folder, prepare_git, PreparedImport, Preview},
+    imports::{prepare_folder, prepare_git, prepare_upload, FolderUpload, PreparedImport, Preview},
     Catalog, InstallationResult, Manager,
 };
 use deep_links::{deep_link_take, deep_link_watch, DeepLinks};
@@ -269,8 +269,12 @@ async fn workspace_pick_folder<R: tauri::Runtime>(
 async fn plugin_import_folder<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     imports: tauri::State<'_, Imports>,
+    upload: Option<FolderUpload>,
 ) -> Result<Option<Preview>, String> {
     prepare_import(imports.inner().clone(), move || {
+        if let Some(upload) = upload {
+            return prepare_upload(upload).map(Some);
+        }
         app.dialog()
             .file()
             .set_title("Choose a plugin folder")

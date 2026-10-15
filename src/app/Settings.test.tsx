@@ -857,6 +857,12 @@ it("keeps related plugins out of the pane even when tags overlap", () => {
     refreshError: null,
   };
   const plugins = {
+    imports: {
+      folder: vi.fn(),
+      files: vi.fn(),
+      git: vi.fn(),
+      discard: vi.fn(),
+    },
     subscribe: () => () => {},
     snapshot: () => snapshot,
     change: vi.fn(),
@@ -877,6 +883,10 @@ it("keeps related plugins out of the pane even when tags overlap", () => {
 
   render(<Settings {...host} cards={cards} plugins={plugins} />);
   fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
+  const header = screen
+    .getByRole("heading", { name: "Plugins" })
+    .closest("[data-buzz-ui]");
+  expect(header).toContainElement(screen.getByRole("button", { name: "Add" }));
   fireEvent.click(
     screen.getByRole("button", { name: "View Channels details" }),
   );

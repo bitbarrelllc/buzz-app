@@ -387,6 +387,8 @@ export function Settings({
     [catalog?.plugins],
   );
   const [selectedPluginId, setSelectedPluginId] = useState<string>();
+  const [pluginImportActions, setPluginImportActions] =
+    useState<HTMLSpanElement | null>(null);
   const pluginTrigger = useRef<HTMLButtonElement>(null);
   const selectedPlugin = catalog?.plugins.find(
     (plugin) => plugin.manifest.id === selectedPluginId,
@@ -530,6 +532,11 @@ export function Settings({
                 <Header
                   id="plugin-settings-title"
                   title="Plugins"
+                  actions={
+                    plugins.imports && catalog ? (
+                      <span ref={setPluginImportActions} />
+                    ) : undefined
+                  }
                   subtitle={
                     !plugins.imports
                       ? "Open the desktop app to load plugins from a folder or Git repository."
@@ -538,6 +545,7 @@ export function Settings({
                 />
                 {catalog ? (
                   <PluginImport
+                    actionTarget={pluginImportActions}
                     plugins={plugins}
                     catalog={catalog}
                     busy={busy}
