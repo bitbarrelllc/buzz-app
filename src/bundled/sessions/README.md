@@ -1,7 +1,7 @@
 # Sessions
 
-Keeps older Sessions links working by opening them in **Me**, where your agent chats now live.
+Keeps older Sessions links working by opening them in **Solo**, where your agent chats now live.
 
 ## Getting started
 
-Old Sessions links open in **Me**.
+Old Sessions links open in **Solo**.
