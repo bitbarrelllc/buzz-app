@@ -287,7 +287,9 @@ function ReadySidebar({
     (channel) =>
       !channel.huddle &&
       !channel.metadataPending &&
-      (!meEnabled || !placement.ids.includes(channel.id)) &&
+      (!meEnabled ||
+        !placement.ids.includes(channel.id) ||
+        (!channel.cached && channel.channelType === "stream")) &&
       (!preparingDm ||
         preparingDm.existing.has(channel.id) ||
         channel.channelType !== "dm" ||
