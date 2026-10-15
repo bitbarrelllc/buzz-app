@@ -9,8 +9,10 @@ import { composerDOMFixture } from "../features/messages/composer-testing";
 
 composerDOMFixture();
 
-// jsdom has no IndexedDB; nothing is sent here.
-vi.mock("../features/relay/outbox-storage", () => ({
+// jsdom has no IndexedDB; nothing is sent here. The purge stays real: without
+// IndexedDB it only drops the partition's localStorage record.
+vi.mock("../features/relay/outbox-storage", async (original) => ({
+  ...(await original<typeof import("../features/relay/outbox-storage")>()),
   browserOutboxStorage: () => ({ load: () => [], save: () => {} }),
 }));
 vi.mock("../bundled", async () => ({
