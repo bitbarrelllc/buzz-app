@@ -459,7 +459,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const rowAction = screen.getByRole("button", {
     name: "Disable External helper",
   });
-  expect(rowAction).toHaveAttribute("data-variant", "subtle");
+  expect(rowAction).toHaveAttribute("data-variant", "outline");
   expect(rowAction).toHaveAttribute("data-size", "sm");
   expect(externalCard).not.toContainElement(rowAction);
   fireEvent.click(rowAction);
@@ -508,7 +508,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const rowEnable = screen.getByRole("button", {
     name: "Enable External helper",
   });
-  expect(rowEnable).toHaveAttribute("data-variant", "prominent");
+  expect(rowEnable).toHaveAttribute("data-variant", "subtle");
   fireEvent.click(rowEnable);
   expect(plugins.change).toHaveBeenLastCalledWith("enable", "example.helper");
   fireEvent.click(enable);
