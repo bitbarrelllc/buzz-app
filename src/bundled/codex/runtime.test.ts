@@ -45,6 +45,7 @@ function fixture(
   remainingTerminals: unknown[] = [],
   termination?: Promise<void>,
   plugin = false,
+  configured: { model?: string; model_reasoning_effort?: string } = {},
 ) {
   let terminals = remainingTerminals;
   let options: HostProcessOptions | undefined;
@@ -117,6 +118,7 @@ function fixture(
       if (request.method === "config/read")
         result = {
           config: {
+            ...configured,
             mcp_servers: {
               "company.tools": {
                 command: "secret-tool",
@@ -810,6 +812,7 @@ it("discovers models and efforts before any turn, sharing one read-only lookup",
   expect(one).toBe(two);
   await expect(one).resolves.toEqual({
     current: "test-model",
+    sendDefaults: true,
     models: [
       {
         id: "test-model",
@@ -842,6 +845,36 @@ it("discovers models and efforts before any turn, sharing one read-only lookup",
   f.spawn.mockRejectedValueOnce(new Error("offline"));
   await expect(f.runtime.preview(agent)).rejects.toThrow("offline");
 });
+it("refreshes model discovery only when effective model or effort changes", async () => {
+  const f = fixture();
+  const agent = { pubkey, config: { workspace: "/tmp/codex-test" } } as Agent;
+  const one = f.runtime.preview(agent);
+  await one;
+  expect(
+    f.runtime.preview({ ...agent, config: { workspace: "/tmp/other" } }),
+  ).toBe(one);
+  const two = f.runtime.preview({ ...agent, config: { model: "deep-model" } });
+  expect(two).not.toBe(one);
+  await expect(two).resolves.toMatchObject({ current: "deep-model" });
+  const three = f.runtime.preview({
+    ...agent,
+    config: { model: "deep-model", effort: "xhigh" },
+  });
+  expect(three).not.toBe(two);
+  await expect(three).resolves.toMatchObject({
+    current: "deep-model",
+    models: expect.arrayContaining([
+      expect.objectContaining({ id: "deep-model", effort: "xhigh" }),
+    ]),
+  });
+  expect(
+    f.runtime.preview({
+      ...agent,
+      config: { model: "deep-model", effort: "xhigh" },
+    }),
+  ).toBe(three);
+  expect(f.sent.filter((wire) => wire.method === "model/list")).toHaveLength(3);
+});
 it("shares model discovery with active turns and another agent", async () => {
   const f = fixture();
   await f.runtime.run(f.delivery("work"));
@@ -855,6 +888,14 @@ it("shares model discovery with active turns and another agent", async () => {
   expect(f.process.end).not.toHaveBeenCalled();
   f.complete();
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+});
+it("ignores changes to local Codex model preferences in the composer", async () => {
+  const configured = { model: "deep-model" };
+  const f = fixture([], undefined, false, configured);
+  const agent = { pubkey, config: { workspace: "/tmp/codex-test" } } as Agent;
+  expect((await f.runtime.preview(agent)).current).toBe("test-model");
+  configured.model = "test-model";
+  expect((await f.runtime.preview(agent)).current).toBe("test-model");
 });
 it("still offers the listed models when the configured one is not listed", async () => {
   const f = fixture();
@@ -879,6 +920,41 @@ it("previews each model at the configured effort when it has it", async () => {
   const { models } = await f.runtime.preview(agent);
   expect(models.map((model) => model.effort)).toEqual(["low", "high"]);
 });
+it.each([
+  ["", "", "test-model", "medium"],
+  ["test-model", "high", "test-model", "high"],
+  ["deep-model", "", "deep-model", "high"],
+  ["deep-model", "xhigh", "deep-model", "xhigh"],
+])(
+  "resolves Buzz model %s and thinking %s independently of local Codex preferences",
+  async (model, effort, expected, expectedEffort) => {
+    const f = fixture([], undefined, false, {
+      model: "deep-model",
+      model_reasoning_effort: "xhigh",
+    });
+    const delivery = {
+      ...f.delivery("work"),
+      config: { workspace: "/tmp/codex-test", model, effort },
+    };
+    const preview = await f.runtime.preview({
+      pubkey,
+      config: delivery.config,
+    } as Agent);
+    expect(preview.current).toBe(expected);
+    expect(preview.models.find((row) => row.id === expected)?.effort).toBe(
+      expectedEffort,
+    );
+    await f.runtime.run(delivery);
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    expect(f.starts()[0]?.params).toMatchObject({
+      model: expected,
+      effort: expectedEffort,
+    });
+    expect(
+      f.sent.find((wire) => wire.method === "thread/start")?.params,
+    ).toMatchObject({ model: expected });
+  },
+);
 it("starts a turn at the effort its owner picked when the model supports it", async () => {
   const f = fixture();
   await f.runtime.run({ ...f.delivery("@Codex hard"), effort: "high" });
@@ -2140,10 +2216,16 @@ it("uses the launched workspace for shared file tools and the owner view for enc
     ],
   });
   expect(f.media).toHaveBeenCalledWith("shot.png");
-  expect(f.memoryRead).toHaveBeenCalledWith(pubkey, expect.any(AbortSignal));
   expect(f.remember).toHaveBeenCalledWith("mem/test", "remembered", 0);
-  // The turn's own `core` read, then mem_set's read and a fresh post-write read.
-  expect(f.memoryRead).toHaveBeenCalledTimes(3);
+  // The turn's own `core` read, then mem_set's read and a fresh post-write
+  // read, each of one entry by its slug.
+  expect(
+    f.memoryRead.mock.calls.map((call: unknown[]) => [call[0], call[2]]),
+  ).toEqual([
+    [pubkey, "core"],
+    [pubkey, "mem/test"],
+    [pubkey, "mem/test"],
+  ]);
   expect(
     (
       await f.tool("send", {

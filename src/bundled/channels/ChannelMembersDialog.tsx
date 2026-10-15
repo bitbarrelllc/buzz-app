@@ -1091,8 +1091,16 @@ export function ChannelMembersDialog({
       }
       height={selection ? "content" : "stable"}
       bodyLayout={selection ? "flow" : "flex"}
-      headerGap={selection?.role === "remove" ? "compact" : "default"}
-      footerGap={selection?.role === "remove" ? "compact" : "default"}
+      headerGap={
+        !selection || selection.role === "remove" ? "compact" : "default"
+      }
+      footerGap={
+        !selection
+          ? "none"
+          : selection.role === "remove"
+            ? "compact"
+            : "default"
+      }
       description={
         selection ? (
           <span className="flex min-w-0 items-center gap-2">
@@ -1233,6 +1241,7 @@ export function ChannelMembersDialog({
               >
                 <Select
                   variant="compact"
+                  size="md"
                   label="Filter members by role"
                   align="end"
                   value={roleFilter}
@@ -1264,7 +1273,7 @@ export function ChannelMembersDialog({
           )}
           <section
             ref={scrollport}
-            className={styles.memberList}
+            className={`${styles.memberList} buzz-thin-scrollbar`}
             aria-label="Member list"
           >
             {!canAdd && (

@@ -406,6 +406,7 @@ function Composer({
   const valueRef = useRef(value);
   // Model and effort picked for mentioned agents' next run; cleared by each send.
   const [picks, setPicks] = useState<MentionPicks>({});
+  const resolvedPicks = useRef<MentionPicks>({});
   const caret = useRef<number | undefined>(undefined);
   const input = useRef<ComposerInputElement>(null);
   const focusOnMount = useRef(
@@ -1115,6 +1116,7 @@ function Composer({
     const captured = valueRef.current;
     const capturedAttachments = attachments.store.snapshot();
     const capturedPicks = picks;
+    const capturedRunPicks = { ...picks, ...resolvedPicks.current };
     try {
       if (submission?.receiptOnly) {
         submission.submit(captured);
@@ -1210,7 +1212,7 @@ function Composer({
         : sentMentionFollowup(session, captured, recipients);
       // Only agents still notified by this message are asked for a model or effort.
       const sentPicks: MentionPicks = Object.fromEntries(
-        Object.entries(capturedPicks).filter(([key]) =>
+        Object.entries(capturedRunPicks).filter(([key]) =>
           recipients.includes(key),
         ),
       );
@@ -1756,6 +1758,9 @@ function Composer({
                   value={picks}
                   disabled={editingDisabled}
                   onChange={setPicks}
+                  onResolved={(next) => {
+                    resolvedPicks.current = next;
+                  }}
                 />
               )}
             <IconButton
