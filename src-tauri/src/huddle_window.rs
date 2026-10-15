@@ -111,19 +111,16 @@ impl DiscussionAttachment {
             && self.url.len() <= 8192
             && [&self.source, &self.preview_source, &self.preview_url]
                 .iter()
-                .all(|url| url.as_ref().map_or(true, |url| url.len() <= 8192))
-            && self.name.as_ref().map_or(true, |name| name.len() <= 4096)
-            && self.mime.as_ref().map_or(true, |mime| mime.len() <= 256)
-            && self
-                .blurhash
-                .as_ref()
-                .map_or(true, |hash| hash.len() <= 256)
-            && self.waveform.as_ref().map_or(true, |waveform| {
+                .all(|url| url.as_ref().is_none_or(|url| url.len() <= 8192))
+            && self.name.as_ref().is_none_or(|name| name.len() <= 4096)
+            && self.mime.as_ref().is_none_or(|mime| mime.len() <= 256)
+            && self.blurhash.as_ref().is_none_or(|hash| hash.len() <= 256)
+            && self.waveform.as_ref().is_none_or(|waveform| {
                 !waveform.is_empty() && waveform.len() <= 100 && waveform.iter().all(|n| *n <= 100)
             })
-            && self.duration.map_or(true, |duration| {
-                duration.is_finite() && (0.0..=86400.0).contains(&duration)
-            })
+            && self
+                .duration
+                .is_none_or(|duration| duration.is_finite() && (0.0..=86400.0).contains(&duration))
     }
 }
 #[derive(Clone, Deserialize, Serialize)]
@@ -446,12 +443,12 @@ pub(crate) fn huddle_window_action<R: tauri::Runtime>(
     ) {
         if text
             .as_ref()
-            .map_or(true, |t| t.trim().is_empty() || t.len() > 65536)
+            .is_none_or(|t| t.trim().is_empty() || t.len() > 65536)
         {
             return Err("Invalid Huddle message".into());
         }
     } else if matches!(action, Action::OpenLink) {
-        if text.as_ref().map_or(true, |url| {
+        if text.as_ref().is_none_or(|url| {
             !url.get(..5)
                 .is_some_and(|scheme| scheme.eq_ignore_ascii_case("buzz:"))
                 || url.len() > 8192
@@ -459,7 +456,7 @@ pub(crate) fn huddle_window_action<R: tauri::Runtime>(
             return Err("Invalid Huddle link".into());
         }
     } else if matches!(action, Action::InputDevice | Action::OutputDevice) {
-        if text.as_ref().map_or(true, |id| id.len() > 4096) {
+        if text.as_ref().is_none_or(|id| id.len() > 4096) {
             return Err("Invalid audio device".into());
         }
     } else if text.is_some() {
@@ -484,7 +481,7 @@ pub(crate) fn retire<R: tauri::Runtime>(app: &tauri::AppHandle<R>, id: &str) {
     let Ok(mut slot) = host.0.lock() else {
         return;
     };
-    if slot.as_ref().map_or(true, |s| s.view.id == id) {
+    if slot.as_ref().is_none_or(|s| s.view.id == id) {
         *slot = None;
         if let Some(window) = app.get_webview_window(LABEL) {
             let _ = window.destroy();

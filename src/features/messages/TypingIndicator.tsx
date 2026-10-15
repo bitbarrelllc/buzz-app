@@ -34,7 +34,7 @@ const noRows: readonly never[] = [];
 
 /** Agents working in one conversation, over existing stores; no reads or capture. */
 function useConversationAgents(
-  session: RelaySession,
+  session: ComposerSession & Partial<Pick<RelaySession, "agentActivity">>,
   channelId: string,
   threadRootId: string | undefined,
 ) {
