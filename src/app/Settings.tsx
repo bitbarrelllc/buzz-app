@@ -617,11 +617,6 @@ export function Settings({
                       <span ref={setPluginImportActions} />
                     ) : undefined
                   }
-                  subtitle={
-                    !plugins.imports
-                      ? "Open the desktop app to load plugins from a folder or Git repository."
-                      : undefined
-                  }
                 />
                 {catalog ? (
                   <PluginImport
