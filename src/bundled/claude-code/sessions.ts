@@ -193,8 +193,7 @@ export class AgentSessions {
     if (
       live &&
       (!live.process.running ||
-        (live.fingerprint !== this.options.fingerprint() &&
-          !live.process.active))
+        (live.fingerprint !== this.options.fingerprint() && !live.process.busy))
     ) {
       this.drop(key, live);
       live = undefined;
@@ -298,13 +297,13 @@ export class AgentSessions {
     }
   }
 
-  /** Stops idle processes started with old settings; active ones stop at their
-   * next message or idle deadline once quiet. */
+  /** Stops idle processes started with old settings; busy ones stop when they
+   * next fall idle. */
   reconfigure() {
     this.clearDiscovery();
     const fingerprint = this.options.fingerprint();
     for (const [key, live] of this.live)
-      if (live.fingerprint !== fingerprint && !live.process.active)
+      if (live.fingerprint !== fingerprint && !live.process.busy)
         this.drop(key, live);
   }
 
@@ -365,10 +364,7 @@ export class AgentSessions {
     const settled = await live.process.send(text, activity);
     if (this.live.get(key) === live) {
       this.touch(key, live);
-      if (
-        live.fingerprint !== this.options.fingerprint() &&
-        !live.process.active
-      )
+      if (live.fingerprint !== this.options.fingerprint() && !live.process.busy)
         this.drop(key, live);
     }
     return settled;
