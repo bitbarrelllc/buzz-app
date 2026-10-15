@@ -541,9 +541,9 @@ grants capabilities, asserts provenance, or describes runtime state. The
 `discovery` object accepts unknown display hints for forward compatibility;
 security-bearing manifest fields remain strict.
 
-Older hosts that validate tags as slugs will reject readable phrases. Publishers
-targeting those hosts must continue using slug tags; existing slug tags remain
-valid in the new host.
+Hosts released before these metadata fields were introduced reject `description`
+and `discovery` as unknown manifest keys. Publishers targeting those hosts must
+omit both fields; using slug tags does not make them compatible.
 
 Plugins can separately declare host access in `manifest.json`:
 
@@ -612,7 +612,9 @@ stdout and stderr arrive as UTF-8 text as they are read, not split into lines.
 `cwd` is absolute or `~/…` and is created if missing. `env` adds to the app's
 environment (`null` removes a variable); variables starting `BUZZ_` or `NOSTR_`
 are never inherited. The program is found on the same search path as commands,
-which on macOS also includes `~/.local/bin`.
+which on macOS also includes `~/.local/bin`. A process declared with
+`"bundled": true` instead runs the copy the app ships in its `bin` resources and
+never searches PATH; the Goose plugin runs `goose-acp` this way.
 
 `agent` names an agent whose type the calling plugin registered. The
 process then runs as that agent, as harness agents do: native puts its key in
@@ -1195,7 +1197,9 @@ plugin keeps registering its default and never sees, stores or re-registers for
 an override; the override follows the plugin across disable, re-enable and
 replacement, and an override whose owner is no longer installed is ignored rather
 than deleted. Rebinding replaces an alias set with the single chosen chord; reset
-restores every alias. Host chords stay reserved: the page refuses to assign a chord
+restores every alias. On Apple platforms a binding may add Control (`ctrl`) beside
+Command, as in Me's ⌃⌘A Archive chat; elsewhere Control is `mod`, so a `ctrl`
+binding never matches there and capture never records one. Host chords stay reserved: the page refuses to assign a chord
 that another listed shortcut already uses, host or plugin, refuses the copy, cut,
 paste and select-all chords (and close-window/quit in the desktop build) because a
 match would prevent their default everywhere, and warns when a chord is one the

@@ -1,3 +1,4 @@
+import type { Agents } from "../features/agents/service";
 import { Header, InlineHeader } from "../shared/design-system/ui/Header";
 import { ToastNotice } from "../shared/design-system/ui/Toast";
 import { Panel } from "../shared/design-system/ui/Panel";
@@ -9,6 +10,7 @@ import { ChoiceRow } from "../shared/design-system/ui/ChoiceRow";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -24,7 +26,7 @@ import {
 } from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
 import type { PluginInfo } from "../plugins/types";
-import type { Communities } from "../features/communities/service";
+import type { Communities, Membership } from "../features/communities/service";
 import { PluginImport } from "./PluginImport";
 import { PluginReadme } from "./PluginReadme";
 import { bundledReadmes } from "../bundled/readmes";
@@ -46,18 +48,10 @@ import type { SettingsCards } from "../features/settings/service";
 import { OwnedContribution } from "../plugins/OwnedContribution";
 import type { Updates } from "../features/updates/updates";
 import { UpdateSettings } from "../features/updates/UpdateSettings";
+import { CommunityDepartureSettings } from "./CommunityDepartureSettings";
 import { developerMode, settingsSections } from "./settings-sections";
 
-const pluginCategoryDefinitions = [
-  { id: "communication", label: "Communication" },
-  { id: "productivity", label: "Productivity" },
-  { id: "agents", label: "Agents" },
-  {
-    id: "developer-tools-and-integrations",
-    label: "Developer tools & integrations",
-  },
-  { id: "people-and-communities", label: "People & communities" },
-] as const;
+import { pluginCategoryDefinitions } from "./plugin-categories";
 
 function isRequiredPlugin(plugin: PluginInfo) {
   return plugin.manifest.id === "buzz.channels";
@@ -341,6 +335,7 @@ function PluginDetails({
 }
 
 export function Settings({
+  agents,
   cards,
   plugins,
   communities,
@@ -353,7 +348,9 @@ export function Settings({
   navigation,
   onSection,
   navigationPane = false,
+  onDeparturePending,
 }: {
+  agents?: Agents | undefined;
   cards: SettingsCards;
   plugins: PluginManager;
   communities: Communities;
@@ -368,6 +365,7 @@ export function Settings({
     | undefined;
   onSection?: (section: string) => void;
   navigationPane?: boolean;
+  onDeparturePending?: (pending: boolean) => void;
 }) {
   useEffect(() => cards.retainVisibility(), [cards]);
   const contributed = useSyncExternalStore(cards.subscribe, cards.snapshot);
@@ -378,11 +376,37 @@ export function Settings({
   const selectedCommunity = client.memberships.find(
     (membership) => membership.id === client.selected,
   );
+  // Local removal drops the saved membership before session disposal/purge
+  // settles. Retain only this action's context so its modal can finish.
+  const [departure, setDeparture] = useState<{
+    community: Membership;
+    viewer: string | undefined;
+  } | null>(null);
+  const departureCommunity =
+    departure?.viewer === client.viewer
+      ? (departure?.community ?? selectedCommunity)
+      : selectedCommunity;
   const { groups, sections, defaultSection } = useMemo(
-    () => settingsSections(contributed, selectedCommunity),
-    [contributed, selectedCommunity],
+    () => settingsSections(contributed, departureCommunity),
+    [contributed, departureCommunity],
   );
   const [selected, setSelected] = useState(defaultSection);
+  const departureFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (selected !== "profile" || !departureFocus.current) return;
+    departureFocus.current = false;
+    document.getElementById("main-content")?.focus({ preventScroll: true });
+  }, [selected]);
+  useEffect(() => {
+    if (
+      departure &&
+      (selected !== "leave-community" ||
+        departure.viewer !== client.viewer ||
+        (client.selected !== null &&
+          client.selected !== departure.community.id))
+    )
+      setDeparture(null);
+  }, [client.selected, client.viewer, departure, selected]);
   const requestedSection =
     navigation?.target.kind === "settings"
       ? (navigation.target.section ?? defaultSection)
@@ -500,6 +524,7 @@ export function Settings({
             </div>
             <div hidden={selected !== "agents"}>
               <AgentSettings
+                agents={agents}
                 archive={
                   <ArchiveSettings
                     relay={communities.relay}
@@ -537,6 +562,26 @@ export function Settings({
                     }}
                   </OwnedContribution>
                 ),
+            )}
+            {departureCommunity && selected === "leave-community" && (
+              <CommunityDepartureSettings
+                key={`${client.viewer}:${departureCommunity.id}`}
+                communities={communities}
+                community={departureCommunity}
+                onPending={(pending) => {
+                  onDeparturePending?.(pending);
+                  setDeparture(
+                    pending
+                      ? { community: departureCommunity, viewer: client.viewer }
+                      : null,
+                  );
+                }}
+                onRemoved={() => {
+                  departureFocus.current = true;
+                  if (onSection) onSection("profile");
+                  else setSelected("profile");
+                }}
+              />
             )}
             <div hidden={selected !== "profile"}>
               <ProfileSettings
@@ -628,7 +673,9 @@ export function Settings({
                               <span>{group.label}</span>
                               <span className={styles.pluginCount}>
                                 {group.plugins.length}
-                                <span className="sr-only"> plugins</span>
+                                <span className="sr-only">
+                                  {group.plugins.length === 1 ? " plugin" : " plugins"}
+                                </span>
                               </span>
                             </span>
                           }

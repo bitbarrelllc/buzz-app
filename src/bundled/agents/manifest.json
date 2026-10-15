@@ -3,8 +3,5 @@
   "name": "Agents",
   "apiVersion": 1,
   "description": "Create, configure, and manage agents.",
-  "discovery": {
-    "category": "agents",
-    "tags": ["coding-agents", "Essentials"]
-  }
+  "discovery": {"category": "agents", "tags": ["Essentials", "coding-agents"]}
 }

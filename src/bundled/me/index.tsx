@@ -1,6 +1,6 @@
 import type { PluginModule } from "../../plugins/api";
 import { isApplePlatform } from "../../features/shortcuts/format";
-import { SessionsPage } from "../sessions/SessionsPage";
+import { SessionsPage, type ArchiveShortcut } from "../sessions/SessionsPage";
 import { isMeRoute, meTarget } from "./routes";
 
 export const inject = [
@@ -15,6 +15,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const relay = ctx.relay;
   const extensions = ctx.conversation;
   const navigator = ctx.navigation;
+  const archive: ArchiveShortcut = {};
   ctx.shortcuts.register({
     id: "new-conversation",
     title: "New conversation",
@@ -31,9 +32,21 @@ export const apply: PluginModule["apply"] = (ctx) => {
       if (scope) void navigator.open(meTarget(scope));
     },
   });
+  ctx.shortcuts.register({
+    id: "archive-chat",
+    title: "Archive chat",
+    // Apple Mail's Archive. Elsewhere Ctrl is Mod, and Ctrl+Shift+A is Home.
+    binding: isApplePlatform(globalThis.navigator?.platform ?? "")
+      ? { key: "a", mod: true, ctrl: true }
+      : { key: "e", mod: true, shift: true },
+    order: 20,
+    allowInEditable: true,
+    when: () => !!archive.current?.available(),
+    run: () => archive.current?.run(),
+  });
   ctx.pages.register({
     id: "me",
-    title: "Me",
+    title: "Solo",
     primary: true,
     placement: "topbar",
     layout: "workspace",
@@ -48,6 +61,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
           extensions={extensions}
           navigator={navigator}
           navigation={navigation}
+          archive={archive}
         />
       </div>
     ),

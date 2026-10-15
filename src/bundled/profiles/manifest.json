@@ -3,8 +3,5 @@
   "name": "Profiles",
   "apiVersion": 1,
   "description": "View member and agent profiles and recent activity.",
-  "discovery": {
-    "category": "people-and-communities",
-    "tags": ["people", "Essentials"]
-  }
+  "discovery": {"category": "people-and-communities", "tags": ["Essentials", "people"]}
 }

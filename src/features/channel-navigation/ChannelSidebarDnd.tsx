@@ -5,6 +5,7 @@ import {
   type CollisionDetection,
   pointerWithin,
   useDraggable,
+  useDndMonitor,
   useDroppable,
   useSensor,
   useSensors,
@@ -13,6 +14,7 @@ import {
   createContext,
   useContext,
   useState,
+  useRef,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -56,9 +58,10 @@ const sidebarCollisions: CollisionDetection = (args) => {
 };
 
 /**
- * Pointer moves between saved groups, Starred and Channels, and reorders saved
- * groups by their header. A drop only reports its destination, so the caller
- * saves it exactly like the menus' moves; those menus remain the keyboard path.
+ * Pointer moves between sidebar sections (Messages groups, Starred and Channels,
+ * or Me projects and Chats), and reorders saved groups by their header. A drop
+ * only reports its destination, so the caller saves it exactly like the menus'
+ * moves; those menus remain the keyboard path.
  */
 export function ChannelSidebarDnd({
   writable,
@@ -164,6 +167,12 @@ export function DroppableSidebarSection({
     data: { group: true, groupIndex },
     disabled: !reorderable,
   });
+  const suppressClick = useRef(false);
+  useDndMonitor({
+    onDragStart: ({ active }) => {
+      if (active.id === section.sectionKey) suppressClick.current = true;
+    },
+  });
   const group = !!active?.data.current?.group;
   const from = active?.data.current?.groupIndex;
   return (
@@ -184,7 +193,23 @@ export function DroppableSidebarSection({
       }
       dragHandle={
         reorderable
-          ? { ref: drag.setNodeRef, listeners: drag.listeners }
+          ? {
+              ref: drag.setNodeRef,
+              listeners: {
+                ...drag.listeners,
+                onPointerDown: (event) => {
+                  suppressClick.current = false;
+                  drag.listeners?.onPointerDown?.(event);
+                },
+                onClickCapture: (event) => {
+                  // dnd-kit removes its document click guard after 50ms.
+                  // Keep late drag clicks inert until the next deliberate input.
+                  if (!suppressClick.current || event.detail === 0) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                },
+              },
+            }
           : undefined
       }
       dragging={drag.isDragging}

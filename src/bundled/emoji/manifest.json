@@ -3,8 +3,5 @@
   "name": "Emoji",
   "apiVersion": 1,
   "description": "Use emoji completion, reactions, and custom emoji.",
-  "discovery": {
-    "category": "communication",
-    "tags": ["messaging", "Essentials"]
-  }
+  "discovery": {"category": "communication", "tags": ["Essentials", "messaging"]}
 }

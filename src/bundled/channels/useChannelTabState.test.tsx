@@ -3,12 +3,11 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, expect, test } from "vitest";
 import type { RelaySession } from "../../features/relay/session";
-import type { RegisteredPanel } from "../../features/panels/service";
-import {
-  panelTabId,
-  type PanelOpening,
-  useChannelTabState,
-} from "./useChannelTabState";
+import type {
+  PanelOpening,
+  RegisteredPanel,
+} from "../../features/panels/service";
+import { panelTabId, useChannelTabState } from "./useChannelTabState";
 
 import {
   setThreadPlacementPreference,
@@ -428,6 +427,17 @@ test("revisiting a history entry restores its selection without closing threads"
   expect(h.result.current.selected).toBe("other");
   act(() => h.result.current.enterVisit("two:thread", routed));
   expect(h.result.current.selected).toBe("thread:alpha:root");
+});
+
+test("a new channel visit shows the conversation unless it keeps the current selection", () => {
+  const session = {} as RelaySession;
+  const h = renderHook(() => useChannelTabState(session, "alpha"));
+  act(() => h.result.current.openThreadTab("alpha", "root", "root", "select"));
+  act(() => h.result.current.moveTab("thread:alpha:root", "main", 0));
+  act(() => h.result.current.enterVisit("one:channel", undefined, true));
+  expect(h.result.current.mainSelected).toBe("thread:alpha:root");
+  act(() => h.result.current.enterVisit("two:channel"));
+  expect(h.result.current.mainSelected).toBeUndefined();
 });
 
 test("Back restores an empty side pane as hidden while retaining the later thread", () => {
