@@ -41,6 +41,29 @@ function discussion(delivery: "failed" | "unknown"): HuddleDiscussion {
   };
 }
 
+it.each(["buzz-media://localhost/authorized-avatar", null])(
+  "renders a profile avatar only through its resolved media source (%s)",
+  (source) => {
+    const value = discussion("failed");
+    const row = value.rows[0];
+    assert.exists(row);
+    row.pictureUrl = "https://example.test/avatar.png";
+    row.picture = source;
+    const { container } = render(
+      <HuddleDiscussionView
+        discussion={value}
+        composer={null}
+        older={() => {}}
+        retry={() => {}}
+        recover={() => {}}
+      />,
+    );
+    expect(container.querySelector("img")?.getAttribute("src") ?? null).toBe(
+      source,
+    );
+  },
+);
+
 it.each(["failed", "unknown"] as const)(
   "keeps focus when recovering a %s message succeeds or fails",
   (delivery) => {

@@ -66,6 +66,8 @@ struct DiscussionRow {
     attachments: Vec<DiscussionAttachment>,
     author: String,
     picture: Option<String>,
+    #[serde(default)]
+    picture_url: Option<String>,
     text: String,
     #[serde(default)]
     mentions: Vec<String>,
@@ -235,6 +237,7 @@ fn validate(view: &View) -> Result<()> {
                         || r.author.len() > 4096
                         || r.text.len() > 65536
                         || r.picture.as_ref().is_some_and(|p| p.len() > 8192)
+                        || r.picture_url.as_ref().is_some_and(|p| p.len() > 8192)
                 })
         })
         || view.participants.iter().any(|p| {
@@ -617,7 +620,8 @@ mod tests {
                 }))
                 .unwrap()],
                 author: "Alex".into(),
-                picture: None,
+                picture: Some("http://buzz-media.localhost/avatar".into()),
+                picture_url: Some("https://relay.example/avatar.png".into()),
                 text: "Hello".into(),
                 mentions: vec!["cd".repeat(32)],
                 mention_names: [("cd".repeat(32), "Taylor".into())].into(),
@@ -660,9 +664,26 @@ mod tests {
             "ab".repeat(32)
         );
         assert_eq!(serialized["discussion"]["rows"][0]["channelId"], "room");
+        assert_eq!(
+            serialized["discussion"]["rows"][0]["pictureUrl"],
+            "https://relay.example/avatar.png"
+        );
         let restored: View = serde_json::from_value(serialized.clone()).unwrap();
         assert_eq!(serde_json::to_value(&restored).unwrap(), serialized);
         assert!(validate(&restored).is_ok());
+        let mut legacy = serialized.clone();
+        legacy["discussion"]["rows"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("pictureUrl");
+        let legacy: View = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.discussion.as_ref().unwrap().rows[0]
+            .picture_url
+            .is_none());
+        assert!(validate(&legacy).is_ok());
+        presentation.discussion.as_mut().unwrap().rows[0].picture_url = Some("é".repeat(4097));
+        assert!(validate(&presentation).is_err());
+        presentation.discussion.as_mut().unwrap().rows[0].picture_url = None;
         let attachment = &mut presentation.discussion.as_mut().unwrap().rows[0].attachments[0];
         attachment.kind = "invalid".into();
         assert!(validate(&presentation).is_err());

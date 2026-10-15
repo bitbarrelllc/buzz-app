@@ -514,6 +514,7 @@ it("preserves signed mention evidence and edit boundaries while bounding discuss
       picture: `data:image/png;base64,${"a".repeat(9000)}`,
     });
     expect(h.discussion.snapshot().rows[0]?.picture).toBeNull();
+    expect(h.discussion.snapshot().rows[0]?.pictureUrl).toBeNull();
     h.profiles.set("ab".repeat(32), {
       name: "Author",
       picture: "https://example.test/avatar.png",
@@ -522,6 +523,7 @@ it("preserves signed mention evidence and edit boundaries while bounding discuss
       "http://buzz-media.localhost/https%3A%2F%2Fexample.test%2Favatar.png",
     );
     expect(h.discussion.snapshot().rows[0]).toMatchObject({
+      pictureUrl: "https://example.test/avatar.png",
       mentions: ["cd".repeat(32)],
       mentionReferences: ["ef".repeat(32)],
       edited: true,

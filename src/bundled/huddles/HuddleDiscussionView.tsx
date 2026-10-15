@@ -122,10 +122,11 @@ export function HuddleDiscussionView({
                       }
                       profile={{
                         name: row.author,
-                        ...(row.picture ? { picture: row.picture } : {}),
+                        ...(row.pictureUrl ? { picture: row.pictureUrl } : {}),
                       }}
                       media={(url) => {
-                        if (url === row.picture) return row.picture;
+                        if (url === row.pictureUrl)
+                          return row.picture ?? undefined;
                         for (const attachment of row.attachments) {
                           if (url === attachment.url)
                             return attachment.source ?? undefined;

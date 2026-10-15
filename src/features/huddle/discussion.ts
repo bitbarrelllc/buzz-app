@@ -3,6 +3,7 @@ import type { RelaySession } from "../relay/session";
 import type { Attachment, ChannelMessage } from "../relay/contracts";
 import type { Delivery } from "../relay/outbox";
 import { formatPublicKey } from "../../shared/identity/public-key";
+import { avatarMedia, avatarSource } from "../../shared/avatar-source";
 
 export type HuddleDiscussion = {
   composer?: string | undefined;
@@ -24,6 +25,8 @@ export type HuddleDiscussion = {
       previewSource: string | null;
     })[];
     picture: string | null;
+    /** Original profile URL; picture remains its authorized media source. */
+    pictureUrl?: string | null;
     text: string;
     mentions?: readonly string[];
     mentionNames?: Record<string, string>;
@@ -152,9 +155,8 @@ export function createHuddleDiscussion(
         hasMore: resolved && window.hasMore && rows.length < 200,
         rows: (available() ? rows : []).slice(-200).map((r) => {
           const profile = profiles.get(r.authorId);
-          const picture = profile?.picture
-            ? session.media(profile.picture)
-            : undefined;
+          const pictureUrl = avatarSource(profile?.picture);
+          const picture = avatarMedia(pictureUrl, session.media);
           return {
             id: r.id,
             authorId: r.authorId,
@@ -211,6 +213,10 @@ export function createHuddleDiscussion(
             picture:
               picture && new TextEncoder().encode(picture).length <= 8192
                 ? picture
+                : null,
+            pictureUrl:
+              pictureUrl && new TextEncoder().encode(pictureUrl).length <= 8192
+                ? pictureUrl
                 : null,
             text: r.content.slice(0, 16000),
             mentions: r.mentions,
