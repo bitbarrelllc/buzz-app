@@ -108,7 +108,7 @@ const lifecycleReadError = new URLSearchParams(location.search).has(
   "lifecycleReadError",
 );
 let lifecycleReadFailed = false;
-const startedAt = Math.floor(Date.now() / 1000);
+let startedAt = Math.floor(Date.now() / 1000);
 const lifecycleListeners = new Set<() => void>();
 let endedAt: number | undefined;
 let lifecycleParent = destination.channelId;
@@ -476,6 +476,8 @@ window.huddleFixture = {
   stats,
   connect: () => connect(),
   request: () => {
+    // A newly simulated call starts now, after the request watcher activated.
+    startedAt = Math.floor(Date.now() / 1000);
     lifecycleParent = dmId;
     lifecycleCreator = peer;
     endedAt = undefined;

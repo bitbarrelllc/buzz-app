@@ -335,6 +335,7 @@ test("real capture emits 20ms frames and stops on mute and plugin disposal", asy
 test("capsule and companion presentation share mute and leave", async ({
   page,
 }) => {
+  await page.clock.install();
   await page.goto(`${origin}/tests/fixtures/huddles.html?chrome`);
   const panel = page.getByRole("region", { name: "Conversation", exact: true });
   await panel
@@ -499,6 +500,8 @@ test("capsule and companion presentation share mute and leave", async ({
   await expect(
     roster.getByRole("img", { name: /^1 more participants:/ }),
   ).toBeVisible();
+  // Hold the 220ms speaking lifetime while checking its rendered contract.
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
   await page.evaluate(() => window.huddleFixture.speak("cd".repeat(32)));
   const speaker = roster.locator(`[data-participant="${"cd".repeat(32)}"]`);
   const speakerHalo = roster.locator(`[data-speaker="${"cd".repeat(32)}"]`);
@@ -507,7 +510,9 @@ test("capsule and companion presentation share mute and leave", async ({
   await expect(
     speaker.getByRole("img", { name: "Alex, speaking", exact: true }),
   ).toBeVisible();
+  await page.clock.runFor(300);
   await expect(speakerHalo).toHaveAttribute("data-speaking", "false");
+  await page.clock.resume();
   await expect(roster).toHaveAttribute("data-arrival-motion", "true");
   await expectNamesClear();
   await companion.evaluate((el) => {
