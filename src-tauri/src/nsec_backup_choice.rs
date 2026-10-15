@@ -136,6 +136,10 @@ pub(crate) async fn set(
         .map_err(|_| FAILED)?;
     staged.as_file().sync_all().map_err(|_| FAILED)?;
     staged.persist(path).map_err(|_| FAILED)?;
+    #[cfg(unix)]
+    fs::File::open(path.parent().ok_or(FAILED)?)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|_| FAILED)?;
     Ok(BackupChoice {
         available: true,
         pubkey: pubkey.into(),
