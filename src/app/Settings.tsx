@@ -182,18 +182,25 @@ function PluginDetails({
                 publisher={plugin.publisher}
               />
             )}
-            {plugin.manifest.discovery?.tags?.map((tag) => {
-              const essential = tag.trim().toLowerCase() === "essentials";
-              return (
-                <span
-                  className={`${styles.pluginInstallBadge} ${styles.pluginTag}`}
-                  key={tag}
-                >
-                  {essential && <SparklesIcon size={14} aria-hidden="true" />}
-                  {essential ? "Essentials" : tag}
-                </span>
-              );
-            })}
+            {[...(plugin.manifest.discovery?.tags ?? [])]
+              .sort(
+                (a, b) =>
+                  Number(b.trim().toLowerCase() === "essentials") -
+                  Number(a.trim().toLowerCase() === "essentials"),
+              )
+              .map((tag) => {
+                const essential = tag.trim().toLowerCase() === "essentials";
+                return (
+                  <span
+                    className={`${styles.pluginInstallBadge} ${styles.pluginTag}`}
+                    data-essential={essential || undefined}
+                    key={tag}
+                  >
+                    {essential && <SparklesIcon size={14} aria-hidden="true" />}
+                    {essential ? "Essentials" : tag}
+                  </span>
+                );
+              })}
           </div>
           {plugin.manifest.description && (
             <p className={styles.pluginAsideDescription}>

@@ -372,6 +372,10 @@
 .pluginTag {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.pluginTag[data-essential] {
+  background: var(--surface-categorical-purple);
   color: var(--text-accent);
 }
 

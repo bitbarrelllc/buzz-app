@@ -326,7 +326,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
               id: "buzz.channels",
               name: "Channels",
               apiVersion: 1 as const,
-              discovery: { tags: ["  Essentials  ", "messaging"] },
+              discovery: { tags: ["messaging", "  Essentials  "] },
             },
             source: "bundled" as const,
             enabled: true,
@@ -402,6 +402,10 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     within(bundled).getByRole("heading", { name: "Channels" }),
   );
   expect(badge.nextElementSibling).toHaveTextContent("Essentials");
+  expect(badge.nextElementSibling).toHaveAttribute("data-essential");
+  expect(within(bundled).getByText("messaging")).not.toHaveAttribute(
+    "data-essential",
+  );
   expect(within(bundled).getByText("messaging")).toBeVisible();
   expect(within(bundled).queryByText("Installed")).toBeNull();
   const required = within(bundled).getByRole("button", { name: "Required" });
