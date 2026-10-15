@@ -11,7 +11,7 @@ import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import { nativeIdentityEnabled } from "../identity/service";
 import type { SettingsCards } from "../settings/service";
 import type { OpenTarget } from "../navigation/targets";
-import { readErrorKind } from "../relay/errors";
+import { isTransientFailure, readErrorKind } from "../relay/errors";
 import { communityFromScope } from "../relay/gifs";
 import { useRelayConnection } from "../relay/react";
 import { checkCommunityAccess } from "./api";
@@ -38,6 +38,26 @@ import { fetchCommunityIcon } from "./community-icon";
 import { useCommunityRole } from "./useCommunityRole";
 
 const noSubscription = () => () => {};
+
+/** One bounded signed read proves this identity can still read the relay. Its
+ * answer is shown on the item, never acted on: a community restored from the
+ * account stays saved whether the relay refuses the viewer or cannot be
+ * reached. The bound is short so a full pass over many saved communities
+ * cannot spend long on each relay that is down. */
+async function readAccess(
+  id: string,
+  signal: AbortSignal,
+): Promise<CommunityAccess> {
+  try {
+    await checkCommunityAccess(
+      id,
+      AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+    );
+    return "ok";
+  } catch (error) {
+    return readErrorKind(error) === "denied" ? "denied" : "unavailable";
+  }
+}
 
 /** Shell navigation only: selecting a community remains owned by Communities. */
 export function CommunityRail({
@@ -164,35 +184,23 @@ export function CommunityRail({
         while (next < ids.length && !controller.signal.aborted) {
           const id = ids[next++];
           if (id === undefined) break;
+          let state: CommunityAccess | undefined;
           try {
             const icon = await fetchCommunityIcon(id, controller.signal);
             if (icon !== undefined && !controller.signal.aborted)
               setIcons((previous) => ({ ...previous, [id]: icon }));
-          } catch {
-            // Unreachable relay: retain saved icon or initials.
+          } catch (error) {
+            // Unreachable relay: retain saved icon or initials. Discovery
+            // needs no session, so a relay that could not answer it will not
+            // answer the signed read either; that answer is taken as read.
+            if (isTransientFailure(error)) state = "unavailable";
           }
           if (controller.signal.aborted) return;
           if (probing) {
-            // One bounded signed read proves this identity can still read the
-            // relay. Its answer is shown on the item, never acted on: a
-            // community restored from the account stays saved whether the
-            // relay refuses the viewer or cannot be reached.
-            let state: CommunityAccess = "ok";
-            try {
-              await checkCommunityAccess(
-                id,
-                AbortSignal.any([
-                  controller.signal,
-                  AbortSignal.timeout(12000),
-                ]),
-              );
-            } catch (error) {
-              state =
-                readErrorKind(error) === "denied" ? "denied" : "unavailable";
-            }
+            const answer = state ?? (await readAccess(id, controller.signal));
             if (controller.signal.aborted) return;
-            answers.current.set(id, state);
-            setAccess((previous) => ({ ...previous, [id]: state }));
+            answers.current.set(id, answer);
+            setAccess((previous) => ({ ...previous, [id]: answer }));
           }
           checked.current.set(id, pass.count);
         }

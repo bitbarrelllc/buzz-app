@@ -152,9 +152,16 @@ exposes the record, the queue and these writes to one owner, the bundled
 Builderlab plugin, and carries that owner's report back for the rail.
 
 The list is account-scoped, but this state is still kept under the device
-record's viewer key (`buzz-client.v1:<viewer>`). Moving it to live with the
-Builderlab account is a follow-up; until then a device whose identity changes
-starts from an empty known set and re-merges on its next sign-in.
+record's viewer key (`buzz-client.v1:<viewer>`), where it outlives a
+Builderlab sign-out. So the record also names the account whose list the
+known set describes, and a merge for a different account (or for a record
+that names none) starts from nothing known, with the outbox kept: nothing of
+the previous account's list is read as removed elsewhere, and every saved
+membership the new account's list lacks is queued for it. Signing back in as
+the same account keeps the set, so a removal made elsewhere meanwhile is still
+applied. Moving the state to live with the Builderlab account is a follow-up;
+until then a device whose identity changes starts from an empty record and
+re-merges on its next sign-in.
 
 The plugin starts a sync owner only where signing in is possible: the native
 app with a configured Builderlab service. The owner syncs only while signed in.
@@ -179,12 +186,15 @@ the account's sync.
 Signing out or disabling the plugin abandons the request in flight and leaves
 the queue intact.
 
-In the native app, the rail checks each saved community with one bounded
-signed read (of the viewer's own profile, whose content is never looked at)
-after it mounts, for communities it has not yet read when the list changes,
-and again for every one when the window comes online. Coming back to the
-window re-checks only communities whose last answer was a refusal or an
-unreachable relay, so switching apps is not a round trip per community. The
+In the native app, the rail checks each saved community with one signed read
+(of the viewer's own profile, whose content is never looked at), bounded by a
+few seconds, after it mounts, for communities it has not yet read when the
+list changes, and again for every one when the window comes online. The icon
+read that precedes it needs no session, so a relay that could not answer it
+in the same pass is read as unreachable without the signed read, and a pass
+over relays that are down waits out one bound per relay, not two. Coming back
+to the window re-checks only communities whose last answer was a refusal or
+an unreachable relay, so switching apps is not a round trip per community. The
 development broker holds lazy, scoped relay connections and has no lighter
 route, so the check does not run there. The answer is shown, never acted on:
 a relay that refuses this identity or cannot be reached keeps its place, its

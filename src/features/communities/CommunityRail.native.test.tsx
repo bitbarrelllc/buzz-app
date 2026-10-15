@@ -17,6 +17,7 @@ import type { RelayData, RelaySnapshot } from "../relay/service";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { nativeIdentityEnabled } from "../identity/service";
 import * as communityApi from "./api";
+import * as communityIcon from "./community-icon";
 import { CommunityRail } from "./CommunityRail";
 import type { Communities, ClientSnapshot } from "./service";
 
@@ -255,6 +256,33 @@ it("shows which saved communities refuse this identity or cannot be reached, and
   expect(button("Secondary")).toBeInTheDocument();
   expect(h.communities.leave).not.toHaveBeenCalled();
   expect(h.communities.select).not.toHaveBeenCalled();
+});
+
+it("reads a relay whose discovery could not be reached as unreachable, without the signed read", async () => {
+  const user = userEvent.setup();
+  // The NIP-11 read that fetches the icon; the native host rejects a relay it
+  // could not reach with this plain string (src-tauri/src/relay.rs).
+  vi.spyOn(communityIcon, "fetchCommunityIcon").mockImplementation((id) =>
+    id === secondary
+      ? Promise.reject("Relay request could not be confirmed")
+      : Promise.resolve(undefined),
+  );
+  const inspect = vi
+    .spyOn(communityApi, "checkCommunityAccess")
+    .mockResolvedValue(undefined);
+  const h = harness();
+  render(<CommunityRail communities={h.communities} />);
+  const down = await hint(user, "Secondary");
+  await waitFor(() =>
+    expect(down.tooltip).toHaveTextContent("Secondary · Unreachable"),
+  );
+  // Discovery needs no session, so a relay that could not answer it is not
+  // asked for the signed read: a pass over relays that are down waits out
+  // one bound per relay, not two.
+  expect(inspect.mock.calls.map(([id]) => id)).toEqual([primary]);
+  await down.close();
+  const up = await hint(user, "Primary");
+  await waitFor(() => expect(up.tooltip).toHaveTextContent(/^Primary$/));
 });
 
 it("re-checks only refused or unreachable communities on returning to the window, and every one on coming back online", async () => {
