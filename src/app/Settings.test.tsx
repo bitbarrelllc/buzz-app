@@ -396,6 +396,10 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     within(bundledCard).getByText("Channels").querySelector("svg"),
   ).not.toBeNull();
   expect(screen.queryByRole("button", { name: "Disable Channels" })).toBeNull();
+  const rowRequired = screen.getByRole("button", { name: "Required" });
+  expect(rowRequired).toBeDisabled();
+  expect(rowRequired).toHaveAttribute("data-variant", "outline");
+  expect(rowRequired).toHaveAttribute("data-size", "sm");
   expect(screen.queryByText("buzz.channels")).toBeNull();
 
   fireEvent.click(bundledCard);
@@ -459,7 +463,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const rowAction = screen.getByRole("button", {
     name: "Disable External helper",
   });
-  expect(rowAction).toHaveAttribute("data-variant", "outline");
+  expect(rowAction).toHaveAttribute("data-variant", "subtle");
   expect(rowAction).toHaveAttribute("data-size", "sm");
   expect(externalCard).not.toContainElement(rowAction);
   fireEvent.click(rowAction);
@@ -508,14 +512,17 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   const rowEnable = screen.getByRole("button", {
     name: "Enable External helper",
   });
-  expect(rowEnable).toHaveAttribute("data-variant", "subtle");
+  expect(rowEnable).toHaveAttribute("data-variant", "prominent");
   fireEvent.click(rowEnable);
   expect(plugins.change).toHaveBeenLastCalledWith("enable", "example.helper");
   fireEvent.click(enable);
   expect(plugins.change).toHaveBeenLastCalledWith("enable", "example.helper");
   fireEvent.keyDown(enable, { key: "Escape" });
+  helper.publisher = "";
   snapshot.busy = true;
   fireEvent.click(externalCard);
+  expect(within(externalCard).queryByText("publisher-public-key")).toBeNull();
+  expect(screen.queryByText("Unknown author")).toBeNull();
   const pending = within(
     screen.getByRole("complementary", { name: "External helper details" }),
   ).getByRole("button", { name: "Enable" });

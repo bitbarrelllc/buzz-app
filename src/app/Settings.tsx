@@ -130,11 +130,10 @@ function PluginProvenance({
   publisher?: string | null | undefined;
   className?: string | undefined;
 }) {
+  if (source !== "bundled" && !publisher) return null;
   return (
     <span className={`${styles.pluginProvenance} ${className ?? ""}`}>
-      <span>
-        {source === "bundled" ? "Buzz" : publisher || "Unknown author"}
-      </span>
+      <span>{source === "bundled" ? "Buzz" : publisher}</span>
     </span>
   );
 }
@@ -694,9 +693,13 @@ export function Settings({
                                   </button>
                                   <div className={styles.pluginRowAction}>
                                     {isRequiredPlugin(plugin) ? (
-                                      <span className="text-caption text-secondary">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled
+                                      >
                                         Required
-                                      </span>
+                                      </Button>
                                     ) : (
                                       <Button
                                         variant={
