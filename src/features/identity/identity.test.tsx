@@ -359,12 +359,11 @@ it.each([
 );
 
 it.each([
+  ["nsec_restore_begin", "Backup recovery is unavailable. Try again later."],
   ["nsec_restore_wait", "Backup recovery is unavailable. Try again later."],
-  [
-    "nsec_restore_wait",
-    "Couldn’t check the identity linked to your account. Try again.",
-  ],
-  ["nsec_restore_install", "Couldn’t save your identity securely. Try again."],
+  ["nsec_restore_wait", "Could not restore your identity. Try again."],
+  ["nsec_restore_wait", "Restore was canceled. Try again."],
+  ["nsec_restore_install", "Could not restore your identity. Try again."],
 ])(
   "keeps %s failures retryable without creating or adopting an identity",
   async (operation, message) => {
@@ -396,6 +395,102 @@ it.each([
     identity.dispose();
   },
 );
+
+it("keeps a failed cancellation visible and blocks key changes until Back succeeds", async () => {
+  let cancellations = 0;
+  const { identity } = mountRecovery(recovered, (command) => {
+    if (command === "nsec_restore_cancel" && ++cancellations === 1)
+      return Promise.reject(new Error("Synthetic IPC failure"));
+  });
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("button", { name: "Restore from backup" }),
+  );
+  await screen.findByRole("button", { name: "Restore this identity" });
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Couldn’t cancel recovery. Try Back again.",
+  );
+  await identity.create();
+  await identity.importKey(key);
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.some(
+        ([command]) =>
+          command === "identity_create" || command === "identity_import",
+      ),
+  ).toBe(false);
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  expect(
+    await screen.findByRole("button", { name: "Use an existing key" }),
+  ).toBeEnabled();
+  expect(cancellations).toBe(2);
+  identity.dispose();
+});
+
+it("retries a recovery error only after the prior attempt is canceled", async () => {
+  const canceled = deferred<void>();
+  let waits = 0;
+  const { identity } = mountRecovery(recovered, (command) => {
+    if (command === "nsec_restore_wait" && ++waits === 1)
+      return Promise.reject("Could not restore your identity. Try again.");
+    if (command === "nsec_restore_cancel") return canceled.promise;
+  });
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("button", { name: "Restore from backup" }),
+  );
+  await screen.findByRole("alert");
+  try {
+    await user.click(
+      screen.getByRole("button", { name: "Try recovery again" }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("nsec_restore_cancel", {
+        attempt: "attempt",
+      }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Canceling recovery");
+    expect(
+      vi
+        .mocked(invoke)
+        .mock.calls.filter(([command]) => command === "nsec_restore_begin"),
+    ).toHaveLength(1);
+  } finally {
+    await act(async () => canceled.resolve());
+  }
+  expect(
+    await screen.findByRole("button", { name: "Restore this identity" }),
+  ).toBeEnabled();
+  expect(
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "nsec_restore_begin"),
+  ).toHaveLength(2);
+  identity.dispose();
+});
+
+it("rejects an installed viewer that differs from the selected identity", async () => {
+  const { identity } = mountRecovery(recovered, (command) =>
+    command === "nsec_restore_install"
+      ? Promise.resolve(previousViewer)
+      : undefined,
+  );
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("button", { name: "Restore from backup" }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "Restore this identity" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The restored identity could not be verified. Restart the app.",
+  );
+  expect(identity.snapshot().status).toBe("missing");
+  expect(screen.queryByText("Restored identity")).toBeNull();
+  identity.dispose();
+});
 
 it("fences late recovery after cancellation before allowing creation", async () => {
   const waiting = deferred<RecoveryResult>();
