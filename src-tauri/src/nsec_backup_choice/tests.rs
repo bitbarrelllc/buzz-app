@@ -135,3 +135,29 @@ async fn failed_storage_does_not_report_saved_consent() {
         .is_err());
     assert!(read(&path, &config(), &pubkey).is_err());
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn directory_sync_failure_does_not_report_a_durable_revocation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("choice.json");
+    let identity = IdentityHost::fixture();
+    let pubkey = identity.viewer().await.unwrap();
+    let config = config();
+    set(&identity, &path, &config, &pubkey, true).await.unwrap();
+    // Rename remains permitted, but opening the directory for its durability sync fails.
+    fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o300)).unwrap();
+    let result = set(&identity, &path, &config, &pubkey, false).await;
+    fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o700)).unwrap();
+
+    assert_eq!(result.err().as_deref(), Some(FAILED));
+    assert_eq!(
+        read(&path, &config, &pubkey).unwrap().automatic,
+        Some(false)
+    );
+    set(&identity, &path, &config, &pubkey, false)
+        .await
+        .unwrap();
+}
