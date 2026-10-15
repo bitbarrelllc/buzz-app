@@ -151,7 +151,12 @@ export function PluginImport({
   const declaredGrants = candidate ? hostGrants(candidate.manifest) : [];
   const previousGrants = existing ? hostGrants(existing.manifest) : [];
   const addButton = (
-    <Button ref={trigger} disabled={blocked} onClick={() => setOpen(true)}>
+    <Button
+      ref={trigger}
+      size="sm"
+      disabled={blocked}
+      onClick={() => setOpen(true)}
+    >
       Add
     </Button>
   );

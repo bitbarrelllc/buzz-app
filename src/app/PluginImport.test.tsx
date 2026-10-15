@@ -29,6 +29,7 @@ it("opens both sources and the safety hint only inside Add, and restores focus o
     />,
   );
   const add = screen.getByRole("button", { name: "Add" });
+  expect(add).toHaveAttribute("data-size", "sm");
   expect(screen.queryByLabelText("Git or GitHub repository")).toBeNull();
   expect(screen.queryByText(/plugins aren’t sandboxed/)).toBeNull();
   fireEvent.click(add);
