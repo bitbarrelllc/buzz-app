@@ -3,5 +3,8 @@
   "name": "Sessions",
   "apiVersion": 1,
   "description": "Keep legacy Sessions links working through the Solo workspace.",
-  "discovery": {"category": "productivity", "tags": ["Essentials", "agent-sessions"]}
+  "discovery": {
+    "category": "productivity",
+    "tags": ["Essentials", "agent-sessions"]
+  }
 }

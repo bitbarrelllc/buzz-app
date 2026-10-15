@@ -679,7 +679,9 @@ export function Settings({
                               <span className={styles.pluginCount}>
                                 {group.plugins.length}
                                 <span className="sr-only">
-                                  {group.plugins.length === 1 ? " plugin" : " plugins"}
+                                  {group.plugins.length === 1
+                                    ? " plugin"
+                                    : " plugins"}
                                 </span>
                               </span>
                             </span>
