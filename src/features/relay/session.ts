@@ -428,6 +428,23 @@ export function createRelaySession(
       }
     }
   }
+  // Keep ordinary reads on their existing promise chain; page metadata is opt-in.
+  function readVerified(
+    filters: readonly ReadFilter[],
+    settings: ReadOptions | undefined,
+    channelTraffic: true,
+    beforeInbox: undefined,
+    page: { withRelayCount: true },
+  ): Promise<{ events: readonly RelayEvent[]; relayCount: number }>;
+  function readVerified(
+    filters: readonly ReadFilter[],
+    settings?: ReadOptions,
+    channelTraffic?: boolean,
+    beforeInbox?: (
+      events: readonly RelayEvent[],
+      raw: readonly RelayEvent[],
+    ) => void,
+  ): Promise<readonly RelayEvent[]>;
   async function readVerified(
     filters: readonly ReadFilter[],
     settings?: ReadOptions,
@@ -436,6 +453,7 @@ export function createRelaySession(
       events: readonly RelayEvent[],
       raw: readonly RelayEvent[],
     ) => void,
+    page?: { withRelayCount: true },
   ) {
     if (
       options.cachedOnly ||
@@ -470,6 +488,7 @@ export function createRelaySession(
     }
     if (closed || epoch !== accessEpoch)
       throw new DOMException("Stale relay read", "AbortError");
+    const relayCount = events.length;
     // A broken or stale transport must not promote private sidecar events into
     // finite reads, retained views, or store discovery.
     events = events.filter((event) => event.kind !== PRODUCT_FEEDBACK_KIND);
@@ -520,12 +539,13 @@ export function createRelaySession(
     );
     // Discovery must see signed grants/removals even when their channel is
     // currently denied; only the store interprets roster completeness.
-    return channelTraffic
+    const result = channelTraffic
       ? visible
       : events.filter(
           (event) =>
             [39000, 39002].includes(event.kind) || visible.includes(event),
         );
+    return page ? { events: result, relayCount } : result;
   }
   const verified: RelayReader = { read: readVerified };
   function accept(
@@ -1973,11 +1993,17 @@ export function createRelaySession(
     ): Promise<readonly VisibleEvent[]> {
       return (await session.readPage(filters, settings)).events;
     },
-    /** Relay continuation evidence is separate from projected local/live results. */
+    /** Transport-page count precedes visibility filtering and local/live projection. */
     async readPage(filters: readonly ReadFilter[], settings?: ReadOptions) {
       const began = revision;
       const epoch = accessEpoch;
-      const result = await verified.read(filters, settings);
+      const { events: result, relayCount } = await readVerified(
+        filters,
+        settings,
+        true,
+        undefined,
+        { withRelayCount: true },
+      );
       // Applying discovery can itself revoke access. Let that authority-only
       // read finish under current visibility; content/search completions must
       // still be fenced, including mixed discovery + content requests.
@@ -2005,7 +2031,7 @@ export function createRelaySession(
           local(),
           filters,
         ),
-        relayCount: result.length,
+        relayCount,
       };
     },
     /** An owned retained event view, not a replacement query snapshot. Limits bound
