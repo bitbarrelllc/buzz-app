@@ -684,17 +684,19 @@ fn signing_out_the_latest_source_retains_the_other_sources_session() {
             namespace: "backup/staging".into(),
         })),
     };
-    assert!(host.source_allowed(Source::Builderlab));
-    for source in [Source::Hosted, Source::Builderlab] {
-        host.session(
-            source,
-            1,
-            Some("synthetic-session".into()),
-            IdentityHost::fixture(),
-        )
-        .unwrap();
-    }
-    host.session(Source::Builderlab, 2, None, IdentityHost::fixture())
+    // Start with an admitted secondary session, independent of optional build origins.
+    host.state.lock().unwrap().sessions.push(Session {
+        source: Source::Builderlab,
+        credential: Zeroizing::new("synthetic-builderlab-session".into()),
+    });
+    host.session(
+        Source::Hosted,
+        1,
+        Some("synthetic-hosted-session".into()),
+        IdentityHost::fixture(),
+    )
+    .unwrap();
+    host.session(Source::Hosted, 2, None, IdentityHost::fixture())
         .unwrap();
     assert!(host
         .state
@@ -702,20 +704,25 @@ fn signing_out_the_latest_source_retains_the_other_sources_session() {
         .unwrap()
         .sessions
         .last()
-        .is_some_and(|s| s.source == Source::Hosted));
+        .is_some_and(|s| s.source == Source::Builderlab));
     host.session(
-        Source::Builderlab,
+        Source::Hosted,
         3,
-        Some("synthetic-builderlab-session".into()),
+        Some("synthetic-hosted-session".into()),
         IdentityHost::fixture(),
     )
     .unwrap();
-    host.retry(Source::Hosted, IdentityHost::fixture());
+    host.retry(Source::Builderlab, IdentityHost::fixture());
     let epoch = host.state.lock().unwrap().epoch;
-    host.session(Source::Builderlab, 4, None, IdentityHost::fixture())
+    host.session(Source::Hosted, 4, None, IdentityHost::fixture())
         .unwrap();
     assert!(host.valid(epoch).is_ok());
-    assert!(host.state.lock().unwrap().sessions.last().is_some_and(
-        |s| s.source == Source::Hosted && s.credential.as_str() == "synthetic-session"
-    ));
+    assert!(host
+        .state
+        .lock()
+        .unwrap()
+        .sessions
+        .last()
+        .is_some_and(|s| s.source == Source::Builderlab
+            && s.credential.as_str() == "synthetic-builderlab-session"));
 }
