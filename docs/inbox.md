@@ -53,7 +53,10 @@ resumes playback or replays an old pending seek. Explicit Play is required.
 
 Opening a row captures channel, message and optional thread root, then uses the
 existing channel window or an exact shared thread reader to reveal even an older
-target outside the newest bounded page. A late verified root can regroup a
+target outside the newest bounded page. A DM or session timeline first pages
+older history back to the target's time; only a target still missing there opens
+in the thread reader. A cached window revalidates before that choice, so a
+reconnect cannot freeze the visit in the thread reader. A late verified root can regroup a
 conversation without changing the captured visit or canonical origin. Reading
 is saved by the shared unread owner; failed actions retain their captured Retry
 unless the visit/access/session or a newer intent retires it. A DM Retry reuses

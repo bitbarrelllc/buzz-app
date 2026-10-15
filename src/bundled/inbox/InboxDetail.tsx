@@ -333,6 +333,11 @@ export function InboxDetail({
                         : channelName
                     }
                     anchor={target.messageId}
+                    anchorAt={
+                      item.messages.find(
+                        (message) => message.id === target.messageId,
+                      )?.createdAt
+                    }
                   />
                 ) : (
                   <ConversationThread
