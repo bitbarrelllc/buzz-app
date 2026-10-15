@@ -432,3 +432,10 @@
   --affordance-danger-pressed: var(--affordance-call-decline);
   color: var(--text-inverse);
 }
+
+.callerName {
+  max-inline-size: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

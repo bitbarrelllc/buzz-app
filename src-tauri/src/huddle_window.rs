@@ -766,7 +766,8 @@ mod tests {
             serde_json::json!([
                 "allow-huddle-window-watch",
                 "allow-huddle-window-action",
-                "allow-media-download"
+                "allow-media-download",
+                { "identifier": "opener:allow-open-url", "allow": [{ "url": "https://*" }, { "url": "http://*" }] }
             ])
         );
         assert!(serde_json::from_str::<Action>("\"start\"").is_err());

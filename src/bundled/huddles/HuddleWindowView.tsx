@@ -170,6 +170,7 @@ function HuddleWindowContent({ view, act, error }: WindowProps) {
           aria-label="Huddle chat panel"
         >
           <HuddleDiscussionView
+            allowImageCopy={false}
             discussion={view.discussion}
             openLink={(url) => {
               if (!isBuzzLink(url)) return false;

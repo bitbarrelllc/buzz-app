@@ -1,7 +1,7 @@
 import { MessageProjection } from "../relay/message-projection";
 import { createRelayProfiler } from "../relay/profiling";
 import { foldMessages } from "../relay/fold";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   keypair,
   signed,
@@ -183,4 +183,55 @@ it("rejects unrelated, premature and unmatched creator ends", () => {
       event(48103, stranger, 20),
     ])[0]?.huddle?.endedAt,
   ).toBeUndefined();
+});
+
+it("collapses repeated starts to the canonical card", () => {
+  const start = event(48100, author, 10);
+  const later = event(48100, author, 15);
+  const end = event(48103, relay, 20);
+  const rows = foldMessages(parent, relay.pubkey, [later, end, start]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ id: start.id, huddle: { endedAt: 20 } });
+});
+
+it("resolves missing metadata for an already authorized Huddle", async () => {
+  const wire = scriptedTransport(author.pubkey, relay.pubkey);
+  const owner = createRelaySession(wire.transport);
+  try {
+    owner.session.channels.ensureList();
+    wire.next().respond([roster(relay, room, [author.pubkey])]);
+    await vi.waitFor(() =>
+      expect(
+        owner.session.channels.list().channels.some((c) => c.id === room),
+      ).toBe(true),
+    );
+    // Complete the initial metadata read without a result.
+    await vi.waitFor(() => expect(wire.pending.length).toBeGreaterThan(0));
+    wire.next().respond([]);
+    await vi.waitFor(() =>
+      expect(owner.session.channels.list().status).toBe("ready"),
+    );
+    const retry = owner.session.channels.resolve?.([room]);
+    await vi.waitFor(() =>
+      expect(
+        wire.pending.some((r) => r.filters[0]?.kinds?.includes(39000)),
+      ).toBe(true),
+    );
+    const index = wire.pending.findIndex((r) =>
+      r.filters[0]?.kinds?.includes(39000),
+    );
+    wire.pending
+      .splice(index, 1)[0]
+      ?.respond([
+        roster(relay, room, [author.pubkey]),
+        metadata(relay, room, "Huddle", 30, [
+          ["private"],
+          ["about", huddleDescription(parent)],
+        ]),
+      ]);
+    await retry;
+    expect(owner.session.channels.get?.(room)?.huddle).toBe(true);
+  } finally {
+    owner.dispose();
+  }
 });

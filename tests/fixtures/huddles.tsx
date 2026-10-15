@@ -71,7 +71,9 @@ const profiles = new Map<string, Profile>([
   [
     peer,
     {
-      name: "Alex",
+      name: new URLSearchParams(location.search).has("longCaller")
+        ? "Caller".repeat(400)
+        : "Alex",
       picture: "https://fixture.example/media/avatar.png",
     },
   ],
@@ -87,6 +89,9 @@ const channelList = {
     {
       id: destination.channelId,
       name: "Design",
+      ...(new URLSearchParams(location.search).has("archived")
+        ? { archived: true as const }
+        : {}),
       channelType: "stream" as const,
       members: [viewer, peer],
     },

@@ -39,12 +39,20 @@ export function HuddleLauncher(props: Props) {
       : undefined,
     context.channelId,
   );
+  const list = useSyncExternalStore(
+    connection.session.channels.subscribeList,
+    connection.session.channels.list,
+  );
+  const parent = list.channels.find(
+    (channel) => channel.id === context.channelId,
+  );
   const active = ["connecting", "connected", "leaving"].includes(call.phase);
   const here =
     call.phase === "connected" &&
     call.destination?.scope === context.scope &&
     call.destination.viewer === context.viewer &&
     call.destination.channelId === context.channelId;
+  if (parent?.archived) return null;
   if (here && call.id)
     return <ActiveHuddle key={call.id} {...props} callId={call.id} />;
   const joinable =

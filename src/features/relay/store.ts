@@ -1337,7 +1337,10 @@ export function createChannelStore(
     if (disposed || !transport || !discovery || options.cachedOnly)
       throw new Error("Relay is unavailable");
     const ids = [...new Set(channelIds)].filter(
-      (id) => !discovery.authorized(id) || discovery.get(id)?.cached,
+      (id) =>
+        !discovery.authorized(id) ||
+        discovery.get(id)?.cached ||
+        !discovery.metadataVersion(id),
     );
     if (!ids.length) return;
     if (ids.length > 128) throw new Error("Too many search result channels");

@@ -82,6 +82,7 @@ fn details(event: &EventTemplate) -> bool {
             == name
         && about.chars().count() <= 1000
         && !about.contains("Buzz session (")
+        && !about.contains("Buzz Huddle (")
 }
 fn lifecycle(event: &EventTemplate) -> bool {
     if !matches!(event.kind, 9002 | 9008 | 9021 | 9022 | 41012)
@@ -575,6 +576,18 @@ mod boundary_tests {
                 assert!(validate("channel-details", &altered, altered["pubkey"].as_str()).is_err());
             }
         }
+    }
+
+    #[test]
+    fn details_reject_huddle_markers_at_sign_and_publish_boundaries() {
+        let mut event = details_event(vec![]);
+        event.tags[2][1] =
+            "Buzz Huddle (buzz.huddles/v1)\nparent:11111111-1111-4111-8111-111111111111".into();
+        let value = serde_json::to_value(&event).unwrap();
+        assert!(validate("channel-details", &value, None).is_err());
+        let host = IdentityHost::fixture();
+        let signed = tauri::async_runtime::block_on(host.sign(event)).unwrap();
+        assert!(validate("channel-details", &signed, signed["pubkey"].as_str()).is_err());
     }
 
     #[test]

@@ -114,7 +114,9 @@ export function createHuddleWindow(
   let opened: string | undefined;
   let opening: Promise<void> | undefined;
   let stopProfiles: (() => void) | undefined;
+  let profileSession: ReturnType<RelayData["snapshot"]>["session"] | undefined;
   let ensured = "";
+  let ensuring = "";
   let discussion: ReturnType<typeof createHuddleDiscussion> | undefined;
   let composer: ReturnType<typeof createHuddleComposerOwner> | undefined;
   const closeDiscussion = () => {
@@ -144,7 +146,8 @@ export function createHuddleWindow(
       error: call.error
         ? Array.from(call.error).slice(0, 2000).join("")
         : undefined,
-      audioSettings: call.audioSettings,
+      audioSettings:
+        call.audioSettings && projectAudioSettings(call.audioSettings),
       level: call.level ?? 0,
       dark: document.documentElement.classList.contains("dark"),
       discussion: discussion
@@ -220,16 +223,29 @@ export function createHuddleWindow(
       stopProfiles?.();
       stopProfiles = undefined;
     } else {
+      const session = relay.snapshot().session;
+      if (profileSession !== session) {
+        profileSession = session;
+        ensured = "";
+        ensuring = "";
+        stopProfiles?.();
+        stopProfiles = session.profiles.subscribe(sync);
+      }
       const keys = live.participants.map((p) => p.key).join(":");
-      if (keys !== ensured) {
-        ensured = keys;
-        void relay
-          .snapshot()
-          .session.profiles.ensure(
+      if (keys && keys !== ensured && keys !== ensuring) {
+        ensuring = keys;
+        void session.profiles
+          .ensure(
             live.participants.map((p) => p.key),
             "background",
           )
-          .catch(() => {});
+          .then(() => {
+            if (profileSession === session) ensured = keys;
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (profileSession === session && ensuring === keys) ensuring = "";
+          });
       }
     }
   }
@@ -410,3 +426,24 @@ export function createHuddleWindow(
   };
 }
 export type HuddleWindow = ReturnType<typeof createHuddleWindow>;
+
+/** Native presentation accepts bounded UTF-8 strings. Never truncate device IDs. */
+export function projectAudioSettings(
+  state: AudioSettingsState,
+): AudioSettingsState {
+  const bytes = (value: string) => new TextEncoder().encode(value).length;
+  const label = (value: string) => Array.from(value).slice(0, 1000).join("");
+  const devices = (items: AudioSettingsState["inputs"]) =>
+    items
+      .filter((item) => bytes(item.id) <= 4096)
+      .slice(0, 128)
+      .map((item) => ({ id: item.id, label: label(item.label) }));
+  return {
+    ...state,
+    inputs: devices(state.inputs),
+    outputs: devices(state.outputs),
+    input: bytes(state.input) <= 4096 ? state.input : "",
+    output: bytes(state.output) <= 4096 ? state.output : "",
+    error: state.error && Array.from(state.error).slice(0, 2000).join(""),
+  };
+}

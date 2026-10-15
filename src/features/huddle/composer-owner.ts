@@ -1,4 +1,5 @@
 import { communityFromScope, relayGifRequests } from "../relay/gifs";
+import { MAX_VOICE_SECONDS } from "../relay/voice-media";
 import { sentMentionFollowup } from "../messages/mention-followup";
 import { mentionDraft } from "../messages/mention-draft";
 import { readView, writeView } from "../../shared/view-state";
@@ -40,7 +41,7 @@ export function createHuddleComposerOwner(
     { file: UploadedAttachment; uses: number }
   >();
   const release = (file: UploadedAttachment) => {
-    const key = JSON.stringify(file);
+    const key = JSON.stringify([file.url, file.sha256]);
     const entry = uploaded.get(key);
     if (!entry) return;
     if (--entry.uses === 0) uploaded.delete(key);
@@ -159,9 +160,33 @@ export function createHuddleComposerOwner(
         )
           throw new Error("Invalid Huddle message.");
         const files = attachments.map((file) => {
-          const known = uploaded.get(JSON.stringify(file));
+          const known = uploaded.get(JSON.stringify([file.url, file.sha256]));
           if (!known) throw new Error("Reattach this file before sending.");
-          return known.file;
+          const voice = file.voice;
+          if (
+            voice &&
+            (known.file.type !== "audio/wav" ||
+              !Number.isFinite(voice.duration) ||
+              voice.duration <= 0 ||
+              voice.duration > MAX_VOICE_SECONDS + 0.1 ||
+              !Array.isArray(voice.waveform) ||
+              !voice.waveform.length ||
+              voice.waveform.length > 100 ||
+              voice.waveform.some(
+                (value: number) =>
+                  !Number.isFinite(value) || value < 0 || value > 1,
+              ))
+          )
+            throw new Error("Invalid voice note metadata.");
+          return voice
+            ? {
+                ...known.file,
+                voice: {
+                  duration: voice.duration,
+                  waveform: [...voice.waveform],
+                },
+              }
+            : known.file;
         });
         const id = session.messages.send(
           room,
@@ -222,7 +247,7 @@ export function createHuddleComposerOwner(
           );
           signal.throwIfAborted();
           check(true);
-          const key = JSON.stringify(result);
+          const key = JSON.stringify([result.url, result.sha256]);
           const previous = uploaded.get(key);
           uploaded.set(key, { file: result, uses: (previous?.uses ?? 0) + 1 });
           publish();

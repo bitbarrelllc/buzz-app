@@ -15,7 +15,9 @@ export function HuddleDiscussionView({
   retry,
   recover,
   openLink,
+  allowImageCopy = true,
 }: {
+  allowImageCopy?: boolean;
   discussion: HuddleDiscussion;
   composer: ReactNode;
   openLink?: ((target: string) => boolean) | undefined;
@@ -229,6 +231,7 @@ export function HuddleDiscussionView({
       >
         {imageRow && selectedImage && (
           <ImageReviewStage
+            allowCopy={allowImageCopy}
             attachments={imageRow.attachments.filter(
               (attachment) => attachment.kind === "image",
             )}

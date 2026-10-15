@@ -552,6 +552,8 @@ export function collapseHuddleCards(
   }
   return authorized.flatMap((row) => {
     if (row.huddle?.state === "ended" && starts.has(key(row))) return [];
+    if (row.huddle?.state === "started" && starts.get(key(row)) !== row)
+      return [];
     const endedAt = ends.get(key(row));
     return row.huddle?.state === "started" &&
       endedAt !== undefined &&

@@ -281,6 +281,11 @@ export function createHuddleDiscussion(
       else if (writable()) session.outbox?.retry(id, writable);
     },
     retry: () => {
+      const window = session.channels.window(room);
+      if (available() && window.status === "ready" && window.error) {
+        session.channels.loadOlder(room);
+        return;
+      }
       void load();
     },
     older: () => {

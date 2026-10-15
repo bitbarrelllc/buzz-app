@@ -482,3 +482,32 @@ it.each(["accepted", "unknown"] as const)(
     }
   },
 );
+
+it.each(["huddle", "metadataPending"] as const)(
+  "rejects %s share destinations at the owner",
+  async (flag) => {
+    const t = setup();
+    await t.ready();
+    const list = t.session.channels.list();
+    const session = {
+      ...t.session,
+      channels: {
+        ...t.session.channels,
+        refreshRoster: async () => true,
+        list: () => ({
+          ...list,
+          channels: list.channels.map((c) =>
+            c.id === channelId ? { ...c, [flag]: true } : c,
+          ),
+        }),
+      },
+    };
+    await expect(
+      destinationShareAudience(
+        session,
+        channelId,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("Destination membership");
+  },
+);

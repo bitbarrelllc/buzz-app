@@ -123,7 +123,9 @@ function HuddleCapsuleContent({
               relay={relay}
               transition
             />
-            {caller} calling
+            <span className={styles.callerName}>
+              {Array.from(caller).slice(0, 80).join("")} calling
+            </span>
           </span>
         </Button>
         {call.error && (

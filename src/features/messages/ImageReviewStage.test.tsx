@@ -856,3 +856,21 @@ it("sends the selected image filename with its authenticated native download sou
     name: "photo.png",
   });
 });
+
+it("hides Copy when the host does not provide image clipboard access", () => {
+  stubImageCopy();
+  render(
+    <ImageReviewStage
+      attachments={[{ url: "https://fixture.test/photo.png", kind: "image" }]}
+      selectedUrl="https://fixture.test/photo.png"
+      media={(url) => url}
+      select={() => {}}
+      onOpenLink={() => false}
+      allowCopy={false}
+    />,
+  );
+  expect(screen.getByRole("img")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Copy image" }),
+  ).not.toBeInTheDocument();
+});

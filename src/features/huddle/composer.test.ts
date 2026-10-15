@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { File as NodeFile } from "node:buffer";
 import {
   act,
   cleanup as cleanupReact,
@@ -27,6 +28,7 @@ afterEach(() => {
   for (const fn of cleanup.splice(0).reverse()) fn();
   localStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 function harness(legacy = false) {
   const store = createRelaySession(null);
@@ -49,6 +51,15 @@ function harness(legacy = false) {
     viewer,
     scope,
     channels: { ...store.session.channels, get: () => metadata },
+    attachments: {
+      upload: vi.fn(async (file: File) => ({
+        name: file.name,
+        url: `https://example.test/media/${file.name}`,
+        type: file.type,
+        size: file.size,
+        sha256: "ab".repeat(32),
+      })),
+    },
     messages: { ...store.session.messages, send },
     agentChoices: { ...store.session.agentChoices, refresh },
   };
@@ -343,3 +354,76 @@ it.each([false, true])(
     );
   },
 );
+
+it("retains valid voice metadata and releases enriched upload identities", async () => {
+  // Node's BroadcastChannel does not preserve File instances as browsers do.
+  // Keep message ordering while retaining files in this owner/client fixture.
+  const peers = new Set<{
+    name: string;
+    onmessage?: (event: { data: unknown }) => void;
+  }>();
+  vi.stubGlobal("File", NodeFile);
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      onmessage?: (event: { data: unknown }) => void;
+      constructor(readonly name: string) {
+        peers.add(this);
+      }
+      postMessage(data: unknown) {
+        for (const peer of peers)
+          if (peer !== this && peer.name === this.name)
+            queueMicrotask(() => {
+              if (peers.has(peer)) peer.onmessage?.({ data });
+            });
+      }
+      close() {
+        peers.delete(this);
+      }
+    },
+  );
+  const h = harness();
+  const { remote } = await h.connect();
+  const file = new File([new Uint8Array(64)], "voice.wav", {
+    type: "audio/wav",
+  });
+  if (!remote.attachments) throw new Error("Missing attachments");
+  const upload = await remote.attachments.upload(
+    file,
+    "room",
+    new AbortController().signal,
+  );
+  const voice = { duration: 1, waveform: [0.2, 0.8] };
+  await expect(
+    remote.messages.send("room", "", [], [{ ...upload, voice }]),
+  ).resolves.toBe("accepted-id");
+  expect(h.send).toHaveBeenCalledWith(
+    "room",
+    "",
+    [],
+    [{ ...upload, voice }],
+    undefined,
+    [],
+  );
+  for (let i = 0; i < 22; i++) {
+    const next = await remote.attachments.upload(
+      new File([new Uint8Array(64)], `${i}.wav`, { type: "audio/wav" }),
+      "room",
+      new AbortController().signal,
+    );
+    remote.attachments.release?.({ ...next, voice });
+  }
+  const invalid = await remote.attachments.upload(
+    file,
+    "room",
+    new AbortController().signal,
+  );
+  await expect(
+    remote.messages.send(
+      "room",
+      "",
+      [],
+      [{ ...invalid, voice: { ...voice, duration: Infinity } }],
+    ),
+  ).rejects.toThrow("Invalid voice");
+});

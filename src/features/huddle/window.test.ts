@@ -2,6 +2,7 @@
 import { assert, expect, it, vi } from "vitest";
 import {
   createHuddleWindow,
+  projectAudioSettings,
   type HuddleWindowAction,
   type WindowBridge,
 } from "./window";
@@ -571,4 +572,51 @@ it("reopens the same invitation with its failure after an unsuccessful attempt",
   } finally {
     await h.dispose();
   }
+});
+
+it("bounds native audio presentation without truncating device identities", () => {
+  const state = projectAudioSettings({
+    inputs: [
+      { id: "😀".repeat(1025), label: "invalid" },
+      ...Array.from({ length: 140 }, (_, i) => ({
+        id: String(i),
+        label: "😀".repeat(2000),
+      })),
+    ],
+    outputs: [],
+    input: "😀".repeat(1025),
+    output: "",
+    outputSupported: true,
+    loading: false,
+    busy: false,
+  });
+  expect(state.inputs).toHaveLength(128);
+  expect(state.inputs[0]?.id).toBe("0");
+  expect(
+    new TextEncoder().encode(state.inputs[0]?.label).length,
+  ).toBeLessThanOrEqual(4096);
+  expect(state.input).toBe("");
+});
+it("retries failed profile reads and scopes successes to the relay session", async () => {
+  const h = harness();
+  const ensure = vi
+    .spyOn(h.connection.session.profiles, "ensure")
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue(undefined);
+  h.set({ ...h.call.snapshot(), participants: ["ab".repeat(32)] });
+  h.release();
+  await h.companion.open();
+  await vi.waitFor(() => expect(ensure).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => {
+    h.set({ ...h.call.snapshot() });
+    expect(ensure).toHaveBeenCalledTimes(2);
+  });
+  const other = vi.fn(async () => {});
+  h.connection.session = {
+    ...h.connection.session,
+    profiles: { ...h.connection.session.profiles, ensure: other },
+  };
+  h.set({ ...h.call.snapshot() });
+  await vi.waitFor(() => expect(other).toHaveBeenCalledTimes(1));
+  await h.dispose();
 });

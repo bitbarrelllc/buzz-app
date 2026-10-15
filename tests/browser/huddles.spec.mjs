@@ -1629,3 +1629,64 @@ test("audio settings mirror device choices between compact and window controls",
     capsule.getByRole("button", { name: "Audio settings" }),
   ).toBeFocused();
 });
+
+// Browser coverage owns the shell geometry and actual launcher integration.
+test("archived conversations do not offer a Huddle launcher", async ({
+  page,
+}) => {
+  await page.goto(`${origin}/tests/fixtures/huddles.html?archived`);
+  const header = page.getByRole("region", {
+    name: "Conversation",
+    exact: true,
+  });
+  await expect(header).toBeVisible();
+  await expect(
+    header.getByRole("button", {
+      name: /Start or join a huddle|Join active huddle/,
+    }),
+  ).toHaveCount(0);
+});
+
+test("long caller names keep compact request controls inside the shell", async ({
+  page,
+}) => {
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme });
+    for (const width of [700, 1200]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.goto(
+        `${origin}/tests/fixtures/huddles.html?chrome&longCaller`,
+      );
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = "125%";
+      });
+      await page
+        .getByRole("button", { name: "Simulate incoming DM Huddle" })
+        .click();
+      const capsule = page.getByRole("group", {
+        name: "Huddle request",
+        exact: true,
+      });
+      await expect(capsule).toBeVisible();
+      const name = capsule.getByText(/calling$/);
+      expect((await name.textContent()).length).toBeLessThanOrEqual(88);
+      expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(
+        true,
+      );
+      for (const label of ["Join", "Decline"]) {
+        const button = capsule.getByRole("button", {
+          name: label,
+          exact: true,
+        });
+        await expect(button).toBeVisible();
+        const box = await button.boundingBox();
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(width);
+      }
+      await capsule
+        .getByRole("button", { name: "Decline", exact: true })
+        .click();
+      await expect(capsule).toHaveCount(0);
+    }
+  }
+});

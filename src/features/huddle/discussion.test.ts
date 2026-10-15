@@ -45,6 +45,7 @@ function harness(room = "room", delivery: "failed" | "unknown" = "failed") {
   const ensure = vi.fn();
   const loadOlder = vi.fn();
   let hasMore = true;
+  let historyError: string | undefined;
   const profiles = new Map<string, { name: string; picture: string }>();
   const session = {
     ...owner.session,
@@ -85,7 +86,7 @@ function harness(room = "room", delivery: "failed" | "unknown" = "failed") {
         rows,
         loadingOlder: false,
         hasMore,
-        error: undefined,
+        error: historyError,
       }),
     },
   };
@@ -98,6 +99,9 @@ function harness(room = "room", delivery: "failed" | "unknown" = "failed") {
     ensure,
     discussion,
     loadOlder,
+    historyError: (value: string) => {
+      historyError = value;
+    },
     hasMore: (value: boolean) => {
       hasMore = value;
     },
@@ -529,6 +533,18 @@ it("preserves signed mention evidence and edit boundaries while bounding discuss
       edited: true,
       attachmentSeams: [3],
     });
+  } finally {
+    h.dispose();
+  }
+});
+
+it("retries a failed older page instead of reloading metadata", async () => {
+  const h = harness();
+  try {
+    await vi.waitFor(() => expect(h.ensure).toHaveBeenCalled());
+    h.historyError("Page unavailable");
+    h.discussion.retry();
+    expect(h.loadOlder).toHaveBeenCalledOnce();
   } finally {
     h.dispose();
   }

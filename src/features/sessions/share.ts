@@ -22,6 +22,8 @@ export function canShareConversation(
     canShareSession(session, channel) ||
     !!(
       channel &&
+      !channel.huddle &&
+      !channel.metadataPending &&
       !channel.cached &&
       !channel.readOnly &&
       !channel.archived &&
@@ -102,6 +104,8 @@ export async function destinationShareAudience(
   if (
     !fresh ||
     !destination ||
+    destination.huddle ||
+    destination.metadataPending ||
     destination.cached ||
     destination.archived ||
     destination.readOnly ||
@@ -138,6 +142,8 @@ export async function publishSessionLink(
     await session.workSessions.refreshMembership(destinationId);
   const eligible = (channel: ChannelSummary, sessionChannel: boolean) =>
     !!session.viewer &&
+    !channel.huddle &&
+    !channel.metadataPending &&
     !channel.cached &&
     !channel.readOnly &&
     !channel.archived &&
