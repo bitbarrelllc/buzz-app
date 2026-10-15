@@ -119,38 +119,6 @@
   @apply text-caption;
 }
 
-.pluginEssentials {
-  position: relative;
-  isolation: isolate;
-  margin-block: var(--space-3) var(--space-2);
-  padding-block: var(--space-4);
-  border-radius: var(--radius-container);
-  border: 1px solid var(--border-standard);
-}
-
-.pluginEssentialsLabel {
-  position: absolute;
-  z-index: 2;
-  /* Match the row's text start, less this label's own horizontal padding. */
-  inset-inline-start: calc(
-    1px +
-    var(--space-4) +
-    var(--space-6) +
-    var(--space-2) +
-    var(--space-row-gap) -
-    var(--space-3)
-  );
-  top: 0;
-  transform: translateY(-50%);
-  margin: 0;
-  padding: var(--space-1h) var(--space-3);
-  border: 1px solid var(--border-standard);
-  border-radius: var(--radius-pill);
-  background: var(--surface-panel);
-  color: var(--text-subtle);
-  @apply text-caption font-medium uppercase tracking-wider;
-}
-
 .settingsGroupTitle {
   margin: 0 0 var(--space-1);
   padding-inline: var(--space-2);

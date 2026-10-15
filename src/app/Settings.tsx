@@ -18,6 +18,7 @@ import { RecoveryScreen } from "./RecoveryScreen";
 import styles from "./Settings.module.css";
 import {
   CheckCircleIcon,
+  SparklesIcon,
   SquaresFourIcon,
   XIcon,
 } from "../shared/design-system/icons/index";
@@ -613,115 +614,88 @@ export function Settings({
                             </span>
                           }
                         />
-                        {[true, false].map((essential) => {
-                          const entries = group.plugins.filter(
-                            (plugin) => isEssentialPlugin(plugin) === essential,
-                          );
-                          if (!entries.length) return null;
-                          return (
-                            <section
-                              key={String(essential)}
-                              className={
-                                essential ? styles.pluginEssentials : undefined
-                              }
-                              aria-labelledby={
-                                essential
-                                  ? `plugin-essentials-${group.id}`
-                                  : undefined
-                              }
-                            >
-                              {essential && (
-                                <h4
-                                  id={`plugin-essentials-${group.id}`}
-                                  className={styles.pluginEssentialsLabel}
+                        <div className={styles.pluginList}>
+                          {group.plugins.map((plugin) => {
+                            const id = plugin.manifest.id;
+                            const active = id === selectedPluginId;
+                            return (
+                              <article className={styles.plugin} key={id}>
+                                <button
+                                  ref={active ? pluginTrigger : undefined}
+                                  type="button"
+                                  className={styles.pluginRow}
+                                  aria-label={`View ${plugin.manifest.name} details`}
+                                  aria-expanded={active}
+                                  aria-controls={
+                                    active ? "plugin-details" : undefined
+                                  }
+                                  onClick={(event) => {
+                                    pluginTrigger.current = event.currentTarget;
+                                    setSelectedPluginId(
+                                      active ? undefined : id,
+                                    );
+                                  }}
                                 >
-                                  Essentials
-                                </h4>
-                              )}
-                              <div className={styles.pluginList}>
-                                {entries.map((plugin) => {
-                                  const id = plugin.manifest.id;
-                                  const active = id === selectedPluginId;
-                                  return (
-                                    <article className={styles.plugin} key={id}>
-                                      <button
-                                        ref={active ? pluginTrigger : undefined}
-                                        type="button"
-                                        className={styles.pluginRow}
-                                        aria-label={`View ${plugin.manifest.name} details`}
-                                        aria-expanded={active}
-                                        aria-controls={
-                                          active ? "plugin-details" : undefined
-                                        }
-                                        onClick={(event) => {
-                                          pluginTrigger.current =
-                                            event.currentTarget;
-                                          setSelectedPluginId(
-                                            active ? undefined : id,
-                                          );
-                                        }}
-                                      >
-                                        <ChoiceRow
-                                          leading={
-                                            <PluginIcon plugin={plugin} />
-                                          }
-                                          label={
-                                            <span className={styles.pluginName}>
-                                              {plugin.manifest.name}
-                                              {plugin.source === "bundled" && (
-                                                <CheckCircleIcon
-                                                  size={14}
-                                                  strokeWidth={2.5}
-                                                  aria-hidden="true"
-                                                />
-                                              )}
-                                            </span>
-                                          }
-                                          description={
-                                            plugin.manifest.description
-                                          }
-                                        />
-                                        {plugin.source === "external" && (
-                                          <PluginProvenance
-                                            source={plugin.source}
-                                            publisher={plugin.publisher}
-                                            className={styles.pluginRowAuthor}
+                                  <ChoiceRow
+                                    leading={<PluginIcon plugin={plugin} />}
+                                    label={
+                                      <span className={styles.pluginName}>
+                                        {plugin.manifest.name}
+                                        {plugin.source === "bundled" && (
+                                          <CheckCircleIcon
+                                            size={14}
+                                            strokeWidth={2.5}
+                                            aria-hidden="true"
                                           />
                                         )}
-                                      </button>
-                                      <div className={styles.pluginRowToggle}>
-                                        {isRequiredPlugin(plugin) ? (
-                                          <span className="text-caption text-secondary">
-                                            Required
-                                          </span>
-                                        ) : (
-                                          <Switch
-                                            aria-label={`Enable ${plugin.manifest.name}`}
-                                            checked={plugin.enabled}
-                                            readOnly={busy}
-                                            aria-disabled={busy}
-                                            onClick={(event) =>
-                                              event.currentTarget.focus()
-                                            }
-                                            onCheckedChange={() => {
-                                              if (busy) return;
-                                              void plugins.change(
-                                                plugin.enabled
-                                                  ? "disable"
-                                                  : "enable",
-                                                id,
-                                              );
-                                            }}
+                                        {isEssentialPlugin(plugin) && (
+                                          <SparklesIcon
+                                            size={14}
+                                            aria-hidden={false}
+                                            role="img"
+                                            aria-label="Essential"
                                           />
                                         )}
-                                      </div>
-                                    </article>
-                                  );
-                                })}
-                              </div>
-                            </section>
-                          );
-                        })}
+                                      </span>
+                                    }
+                                    description={plugin.manifest.description}
+                                  />
+                                  {plugin.source === "external" && (
+                                    <PluginProvenance
+                                      source={plugin.source}
+                                      publisher={plugin.publisher}
+                                      className={styles.pluginRowAuthor}
+                                    />
+                                  )}
+                                </button>
+                                <div className={styles.pluginRowToggle}>
+                                  {isRequiredPlugin(plugin) ? (
+                                    <span className="text-caption text-secondary">
+                                      Required
+                                    </span>
+                                  ) : (
+                                    <Switch
+                                      aria-label={`Enable ${plugin.manifest.name}`}
+                                      checked={plugin.enabled}
+                                      readOnly={busy}
+                                      aria-disabled={busy}
+                                      onClick={(event) =>
+                                        event.currentTarget.focus()
+                                      }
+                                      onCheckedChange={() => {
+                                        if (busy) return;
+                                        void plugins.change(
+                                          plugin.enabled ? "disable" : "enable",
+                                          id,
+                                        );
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
                       </section>
                     ))}
                   </div>

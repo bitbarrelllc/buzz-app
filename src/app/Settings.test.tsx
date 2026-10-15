@@ -263,25 +263,16 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
   expect(within(content).getAllByRole("article")).toHaveLength(5);
   expect(
     within(content).queryAllByRole("img", { name: "Essential" }),
-  ).toHaveLength(0);
+  ).toHaveLength(essentials ? 3 : 0);
   expect(within(content).queryByText("Essential")).toBeNull();
   if (essentials) {
-    const essentialGroup = within(communication as HTMLElement).getByRole(
-      "region",
-      { name: "Essentials" },
-    );
-    expect(
-      within(essentialGroup)
-        .getAllByRole("article")
-        .map((row) =>
-          within(row).getByRole("button").getAttribute("aria-label"),
-        ),
-    ).toEqual(["View Channels details", "View Voice Notes details"]);
-    expect(within(essentialGroup).queryByText("Messages")).toBeNull();
+    const name = within(content).getByText("Voice Notes");
+    const marker = within(name).getByRole("img", { name: "Essential" });
+    expect(marker.previousElementSibling?.tagName.toLowerCase()).toBe("svg");
   }
   expect(
     within(content).queryAllByRole("region", { name: "Essentials" }),
-  ).toHaveLength(essentials ? 2 : 0);
+  ).toHaveLength(0);
   expect(
     within(content).queryByRole("switch", { name: "Enable Channels" }),
   ).toBeNull();
