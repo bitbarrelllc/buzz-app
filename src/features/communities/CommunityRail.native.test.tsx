@@ -204,17 +204,14 @@ async function hint(user: ReturnType<typeof userEvent.setup>, name: string) {
     },
   };
 }
-const profile = {} as Awaited<ReturnType<typeof communityApi.inspectProfile>>;
-
 it("shows which saved communities refuse this identity or cannot be reached, and keeps every one", async () => {
   const user = userEvent.setup();
   // The one signed read per community, answered as the relay taxonomy does.
   const inspect = vi
-    .spyOn(communityApi, "inspectProfile")
+    .spyOn(communityApi, "checkCommunityAccess")
     .mockImplementation(async (id) => {
       if (id === primary) throw httpReadError(403);
       if (id === secondary) throw new Error("ECONNREFUSED");
-      return profile;
     });
   const h = harness();
   render(<CommunityRail communities={h.communities} />);
@@ -224,7 +221,8 @@ it("shows which saved communities refuse this identity or cannot be reached, and
       secondary,
     ]),
   );
-  expect(inspect).toHaveBeenCalledWith(primary);
+  // One bounded read per community: the pass's cancellation and a timeout.
+  expect(inspect).toHaveBeenCalledWith(primary, expect.any(AbortSignal));
   const refused = await hint(user, "Primary");
   await waitFor(() =>
     expect(refused.tooltip).toHaveTextContent("Primary · Access refused"),
@@ -263,10 +261,9 @@ it("re-checks only refused or unreachable communities on returning to the window
   const user = userEvent.setup();
   let refuse = true;
   const inspect = vi
-    .spyOn(communityApi, "inspectProfile")
+    .spyOn(communityApi, "checkCommunityAccess")
     .mockImplementation(async (id) => {
       if (id === primary && refuse) throw httpReadError(401);
-      return profile;
     });
   const h = harness();
   render(<CommunityRail communities={h.communities} />);

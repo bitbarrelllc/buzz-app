@@ -970,8 +970,14 @@ it("says that the community list is not synced while uploads wait, and why", asy
   expect(screen.queryByRole("status")).toBeNull();
   h.update({ syncStatus: { phase: "error", pending: 0, error: "Stale" } });
   expect(screen.queryByRole("status")).toBeNull();
+  // A service without the routes yet is nothing to show, queue or not.
+  h.update({
+    sync: { known: [], outbox: [op] },
+    syncStatus: { phase: "unavailable", pending: 1 },
+  });
+  expect(screen.queryByRole("status")).toBeNull();
   // The owner withdrawing its report (plugin disabled) withdraws the indicator.
-  h.update({ syncStatus: undefined, sync: { known: [], outbox: [op] } });
+  h.update({ syncStatus: undefined });
   expect(screen.queryByRole("status")).toBeNull();
 });
 

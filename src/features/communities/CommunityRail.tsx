@@ -14,7 +14,7 @@ import type { OpenTarget } from "../navigation/targets";
 import { readErrorKind } from "../relay/errors";
 import { communityFromScope } from "../relay/gifs";
 import { useRelayConnection } from "../relay/react";
-import { inspectProfile } from "./api";
+import { checkCommunityAccess } from "./api";
 import type { Communities, Membership } from "./service";
 import {
   CommunityDepartureError,
@@ -173,13 +173,19 @@ export function CommunityRail({
           }
           if (controller.signal.aborted) return;
           if (probing) {
-            // One signed read proves this identity can still read the relay.
-            // Its answer is shown on the item, never acted on: a community
-            // restored from the account stays saved whether the relay refuses
-            // the viewer or cannot be reached.
+            // One bounded signed read proves this identity can still read the
+            // relay. Its answer is shown on the item, never acted on: a
+            // community restored from the account stays saved whether the
+            // relay refuses the viewer or cannot be reached.
             let state: CommunityAccess = "ok";
             try {
-              await inspectProfile(id);
+              await checkCommunityAccess(
+                id,
+                AbortSignal.any([
+                  controller.signal,
+                  AbortSignal.timeout(12000),
+                ]),
+              );
             } catch (error) {
               state =
                 readErrorKind(error) === "denied" ? "denied" : "unavailable";
@@ -196,9 +202,13 @@ export function CommunityRail({
     return () => controller.abort();
   }, [client.status, client.relayAvailable, membershipIds, pass, probing]);
   // Only a running sync owner can say why uploads wait. Where none runs (no
-  // Builderlab plugin, no configured service, a browser build) the queue is
-  // not a promise anyone will keep, so nothing is shown.
-  const unsynced = !!client.syncStatus && client.sync.outbox.length > 0;
+  // Builderlab plugin, no configured service, a browser build) or the service
+  // has no routes for it yet, the queue is not a promise anyone will keep, so
+  // nothing is shown.
+  const unsynced =
+    !!client.syncStatus &&
+    client.syncStatus.phase !== "unavailable" &&
+    client.sync.outbox.length > 0;
   const reason = client.syncStatus ? syncReason(client.syncStatus) : "";
   const select = (id: string | null) => {
     if (onSelect) onSelect(id);
