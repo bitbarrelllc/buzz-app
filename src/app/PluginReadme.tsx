@@ -65,7 +65,7 @@ export function PluginReadme({ text }: { text: string }) {
         className={styles.clip}
         data-collapsed={(overflow && !expanded) || undefined}
         initial={false}
-        style={expanded === null ? { maxHeight: "20rem" } : undefined}
+        style={expanded === null ? { maxHeight: "20rem" } : {}}
         animate={{ height: overflow && !expanded ? size.limit : "auto" }}
         transition={{
           duration: instant || expanded === null ? 0 : 0.2,
