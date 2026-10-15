@@ -58,6 +58,15 @@ const pluginCategoryDefinitions = [
   { id: "people-and-communities", label: "People & communities" },
 ] as const;
 
+const communicationPluginOrder = [
+  "buzz.channels",
+  "buzz.mentions",
+  "buzz.links",
+  "buzz.emoji",
+  "buzz.voice-notes",
+  "buzz.diffs",
+];
+
 function groupPlugins(plugins: readonly PluginInfo[]) {
   const known = new Map<string, PluginInfo[]>(
     pluginCategoryDefinitions.map(({ id }) => [id, []]),
@@ -67,6 +76,13 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
     const group = known.get(plugin.manifest.discovery?.category ?? "");
     (group ?? other).push(plugin);
   }
+  const communicationRank = (plugin: PluginInfo) => {
+    const index = communicationPluginOrder.indexOf(plugin.manifest.id);
+    return index < 0 ? communicationPluginOrder.length : index;
+  };
+  known
+    .get("communication")
+    ?.sort((a, b) => communicationRank(a) - communicationRank(b));
   return [
     ...pluginCategoryDefinitions.flatMap(({ id, label }) => {
       const entries = known.get(id) ?? [];

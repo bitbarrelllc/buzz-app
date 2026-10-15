@@ -187,6 +187,30 @@ it("groups plugin cards by known categories and keeps unknown ones under Other",
     dismissError: vi.fn(),
   } as unknown as Parameters<typeof Settings>[0]["plugins"];
 
+  const channel = ready.configuration.catalog.plugins[0];
+  if (!channel) throw new Error("Expected Channels fixture");
+  ready.configuration.catalog.plugins.unshift(
+    ...(
+      [
+        ["example.chat-z", "Chat Z"],
+        ["buzz.diffs", "Diff viewer"],
+        ["buzz.voice-notes", "Voice Notes"],
+        ["buzz.emoji", "Emoji"],
+        ["buzz.links", "Links"],
+        ["buzz.mentions", "Mentions"],
+        ["example.chat-a", "Chat A"],
+      ] as const
+    ).map(([id, name]) => ({
+      ...channel,
+      manifest: {
+        ...channel.manifest,
+        id,
+        name,
+        description: `${name} description.`,
+      },
+    })),
+  );
+
   render(<Settings {...host} cards={cards} plugins={plugins} />);
   fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
 
@@ -196,6 +220,24 @@ it("groups plugin cards by known categories and keeps unknown ones under Other",
       .getAllByRole("heading", { level: 3 })
       .map((heading) => heading.textContent),
   ).toEqual(["Communication", "Agents", "Other"]);
+  expect(
+    within(content)
+      .getAllByRole("button", { name: /^View .* details$/ })
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual(
+    [
+      "Channels",
+      "Mentions",
+      "Links",
+      "Emoji",
+      "Voice Notes",
+      "Diff viewer",
+      "Chat Z",
+      "Chat A",
+      "Codex",
+      "Invoices",
+    ].map((name) => `View ${name} details`),
+  );
   for (const description of [
     "Navigate channels and hold conversations in Buzz.",
     "Run local Codex coding agents in Buzz.",
