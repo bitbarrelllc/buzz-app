@@ -21,19 +21,15 @@
 
 .readme :is(h3, h4) {
   margin-top: var(--space-4);
-}
-
-.readme h3 {
   @apply text-label;
 }
 
-.readme h4 {
+.readme :is(h5, h6) {
   @apply text-label-sm;
 }
 
-.readme :is(h5, h6) {
+.readme h6 {
   color: var(--text-secondary);
-  @apply text-label-sm;
 }
 
 .readme :is(ul, ol) {
