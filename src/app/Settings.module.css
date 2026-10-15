@@ -184,6 +184,12 @@
   pointer-events: auto;
 }
 
+.pluginRowError {
+  margin: 0;
+  padding-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
 .pluginName {
   display: inline-flex;
   align-items: center;

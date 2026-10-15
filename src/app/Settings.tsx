@@ -59,9 +59,11 @@ function isRequiredPlugin(plugin: PluginInfo) {
 
 function isEssentialPlugin(plugin: PluginInfo) {
   return (
-    plugin.manifest.discovery?.tags?.some(
+    plugin.source === "bundled" &&
+    (plugin.manifest.discovery?.tags?.some(
       (tag) => tag.trim().toLowerCase() === "essentials",
-    ) ?? false
+    ) ??
+      false)
   );
 }
 
@@ -149,7 +151,8 @@ function PluginDetails({
   const readme =
     plugin.source === "bundled" && bundledReadmes.get(plugin.manifest.id);
   const otherTags = (plugin.manifest.discovery?.tags ?? []).filter(
-    (tag) => tag.trim().toLowerCase() !== "essentials",
+    (tag) =>
+      !isEssentialPlugin(plugin) || tag.trim().toLowerCase() !== "essentials",
   );
   return (
     <aside
@@ -439,12 +442,15 @@ export function Settings({
   const [pluginImportActions, setPluginImportActions] =
     useState<HTMLSpanElement | null>(null);
   const pluginTrigger = useRef<HTMLButtonElement>(null);
+  const pluginSection = useRef<HTMLElement>(null);
   const selectedPlugin = catalog?.plugins.find(
     (plugin) => plugin.manifest.id === selectedPluginId,
   );
   useEffect(() => {
-    if (selectedPluginId && catalog && !selectedPlugin)
+    if (selectedPluginId && catalog && !selectedPlugin) {
+      pluginSection.current?.focus();
       setSelectedPluginId(undefined);
+    }
   }, [catalog, selectedPlugin, selectedPluginId]);
   const closePluginDetails = () => {
     pluginTrigger.current?.focus();
@@ -598,7 +604,11 @@ export function Settings({
               </div>
             )}
             <div hidden={selected !== "plugins"}>
-              <section aria-labelledby="plugin-settings-title">
+              <section
+                ref={pluginSection}
+                tabIndex={-1}
+                aria-labelledby="plugin-settings-title"
+              >
                 <Header
                   id="plugin-settings-title"
                   title="Plugins"
@@ -684,6 +694,12 @@ export function Settings({
                           {group.plugins.map((plugin) => {
                             const id = plugin.manifest.id;
                             const active = id === selectedPluginId;
+                            const running = activation[id];
+                            const failure =
+                              plugin.error ??
+                              (running?.revision === plugin.revision
+                                ? running.error
+                                : null);
                             return (
                               <div key={id}>
                                 <article className={styles.plugin}>
@@ -773,6 +789,14 @@ export function Settings({
                                     )}
                                   </div>
                                 </article>
+                                {failure && (
+                                  <p
+                                    role="alert"
+                                    className={`${styles.pluginRowError} error text-body-sm`}
+                                  >
+                                    {failure}
+                                  </p>
+                                )}
                               </div>
                             );
                           })}

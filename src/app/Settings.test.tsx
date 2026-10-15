@@ -550,6 +550,151 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(plugins.change).not.toHaveBeenCalled();
 });
 
+// These fixtures exercise catalog updates through the same subscription as the host.
+function reviewPluginFixture() {
+  const listeners = new Set<() => void>();
+  const external = {
+    manifest: {
+      id: "example.external",
+      name: "Zebra external",
+      apiVersion: 1,
+      discovery: { category: "agents", tags: ["Essentials"] },
+    },
+    source: "external",
+    enabled: true,
+    revision: "current",
+    previous: null,
+    reloadable: true,
+    error: null as string | null,
+  };
+  let snapshot = {
+    configuration: {
+      status: "ready",
+      externalPluginsPaused: false,
+      catalog: {
+        profile: "test",
+        location: "test",
+        plugins: [
+          {
+            ...external,
+            manifest: {
+              ...external.manifest,
+              id: "buzz.alphabet",
+              name: "Alphabet bundled",
+              discovery: { category: "agents", tags: [] },
+            },
+            source: "bundled",
+          },
+          external,
+        ],
+      },
+    },
+    activation: {} as Record<
+      string,
+      { revision: string; error: string | null }
+    >,
+    busy: false,
+    error: null,
+    refreshError: null,
+  };
+  const publish = () => {
+    snapshot = { ...snapshot };
+    for (const listener of listeners) listener();
+  };
+  const manager = {
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    snapshot: () => snapshot,
+    change: vi.fn(async (action: string, id: string) => {
+      if (action === "remove") {
+        snapshot.configuration = {
+          ...snapshot.configuration,
+          catalog: {
+            ...snapshot.configuration.catalog,
+            plugins: snapshot.configuration.catalog.plugins.filter(
+              (plugin) => plugin.manifest.id !== id,
+            ),
+          },
+        };
+        publish();
+      }
+    }),
+  } as unknown as Parameters<typeof Settings>[0]["plugins"];
+  const { cards } = registry([]);
+  render(<Settings {...host} cards={cards} plugins={manager} />);
+  fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
+  return { external, snapshot, publish, manager };
+}
+
+it("keeps external Essentials tags from granting curated markers or priority", () => {
+  reviewPluginFixture();
+  const group = screen.getByRole("region", { name: "Agents2plugins" });
+  expect(
+    within(group)
+      .getAllByRole("button", { name: /^View .* details$/ })
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual(["View Alphabet bundled details", "View Zebra external details"]);
+  expect(within(group).queryByRole("img", { name: "Essential" })).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  );
+  const details = screen.getByRole("complementary", {
+    name: "Zebra external details",
+  });
+  expect(details.querySelector("[data-essential]")).toBeNull();
+  expect(
+    within(details).getByText("Essentials").closest("tr"),
+  ).toHaveTextContent("Tags");
+});
+
+it("announces catalog and current activation failures directly in the list", () => {
+  const fixture = reviewPluginFixture();
+  act(() => {
+    fixture.external.error = "Could not load plugin";
+    fixture.publish();
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent("Could not load plugin");
+  act(() => {
+    fixture.external.error = null;
+    fixture.snapshot.activation[fixture.external.manifest.id] = {
+      revision: "current",
+      error: "Activation failed",
+    };
+    fixture.publish();
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent("Activation failed");
+  act(() => {
+    fixture.external.revision = "next";
+    fixture.publish();
+  });
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("returns focus to the Plugins section when the selected plugin is deleted", async () => {
+  const fixture = reviewPluginFixture();
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  );
+  const details = screen.getByRole("complementary", {
+    name: "Zebra external details",
+  });
+  const remove = within(details).getByRole("button", { name: "Delete" });
+  remove.focus();
+  fireEvent.click(remove);
+  expect(fixture.manager.change).toHaveBeenCalledWith(
+    "remove",
+    "example.external",
+  );
+  await waitFor(() => {
+    expect(
+      screen.queryByRole("complementary", { name: "Zebra external details" }),
+    ).toBeNull();
+    expect(screen.getByRole("region", { name: "Plugins" })).toHaveFocus();
+  });
+});
+
 it("uses contributed icons in community and account navigation", () => {
   const { cards } = registry([
     { ...card("groups", "Personal groups"), icon: FolderSimpleIcon },
