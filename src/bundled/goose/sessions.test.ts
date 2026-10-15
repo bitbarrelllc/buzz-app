@@ -314,43 +314,66 @@ describe("AgentSessions", () => {
     expect(goose?.killed).toBe(false);
   });
 
-  it("compacts a conversation's session, and a message meanwhile waits for it", async () => {
+  it("compacts a conversation's session once it is idle, then answers", async () => {
     const { fake, sessions } = setup({}, true);
     const first = sessions.deliver("a", "one", 1);
     await flush(30);
     const goose = fake.geese[0];
+    const compacted = sessions.deliver("a", "two", 2, { session: "compact" });
+    // A message after it waits for it rather than steering into the session.
+    const next = sessions.deliver("a", "three", 3);
+    await flush(30);
+    expect(goose?.turns[0]?.steered).toEqual([]);
     goose?.turns[0]?.finish();
     await first;
-    const compacted = sessions.compact("a");
     await flush(30);
     expect(goose?.turns[1]?.text).toBe("/compact");
-    expect(sessions.busy("a")).toBe(true);
-    const next = sessions.deliver("a", "two", 2);
-    await flush(30);
-    expect(goose?.turns[1]?.steered).toEqual([]);
     goose?.update("session-1", {
       sessionUpdate: "agent_message_chunk",
       content: { type: "text", text: "Compaction complete" },
     });
     await flush(30);
     goose?.turns[1]?.finish();
-    await expect(compacted).resolves.toEqual({ ok: true });
     await flush(30);
     expect(goose?.turns[2]?.text).toBe("two");
+    expect(goose?.turns[2]?.steered).toEqual(["three"]);
     goose?.turns[2]?.finish();
+    await expect(compacted).resolves.toEqual({ ok: true });
     await expect(next).resolves.toEqual({ ok: true });
   });
 
-  it("reports a compaction goose could not do, and has none without a session", async () => {
-    const { fake, sessions } = setup();
-    await expect(sessions.compact("a")).resolves.toEqual({
-      ok: false,
-      error: "There is no session here to compact yet",
-    });
-    await sessions.deliver("a", "one", 1);
+  it("keeps messages held by a session action past their time to start", async () => {
+    const { fake, sessions } = setup({}, true);
+    const first = sessions.deliver("a", "one", 1);
+    await flush(30);
     const goose = fake.geese[0];
+    const late = new AbortController();
+    const renewed = sessions.deliver("a", "two", 2, {
+      session: "new",
+      signal: late.signal,
+    });
+    const next = sessions.deliver("a", "three", 3, { signal: late.signal });
+    await flush(30);
+    // The turn ahead outlasts both messages' time to start.
+    late.abort();
+    goose?.turns[0]?.finish();
+    await first;
+    await flush(30);
+    expect(goose?.turns.slice(1).map((turn) => turn.text)).toEqual(["two"]);
+    expect(goose?.turns[1]?.steered).toEqual(["three"]);
+    goose?.turns[1]?.finish();
+    await expect(renewed).resolves.toEqual({ ok: true });
+    await expect(next).resolves.toEqual({ ok: true });
+  });
+
+  it("fails the message whose compaction goose could not do", async () => {
+    const { fake, sessions } = setup();
+    // Without a session there is nothing to compact.
+    await sessions.deliver("a", "one", 1, { session: "compact" });
+    const goose = fake.geese[0];
+    expect(goose?.turns.map((turn) => turn.text)).toEqual(["one"]);
     if (goose) goose.hold = true;
-    const compacted = sessions.compact("a");
+    const compacted = sessions.deliver("a", "two", 2, { session: "compact" });
     await flush(30);
     // goose ends a failed compaction like any turn, saying why in its text.
     goose?.update("session-1", {
@@ -366,15 +389,14 @@ describe("AgentSessions", () => {
       ok: false,
       error: "Request failed: Resource not found (404)",
     });
+    expect(goose?.turns).toHaveLength(2);
   });
 
-  it("closes a forgotten conversation's session, so its next message opens another", async () => {
+  it("answers in a new session when asked to", async () => {
     const { fake, sessions } = setup();
     await sessions.deliver("a", "one", 1);
-    sessions.forget("a");
-    await flush(30);
+    await sessions.deliver("a", "two", 2, { session: "new" });
     expect(fake.geese[0]?.closed).toEqual(["session-1"]);
-    await sessions.deliver("a", "two", 2);
     expect(fake.geese[0]?.turns.map((turn) => turn.sessionId)).toEqual([
       "session-1",
       "session-2",

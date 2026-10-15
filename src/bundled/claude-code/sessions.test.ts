@@ -322,10 +322,7 @@ it("compacts a quiet conversation's saved session in place", async () => {
 
 it("has no session to compact before a conversation starts", async () => {
   const { pool, claudes } = sessions();
-  await expect(pool.compact("c/root")).resolves.toEqual({
-    ok: false,
-    error: "There is no session here to compact yet",
-  });
+  await expect(pool.compact("c/root")).resolves.toEqual({ ok: true });
   expect(claudes().filter((process) => process.prompts.length)).toEqual([]);
 });
 
@@ -357,10 +354,8 @@ it("forgets a conversation's session, so its next message starts a new one", asy
   const { pool, claudes } = sessions({ store, hold: true });
   const first = pool.deliver("c/root", "first", 1);
   await flush();
-  expect(pool.busy("c/root")).toBe(true);
   claudes()[0]?.finish();
   await first;
-  expect(pool.busy("c/root")).toBe(false);
   pool.forget("c/root");
   expect(claudes()[0]?.killed).toBe(true);
   expect(store.get("c/root")).toBeUndefined();

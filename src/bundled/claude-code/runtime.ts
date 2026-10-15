@@ -17,8 +17,6 @@ import type {
   Delivery,
   Effort,
   Models,
-  SessionAction,
-  SessionPlace,
   StandaloneTurn,
   TurnResult,
 } from "../../features/agents/service";
@@ -318,6 +316,7 @@ export class ClaudeRuntime {
     channelId,
     model,
     effort,
+    session,
     team,
     workingUntil,
     ignored,
@@ -374,13 +373,22 @@ export class ClaudeRuntime {
       );
     // A turn keeps the posting policy it was admitted with: a request under
     // the other policy waits for the conversation's turns to settle rather
-    // than steering into them and changing their tools' context.
+    // than steering into them and changing their tools' context. So does one
+    // that compacts or replaces their session.
     const prior = entry.policies.get(key);
-    const same = prior?.topLevel === topLevel;
+    const same = prior?.topLevel === topLevel && !session;
     const wait = prior && (same ? prior.handed : prior.settled);
     let delivered!: Promise<Settled>;
     const handed = (async () => {
       await wait;
+      if (session === "new") entry.sessions.forget(key);
+      if (session === "compact") {
+        const compacted = await entry.sessions.compact(key);
+        if (!compacted.ok) {
+          delivered = Promise.resolve(compacted);
+          return;
+        }
+      }
       const text = await prompt(false);
       // A conversation's tools default to its thread; a session shared by
       // several threads is told which to reply in instead.
@@ -428,42 +436,6 @@ export class ClaudeRuntime {
     this.watch(done, async (error) => {
       if (error) await this.report(agent, channel, event, error, topLevel);
     });
-  }
-
-  /** Compacts or forgets the agent's session for the conversation at
-   * `place`. Refused while a turn there is starting or working. */
-  async session(
-    agent: Agent,
-    { channelId, root }: SessionPlace,
-    action: SessionAction,
-  ) {
-    const entry = this.agents.get(agent.pubkey);
-    if (!entry) throw new Error(`${agent.name} is not running here`);
-    const topLevel =
-      (await this.reads(agent.pubkey)?.meChat(
-        agent.owner,
-        channelId,
-        AbortSignal.timeout(NAMES_TIMEOUT_MS * 2),
-      )) ?? false;
-    const key = (await this.whole(entry, agent.pubkey, channelId, topLevel))
-      ? channelId
-      : root && `${channelId}/${root}`;
-    // Each message at a channel's top level starts a new session already.
-    if (!key && action === "new") return;
-    if (!key) throw new Error("There is no session here to compact yet");
-    if (entry.policies.has(key) || entry.sessions.busy(key))
-      throw new Error(`${agent.name} is working here; try when it finishes`);
-    if (action === "new") return entry.sessions.forget(key);
-    // A mention meanwhile waits for the compaction rather than steering into it.
-    const done = entry.sessions.compact(key);
-    const settled = done.then(() => undefined);
-    const policy = { topLevel, handed: settled, settled };
-    entry.policies.set(key, policy);
-    void settled.then(() => {
-      if (entry.policies.get(key) === policy) entry.policies.delete(key);
-    });
-    const result = await done;
-    if (!result.ok) throw new Error(result.error);
   }
 
   /** Runs a standalone turn, such as a watch's or a timer's, as a one-off
@@ -534,20 +506,10 @@ export class ClaudeRuntime {
     channelId: string,
     topLevel: boolean,
   ) {
-    return (await this.whole(entry, self, channelId, topLevel))
+    const summary = await this.reads(self)?.channel(channelId);
+    return topLevel || summary?.dm === true || entry.config.scope === "channel"
       ? channelId
       : `${channelId}/${threadReference(event)?.rootId ?? event.id}`;
-  }
-  /** Whether the channel is one conversation for the agent rather than one
-   * per thread. */
-  private async whole(
-    entry: Entry,
-    self: string,
-    channelId: string,
-    topLevel: boolean,
-  ) {
-    const summary = await this.reads(self)?.channel(channelId);
-    return topLevel || summary?.dm === true || entry.config.scope === "channel";
   }
 
   /** Where the event's turn goes, and what its prompt needs. */

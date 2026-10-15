@@ -3075,33 +3075,22 @@ it("a converted stream uses threaded replies despite an agent owner's retained M
   expect(tagsOf(f)[0]).toContainEqual(["e", root, "", "reply"]);
 });
 describe("session actions", () => {
-  const config = {
-    workspace: "/tmp/codex-test",
-    model: "test-model",
-    effort: "low",
-    instructions: "",
-  };
-  const place = { channelId: "channel", root };
   const methods = (f: ReturnType<typeof fixture>) =>
     f.sent.flatMap((wire) => (wire.method ? [wire.method] : []));
 
-  it("compacts a conversation's thread in its lane, then forgets it", async () => {
+  it("compacts a conversation's thread before the turn, after the one working", async () => {
     const f = fixture();
-    const self = { pubkey, owner, name: "Codex", config } as unknown as Agent;
     await f.runtime.run(f.delivery("first"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    // Asked while the turn works, it runs as the next turn, not a steer.
+    await f.runtime.run({ ...f.delivery("second"), session: "compact" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(methods(f)).not.toContain("turn/steer");
     await f.complete();
-    await vi.waitFor(() =>
-      expect(f.runtime.sessions(pubkey)[0]?.status).toBe("Idle"),
-    );
-    const compacted = f.runtime.session(self, place, "compact");
     await vi.waitFor(() =>
       expect(methods(f)).toContain("thread/compact/start"),
     );
     expect(f.runtime.sessions(pubkey)[0]?.status).toBe("Compacting");
-    // A mention meanwhile waits for the compaction.
-    await f.runtime.run(f.delivery("second"));
-    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(f.starts()).toHaveLength(1);
     f.emit({
       method: "turn/started",
@@ -3114,43 +3103,28 @@ describe("session actions", () => {
         turn: { id: "compact", status: "completed" },
       },
     });
-    await expect(compacted).resolves.toBeUndefined();
-    const compaction = methods(f).slice(
-      methods(f).indexOf("thread/compact/start") - 1,
-    );
-    expect(compaction.slice(0, 3)).toEqual([
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    const since = methods(f).slice(methods(f).lastIndexOf("thread/resume"));
+    expect(since.slice(0, 2)).toEqual([
       "thread/resume",
       "thread/compact/start",
-      "thread/unsubscribe",
     ]);
-    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
-    await f.complete();
-    await vi.waitFor(() =>
-      expect(f.runtime.sessions(pubkey)[0]?.status).toBe("Idle"),
-    );
-    await f.runtime.session(self, place, "new");
-    await f.runtime.run(f.delivery("third"));
-    await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
-    expect(methods(f).filter((method) => method === "thread/start")).toEqual([
-      "thread/start",
-      "thread/start",
-    ]);
+    expect(f.starts()[1]?.params).toMatchObject({ threadId: "thread-1" });
   });
 
-  it("refuses while the conversation is working, and has nothing to compact before it starts", async () => {
+  it("starts a new thread for the conversation", async () => {
     const f = fixture();
-    const self = { pubkey, owner, name: "Codex", config } as unknown as Agent;
-    await expect(f.runtime.session(self, place, "compact")).rejects.toThrow(
-      "There is no session here to compact yet",
-    );
     await f.runtime.run(f.delivery("first"));
     await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
-    await expect(f.runtime.session(self, place, "new")).rejects.toThrow(
-      "Codex is working here",
-    );
-    // A channel's top level has no session of its own to start over.
-    await expect(
-      f.runtime.session(self, { channelId: "channel" }, "new"),
-    ).resolves.toBeUndefined();
+    await f.complete();
+    await f.runtime.run({ ...f.delivery("second"), session: "new" });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(methods(f)).not.toContain("thread/resume");
+    expect(f.starts()[1]?.params).toMatchObject({ threadId: "thread-2" });
+    await f.complete();
+    // The conversation keeps the new thread.
+    await f.runtime.run(f.delivery("third"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(3));
+    expect(f.starts()[2]?.params).toMatchObject({ threadId: "thread-2" });
   });
 });

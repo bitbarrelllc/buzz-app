@@ -1,7 +1,6 @@
 import { Popover } from "@base-ui/react/popover";
 import { Slider } from "@base-ui/react/slider";
 import {
-  useContext,
   useLayoutEffect,
   useRef,
   useState,
@@ -9,9 +8,9 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { AgentsContext, useMentionModels } from "../agents/react";
+import { useMentionModels } from "../agents/react";
 import type { MentionModelChoice } from "../agents/react";
-import type { Effort, SessionAction, SessionPlace } from "../agents/service";
+import type { Effort, SessionAction } from "../agents/service";
 import type { MentionPicks, RunPick } from "../relay/messages";
 import {
   CaretDownIcon,
@@ -24,27 +23,24 @@ import {
   MenuRoot,
   MenuTrigger,
   MenuPopup,
-  MenuItem,
+  MenuCheckboxItem,
   MenuRadioGroup,
   MenuRadioItem,
 } from "../../shared/design-system/ui/Menu";
-import { useToastNotification } from "../../shared/design-system/ui/Toast";
 import styles from "./ComposerModels.module.css";
 
 /** Model and effort for the next run of each mentioned agent of the viewer's
  * that offers a choice. Unpicked agents run with their own. An agent whose
- * type supports it also has its session for `place` here, to compact or
- * start over. */
+ * type supports it can also be asked to compact its session first, or to
+ * start a new one. */
 export function ComposerModels({
   pubkeys,
-  place,
   value,
   disabled,
   onChange,
   onResolved,
 }: {
   pubkeys: readonly string[];
-  place: SessionPlace;
   value: MentionPicks;
   disabled: boolean;
   onChange(value: MentionPicks): void;
@@ -71,6 +67,7 @@ export function ComposerModels({
       resolved[choice.pubkey] = {
         model: runs.id,
         ...(effort ? { effort } : {}),
+        ...(saved.session ? { session: saved.session } : {}),
       };
     }
     onResolved(resolved);
@@ -78,11 +75,12 @@ export function ComposerModels({
   }, [choices, value, onResolved]);
   if (!choices.length) return null;
   const picked = choices.flatMap((choice) => {
-    const { model, effort } = value[choice.pubkey] ?? {};
+    const { model, effort, session } = value[choice.pubkey] ?? {};
     const runs = runModel(choice, model);
     const text = [
       model !== undefined && runs.label,
       runs.efforts.find((item) => item.id === effort)?.label,
+      session && SESSION_LABELS[session],
     ]
       .filter(Boolean)
       .join(" · ");
@@ -90,7 +88,11 @@ export function ComposerModels({
   });
   const pick = (pubkey: string, next: RunPick) => {
     const { [pubkey]: _, ...rest } = value;
-    onChange(next.model || next.effort ? { ...rest, [pubkey]: next } : rest);
+    onChange(
+      next.model || next.effort || next.session
+        ? { ...rest, [pubkey]: next }
+        : rest,
+    );
   };
   return (
     <Popover.Root open={open && !disabled} onOpenChange={setOpen}>
@@ -132,7 +134,6 @@ export function ComposerModels({
               <AgentChoice
                 key={choice.pubkey}
                 choice={choice}
-                place={place}
                 named={choices.length > 1}
                 value={value[choice.pubkey] ?? {}}
                 disabled={disabled}
@@ -155,7 +156,6 @@ const runModel = (choice: MentionModelChoice, picked: string | undefined) =>
 
 function AgentChoice({
   choice,
-  place,
   named,
   value,
   disabled,
@@ -163,7 +163,6 @@ function AgentChoice({
   thumb,
 }: {
   choice: MentionModelChoice;
-  place: SessionPlace;
   named: boolean;
   value: RunPick;
   disabled: boolean;
@@ -179,6 +178,7 @@ function AgentChoice({
     );
   const runs = runModel(choice, value.model);
   const several = choice.models.length > 1;
+  const session = value.session ? { session: value.session } : {};
   // Picking the agent's own model is no pick; an effort the new model lacks
   // falls back to its default.
   const chooseModel = (id: string) => {
@@ -189,6 +189,7 @@ function AgentChoice({
     pick({
       ...(id !== choice.current ? { model: id } : {}),
       ...(effort ? { effort } : {}),
+      ...session,
     });
   };
   const model = several ? (
@@ -218,8 +219,16 @@ function AgentChoice({
   ) : (
     <span className={styles.about}>{runs.label}</span>
   );
-  const session = choice.session && (
-    <SessionMenu choice={choice} place={place} disabled={disabled} />
+  const sessionMenu = choice.session && (
+    <SessionMenu
+      name={choice.name}
+      value={value.session}
+      disabled={disabled}
+      pick={(action) => {
+        const { session: _, ...rest } = value;
+        pick({ ...rest, ...(action ? { session: action } : {}) });
+      }}
+    />
   );
   return (
     <div className={styles.agent}>
@@ -228,7 +237,7 @@ function AgentChoice({
         <EffortSlider
           name={choice.name}
           model={model}
-          session={session}
+          session={sessionMenu}
           efforts={runs.efforts}
           resting={runs.effort}
           value={value.effort}
@@ -237,6 +246,7 @@ function AgentChoice({
             pick({
               ...(value.model ? { model: value.model } : {}),
               ...(effort ? { effort } : {}),
+              ...session,
             })
           }
           {...(thumb ? { thumb } : {})}
@@ -245,7 +255,7 @@ function AgentChoice({
         // Without a slider the model sits on its own tab, not on the thread.
         <div className={styles.solo}>
           {model}
-          {session}
+          {sessionMenu}
         </div>
       )}
     </div>
@@ -328,60 +338,51 @@ function EffortSlider({
   );
 }
 
-/** Expert actions on the agent's session for this conversation. */
+const SESSION_LABELS: Record<SessionAction, string> = {
+  compact: "Compact first",
+  new: "New session",
+};
+
+/** Asks the next run to compact the conversation's session first, or to
+ * start a new one. */
 function SessionMenu({
-  choice,
-  place,
+  name,
+  value,
   disabled,
+  pick,
 }: {
-  choice: MentionModelChoice;
-  place: SessionPlace;
+  name: string;
+  value: SessionAction | undefined;
   disabled: boolean;
+  pick(action: SessionAction | undefined): void;
 }) {
-  const agents = useContext(AgentsContext);
-  const notify = useToastNotification();
-  const [pending, setPending] = useState(false);
-  const act = (action: SessionAction) => {
-    if (!agents || pending) return;
-    setPending(true);
-    // Compacting takes a while: say it started, and again when it ends.
-    if (action === "compact")
-      notify(`Compacting ${choice.name}'s session…`, "info");
-    void agents
-      .session(choice.pubkey, place, action)
-      .then(
-        () =>
-          notify(
-            action === "compact"
-              ? `Compacted ${choice.name}'s session`
-              : `${choice.name} starts a new session with your next message`,
-            "success",
-          ),
-        (error: unknown) =>
-          notify(
-            error instanceof Error ? error.message : String(error),
-            "error",
-          ),
-      )
-      .finally(() => setPending(false));
-  };
   return (
     <MenuRoot>
       <MenuTrigger
-        disabled={disabled || pending}
+        disabled={disabled}
         render={
           <IconButton
             size="xs"
             type="button"
-            aria-label={`${choice.name}'s session`}
-            title={`${choice.name}'s session`}
+            data-selected={value ? "" : undefined}
+            aria-label={`${name}'s session`}
+            title={value ? SESSION_LABELS[value] : `${name}'s session`}
             icon={<DotsThreeIcon aria-hidden="true" />}
           />
         }
       />
       <MenuPopup size="compact" side="top" align="end">
-        <MenuItem onClick={() => act("compact")}>Compact session</MenuItem>
-        <MenuItem onClick={() => act("new")}>New session</MenuItem>
+        {(["compact", "new"] as const).map((action) => (
+          <MenuCheckboxItem
+            key={action}
+            checked={value === action}
+            onCheckedChange={(checked) => pick(checked ? action : undefined)}
+          >
+            {action === "compact"
+              ? "Compact session first"
+              : "Start a new session"}
+          </MenuCheckboxItem>
+        ))}
       </MenuPopup>
     </MenuRoot>
   );

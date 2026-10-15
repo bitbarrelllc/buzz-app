@@ -324,6 +324,9 @@ export type Delivery<Config = unknown> = Readonly<{
   /** The effort level the owner asked for in the triggering message: one of
    * that model's `efforts`. Absent means the agent's own default. */
   effort?: string;
+  /** What the owner asked the turn to do to its conversation's session
+   * first, for a type with `sessions`. */
+  session?: SessionAction;
   /** A section for each team the agent is on, with the team's name, roster and
    * instructions, to follow the agent's own instructions. Absent without one. */
   team?: string;
@@ -350,10 +353,8 @@ export type Delivery<Config = unknown> = Readonly<{
   current(): boolean;
 }>;
 export type Effort = Readonly<{ id: string; label: string }>;
-/** A conversation an agent's session belongs to: a channel, or a thread in it. */
-export type SessionPlace = Readonly<{ channelId: string; root?: string }>;
-/** `compact` summarizes a session's history to free its context; `new`
- * forgets the session, so the conversation's next message starts a new one. */
+/** What a turn does to its conversation's session first: `compact`
+ * summarizes its history to free context, and `new` starts a new session. */
 export type SessionAction = "compact" | "new";
 export type AgentMigrationSetting = Readonly<{
   id: string;
@@ -435,14 +436,9 @@ export type AgentType<Config = unknown> = {
    * mentioning the agent. Discovery may be async but must not start a turn.
    * The picks reach that run as `Delivery.model` and `Delivery.effort`. */
   models?(agent: Agent<Config>): Models | Promise<Models>;
-  /** Acts on the agent's session for the conversation at `place`, for its
-   * owner in the copy of the app that runs it. Rejects with a reason to show,
-   * such as while that session is working. */
-  session?(
-    agent: Agent<Config>,
-    place: SessionPlace,
-    action: SessionAction,
-  ): Promise<void>;
+  /** Its runs honour `Delivery.session`, so the owner can ask for it with
+   * the model and effort. */
+  sessions?: true;
   run?(delivery: Delivery<Config>): void | Promise<void>;
   /** Runs a standalone turn and settles when it ends, stopping it when
    * `turn.signal` aborts. With it, the host runs watches and timers as
@@ -451,7 +447,7 @@ export type AgentType<Config = unknown> = {
   /** Per-run deadline in milliseconds, up to 30 minutes; defaults to 60 seconds. */
   timeoutMs?: number;
   /** Makes the type hosted: its provider runs each agent, so it has no `run`,
-   * `models`, `session` or `timeoutMs`, and its agents have no attention. */
+   * `models` or `timeoutMs`, and its agents have no attention. */
   remote?: RemoteAgentType;
 };
 /** A hosted type's provider: it holds each agent's key and runs it. The app
@@ -626,13 +622,6 @@ export type Agents = {
     type: string,
     change?: Readonly<{ config: unknown }>,
   ): Promise<readonly (keyof Carry)[]>;
-  /** Runs its type's session `action` for the conversation at `place`.
-   * Refused unless this copy of the app runs the agent. */
-  session(
-    pubkey: string,
-    place: SessionPlace,
-    action: SessionAction,
-  ): Promise<void>;
   /** Stops it for good, leaves its channels and archives it in its
    * community, and only then deletes its record, key and settings. When that
    * cannot finish, as offline, nothing is deleted and nothing retries it: it
@@ -1047,14 +1036,13 @@ export class AgentsService extends Service implements Agents {
       remote &&
       (type.run ||
         type.models ||
-        type.session ||
         type.timeoutMs !== undefined ||
         (["provision", "activate", "profile", "remove"] as const).some(
           (step) => typeof remote[step] !== "function",
         ))
     )
       throw new Error(
-        "A hosted agent type has provision, activate, profile and remove, and no run, models, session or timeoutMs",
+        "A hosted agent type has provision, activate, profile and remove, and no run, models or timeoutMs",
       );
     this.contributions.register(this.ctx, type as unknown as AgentType);
   }
@@ -1722,18 +1710,6 @@ export class AgentsService extends Service implements Agents {
       await this.refresh();
       return preview.dropped;
     });
-  }
-
-  async session(pubkey: string, place: SessionPlace, action: SessionAction) {
-    const agent = this.find(pubkey);
-    const type = agent && this.types().find((kind) => kind.key === agent.type);
-    if (!agent || !type?.session)
-      throw new Error("This agent has no session to change");
-    if (!this.runners.runs(pubkey))
-      throw new Error(
-        `${agent.name} isn't running in this copy of Buzz. Change its session in the one that runs it.`,
-      );
-    await type.session(agent, place, action);
   }
 
   previewRetype(pubkey: string, type: string): RetypePreview {

@@ -2266,19 +2266,11 @@ it("opens the model picker while discovery is pending, then fills its controls",
   ).not.toBeInTheDocument();
 });
 
-it("offers session actions for an agent running here whose type has them", async () => {
+it("asks an agent whose type has them to compact its session first on the next run", async () => {
   const snapshot = {
     status: "ready",
-    agents: [
-      {
-        pubkey: first.pubkey,
-        name: "Honey",
-        type: "test/agent",
-        place: "here",
-      },
-    ],
+    agents: [{ pubkey: first.pubkey, name: "Honey", type: "test/agent" }],
   };
-  const session = vi.fn(async () => {});
   const types = [
     {
       key: "test/agent",
@@ -2286,31 +2278,42 @@ it("offers session actions for an agent running here whose type has them", async
         current: "fast",
         models: [{ id: "fast", label: "Fast", efforts: [] }],
       }),
-      session: () => Promise.resolve(),
+      sessions: true,
     },
   ];
   const agents = {
     subscribe: () => () => {},
     snapshot: () => snapshot,
     types: () => types,
-    session,
   } as unknown as Agents;
   const h = mount({}, undefined, undefined, agents);
+  await h.user.type(h.input(), "tidy up");
   await h.user.click(screen.getByRole("button", { name: "First Honey" }));
   // One model and no efforts is no choice of its own; the session still is.
   await h.user.click(
-    screen.getByRole("button", { name: "Model and effort for the next run" }),
+    await screen.findByRole("button", {
+      name: "Model and effort for the next run",
+    }),
   );
   await h.user.click(
     await screen.findByRole("button", { name: "Honey's session" }),
   );
   await h.user.click(
-    await screen.findByRole("menuitem", { name: "Compact session" }),
+    await screen.findByRole("menuitemcheckbox", {
+      name: "Compact session first",
+    }),
   );
-  expect(session).toHaveBeenCalledWith(
-    first.pubkey,
-    { channelId: "channel" },
-    "compact",
+  await h.user.keyboard("{Escape}");
+  await h.user.keyboard("{Escape}");
+  await h.user.click(screen.getByRole("button", { name: "Send message" }));
+  expect(h.messages.send).toHaveBeenLastCalledWith(
+    "channel",
+    expect.stringContaining("tidy up"),
+    [first.pubkey],
+    [],
+    undefined,
+    [],
+    { [first.pubkey]: { session: "compact" } },
   );
 });
 

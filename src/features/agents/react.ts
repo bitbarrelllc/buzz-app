@@ -66,11 +66,11 @@ export type MentionModelChoice = Models &
     pubkey: string;
     name: string;
     loading?: boolean;
-    /** Its type can compact or forget its sessions. */
+    /** Its type can compact a session or start a new one before a run. */
     session?: true;
   }>;
 /** The mentioned agents, of the viewer's own, whose type offers a choice of
- * model or effort, or session actions where the agent runs here. */
+ * model or effort, or session actions. */
 export function useMentionModels(
   pubkeys: readonly string[],
 ): readonly MentionModelChoice[] {
@@ -102,7 +102,7 @@ export function useMentionModels(
         if (!agent || !type?.models) return [];
         try {
           const { current, models, sendDefaults } = await type.models(agent);
-          const session = !!type.session && agent.place === "here";
+          const session = !!type.sessions;
           return models.length > 1 ||
             models.some((m) => m.efforts.length) ||
             session

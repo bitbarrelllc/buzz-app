@@ -14,10 +14,10 @@ export const claudeRun = (
   ready?: (signal: AbortSignal) => Promise<void>,
 ): Pick<
   AgentType<Config>,
-  "models" | "session" | "run" | "runOnce" | "timeoutMs"
+  "models" | "sessions" | "run" | "runOnce" | "timeoutMs"
 > => ({
   models: (agent) => runtime.models(agent.pubkey),
-  session: (agent, place, action) => runtime.session(agent, place, action),
+  sessions: true,
   run: async (delivery) => {
     await ready?.(delivery.signal);
     return runtime.run(delivery);

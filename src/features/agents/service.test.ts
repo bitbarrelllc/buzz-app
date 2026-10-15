@@ -418,7 +418,7 @@ async function setup({
   timeoutMs = 60_000,
   runOnce = undefined as AgentType<Config>["runOnce"],
   jev = undefined as ClassifierNative | undefined,
-  session = undefined as AgentType<Config>["session"],
+  sessions = false,
 } = {}) {
   const ctx = new Context();
   ctx.provide("pluginStatus", {
@@ -503,7 +503,7 @@ async function setup({
     }),
     run,
     ...(runOnce ? { runOnce } : {}),
-    ...(session ? { session } : {}),
+    ...(sessions ? { sessions: true as const } : {}),
   };
   plugin.agents.register(type);
   await vi.waitFor(() => expect(service.snapshot().status).toBe("ready"));
@@ -1425,7 +1425,8 @@ it("passes the model and effort its owner asked for, and no other", async () => 
     event(id, { pubkey, tags: [["h", channel], ["p", bot], ...tags] });
   emit({
     events: [
-      asked("owner", viewer, ["effort", bot, "high"]),
+      // A type without `sessions` takes no session action.
+      asked("owner", viewer, ["effort", bot, "high"], ["session", bot, "new"]),
       asked("stranger", other, ["effort", bot, "high"], ["model", bot, "deep"]),
       asked("unlisted", viewer, ["effort", bot, "max"]),
       asked("elsewhere", viewer, ["effort", sibling, "high"]),
@@ -1435,6 +1436,7 @@ it("passes the model and effort its owner asked for, and no other", async () => 
     ],
   });
   await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(7));
+  expect(run.mock.calls[0]?.[0].session).toBeUndefined();
   expect(
     run.mock.calls.map(([{ model, effort }]) => ({ model, effort })),
   ).toEqual([
@@ -1446,6 +1448,30 @@ it("passes the model and effort its owner asked for, and no other", async () => 
     { model: "deep", effort: "max" },
     { model: "deep", effort: undefined },
     { model: undefined, effort: "low" },
+  ]);
+});
+
+it("passes the session action its owner asked for to a type that takes it", async () => {
+  const { service, run, emit } = await setup({ sessions: true });
+  await service.create({ type: "example/echo", name: "Echo" });
+  const asked = (id: string, pubkey: string, ...tags: string[][]) =>
+    event(id, { pubkey, tags: [["h", channel], ["p", bot], ...tags] });
+  emit({
+    events: [
+      asked("compact", viewer, ["session", bot, "compact"]),
+      asked("new", viewer, ["session", bot, "new"], ["effort", bot, "high"]),
+      asked("stranger", other, ["session", bot, "new"]),
+      asked("unknown", viewer, ["session", bot, "forget"]),
+    ],
+  });
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(4));
+  expect(
+    run.mock.calls.map(([{ session, effort }]) => ({ session, effort })),
+  ).toEqual([
+    { session: "compact", effort: undefined },
+    { session: "new", effort: "high" },
+    { session: undefined, effort: undefined },
+    { session: undefined, effort: undefined },
   ]);
 });
 
@@ -1556,32 +1582,6 @@ it("drops its events while another copy of the app holds the agent, and runs onc
   native.claim.mockRejectedValue(new Error("unreadable"));
   emit({ events: [event("3", { tags: [["p", bot]] })] });
   await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
-});
-
-it("acts on an agent's session only in the copy of the app that runs it", async () => {
-  const session = vi.fn<NonNullable<AgentType<Config>["session"]>>(
-    async () => {},
-  );
-  const { service, native, emit } = await setup({ session });
-  await service.create({ type: "example/echo", name: "Echo" });
-  await vi.waitFor(() => expect(native.claim).toHaveBeenCalledWith(bot));
-  const place = { channelId: channel, root: "root" };
-  await service.session(bot, place, "compact");
-  expect(session).toHaveBeenCalledWith(
-    expect.objectContaining({ pubkey: bot }),
-    place,
-    "compact",
-  );
-  // Another copy takes the agent: this one finds out at its next claim.
-  native.claim.mockClear();
-  native.claim.mockResolvedValue(false);
-  emit({ events: [event("1", { tags: [["p", bot]] })] });
-  await vi.waitFor(() => expect(native.claim).toHaveBeenCalledWith(bot));
-  await settle();
-  await expect(service.session(bot, place, "new")).rejects.toThrow(
-    "Echo isn't running in this copy of Buzz",
-  );
-  expect(session).toHaveBeenCalledTimes(1);
 });
 
 it("lets another copy of the app run an agent it cannot run", async () => {

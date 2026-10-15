@@ -290,7 +290,6 @@ function setup(
       }),
     ),
     save: vi.fn(async () => {}),
-    session: vi.fn(async () => {}),
     previewRetype: vi.fn(
       () =>
         ({

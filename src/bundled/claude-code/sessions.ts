@@ -232,18 +232,13 @@ export class AgentSessions {
     return delivered;
   }
 
-  /** Whether the conversation's process is starting or working. */
-  busy(key: string) {
-    return this.opening.has(key) || !!this.live.get(key)?.process.busy;
-  }
   /** Compacts the conversation's session, resuming it when its process has
    * stopped. Without a session there is nothing to compact. */
   async compact(key: string): Promise<Settled> {
     if (this.disposed) return { ok: false, error: "Claude was stopped" };
     let live = this.live.get(key);
     const saved = this.options.store.get(key);
-    if (!live && !saved)
-      return { ok: false, error: "There is no session here to compact yet" };
+    if (!live && !saved) return { ok: true };
     if (!live) {
       const opened = await this.open(key, saved?.id, 0);
       if (!("process" in opened)) return opened;
@@ -251,8 +246,12 @@ export class AgentSessions {
     }
     // Claude takes the command in stream-json input as it does in a terminal.
     const settled = await this.answer(key, live, "/compact", {});
-    // A saved session that no longer loads is the next message's to start over.
-    if (!settled.ok && !live.process.started) this.drop(key, live);
+    // A saved session that no longer loads is the message's to start over.
+    if (!settled.ok && !live.process.started) {
+      this.options.store.delete(key);
+      this.drop(key, live);
+      return { ok: true };
+    }
     return settled;
   }
   /** Forgets the conversation's session and stops its process, so its next

@@ -16,10 +16,10 @@ export const codexRun = (
   ready?: (signal: AbortSignal) => Promise<void>,
 ): Pick<
   AgentType<Config>,
-  "models" | "session" | "run" | "runOnce" | "timeoutMs"
+  "models" | "sessions" | "run" | "runOnce" | "timeoutMs"
 > => ({
   models: (agent) => runtime.preview(agent),
-  session: (agent, place, action) => runtime.session(agent, place, action),
+  sessions: true,
   run: async (delivery) => {
     await ready?.(delivery.signal);
     return runtime.run(delivery);

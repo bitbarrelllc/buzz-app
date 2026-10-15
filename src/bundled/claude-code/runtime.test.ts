@@ -162,7 +162,10 @@ function setup(
   const stale = new Set<string>();
   // What the host holds: a delivered watch or timer, and its Interest.
   const objects = new Map<string, Record<string, unknown>>();
-  const deliver = (trigger: Delivery["trigger"]) => {
+  const deliver = (
+    trigger: Delivery["trigger"],
+    picks: Partial<Pick<Delivery, "session">> = {},
+  ) => {
     if (trigger.type !== "mention") {
       const value = trigger.type === "timer" ? trigger.timer : trigger.watch;
       objects.set(trigger.slug, {
@@ -181,6 +184,7 @@ function setup(
       config: DEFAULT_CONFIG,
       signal,
       workingUntil,
+      ...picks,
       // The host's answer, as it is when asked.
       current: () =>
         trigger.type === "mention" ||
@@ -287,50 +291,54 @@ it("hands a mention to its thread's session", async () => {
   expect(published).toEqual([]);
 });
 
-it("compacts a thread's session or starts it over, but not while it works", async () => {
+it("compacts a thread's session, or starts a new one, once its turn ends", async () => {
   const root = message("1", "Build is red");
-  const mention = message("2", "@Claude can you look?", {
-    created_at: 110,
-    tags: [
-      ["h", channel],
-      ["e", root.id, "", "reply"],
-      ["p", self],
-    ],
-  });
-  const { deliver, claudes, runtime, data } = setup([root, mention], {
+  const reply = (id: string, text: string, created_at: number) =>
+    message(id, text, {
+      created_at,
+      tags: [
+        ["h", channel],
+        ["e", root.id, "", "reply"],
+        ["p", self],
+      ],
+    });
+  const first = reply("2", "@Claude can you look?", 110);
+  const second = reply("3", "@Claude and now?", 120);
+  const third = reply("4", "@Claude start over", 130);
+  const { deliver, claudes, data } = setup([root, first, second, third], {
     hold: true,
   });
-  const agent = {
-    pubkey: self,
-    owner: alice,
-    name: "Claude",
-    config: DEFAULT_CONFIG,
-  } as unknown as Agent;
-  const place = { channelId: channel, root: root.id };
   const saved = () =>
-    JSON.parse(data.get("buzz.claude-code.sessions.v1") ?? "{}")[self] ?? {};
-  await deliver({ type: "mention", event: mention });
+    JSON.parse(data.get("buzz.claude-code.sessions.v1") ?? "{}")[self]?.[
+      `${channel}/${root.id}`
+    ];
+  await deliver({ type: "mention", event: first });
   await flush(10);
   const claude = claudes().find((process) => process.prompts.length);
-  await expect(runtime.session(agent, place, "new")).rejects.toThrow(
-    "Claude is working here",
-  );
-  claude?.finish();
+  // Asked while the turn works, it waits rather than steering into it.
+  await deliver({ type: "mention", event: second }, { session: "compact" });
   await flush(10);
-  const compacted = runtime.session(agent, place, "compact");
+  expect(claude?.prompts).toHaveLength(1);
+  claude?.finish();
   await flush(10);
   expect(claude?.prompts.at(-1)).toBe("/compact");
   claude?.finish();
-  await expect(compacted).resolves.toBeUndefined();
-  expect(saved()).toHaveProperty(`${channel}/${root.id}`);
-  await runtime.session(agent, place, "new");
+  await flush(10);
+  expect(claude?.prompts.at(-1)).toContain("@Claude and now?");
+  claude?.finish();
+  await flush(10);
+  const before = saved()?.id;
+  await deliver({ type: "mention", event: third }, { session: "new" });
+  await flush(10);
   expect(claude?.killed).toBe(true);
-  expect(saved()).toEqual({});
-  // A channel's top level has no session to compact: each message there
-  // starts its own.
-  await expect(
-    runtime.session(agent, { channelId: channel }, "compact"),
-  ).rejects.toThrow("There is no session here to compact yet");
+  const next = claudes().at(-1);
+  expect(next).not.toBe(claude);
+  expect(next?.options.args).toContain("--session-id");
+  // A new session is shown the thread again.
+  expect(next?.prompts.at(-1)).toContain("Build is red");
+  next?.finish();
+  await flush(10);
+  expect(saved()?.id).not.toBe(before);
 });
 
 const EFFORTS = [
