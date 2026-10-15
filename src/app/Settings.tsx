@@ -243,7 +243,7 @@ function PluginDetails({
           className={styles.pluginAsideSection}
           aria-label={`${plugin.manifest.name} README`}
         >
-          <PluginReadme text={readme} />
+          <PluginReadme key={plugin.manifest.id} text={readme} />
         </section>
       )}
       <section

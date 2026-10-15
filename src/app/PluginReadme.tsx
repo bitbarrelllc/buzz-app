@@ -1,5 +1,8 @@
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { motion, useReducedMotion } from "motion/react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
+import { Button } from "../shared/design-system/ui/Button";
 import { safeLinkUrl } from "../features/relay/message-content";
 import styles from "./PluginReadme.module.css";
 
@@ -25,16 +28,71 @@ const MARKDOWN: Components = {
 };
 
 export function PluginReadme({ text }: { text: string }) {
+  const id = useId();
+  const content = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [size, setSize] = useState({ height: 0, limit: 320 });
+  const reducedMotion = useReducedMotion();
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const measure = () =>
+      setSize({
+        height: element.scrollHeight,
+        limit:
+          20 *
+          (Number.parseFloat(
+            getComputedStyle(document.documentElement).fontSize,
+          ) || 16),
+      });
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(measure);
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, []);
+  const overflow = size.height > size.limit;
+  const instant =
+    reducedMotion ||
+    document.documentElement.hasAttribute("data-keyboard-navigation");
   return (
-    <div className={styles.readme}>
-      <Markdown
-        remarkPlugins={REMARK}
-        components={MARKDOWN}
-        skipHtml
-        urlTransform={(url) => safeLinkUrl(url) ?? null}
+    <div className={styles.disclosure}>
+      <motion.div
+        id={id}
+        className={styles.clip}
+        initial={false}
+        animate={{ height: overflow && !expanded ? size.limit : "auto" }}
+        transition={{ duration: instant ? 0 : 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+        onFocusCapture={() => {
+          if (overflow) setExpanded(true);
+        }}
       >
-        {text.replace(/^# .*\n+/, "")}
-      </Markdown>
+        <div ref={content} className={styles.readme}>
+          <Markdown
+            remarkPlugins={REMARK}
+            components={MARKDOWN}
+            skipHtml
+            urlTransform={(url) => safeLinkUrl(url) ?? null}
+          >
+            {text.replace(/^# .*\n+/, "")}
+          </Markdown>
+        </div>
+      </motion.div>
+      {overflow && (
+        <div className={styles.more}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={expanded}
+            aria-controls={id}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "View less" : "View more"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
