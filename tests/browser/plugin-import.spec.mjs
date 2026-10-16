@@ -419,6 +419,9 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   await page.getByRole("radio", { name: /Example two/ }).check();
   await expect(page.getByRole("radio", { name: /Example two/ })).toBeChecked();
   await expect(
+    page.getByRole("heading", { name: "Example two", level: 3 }),
+  ).toBeVisible();
+  await expect(
     page.getByText(
       "This plugin starts off. Turn it on in the list when you’re ready.",
     ),
@@ -613,6 +616,8 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
         manifest: {
           id: "example.retry",
           name: "Retry plugin",
+          description:
+            "Review a local plugin and its computer access before installation.",
           apiVersion: 1,
           host: {
             networkOrigins: ["https://api.example.com"],
@@ -637,7 +642,30 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(
     dialog.getByText("Choose a plugin folder", { exact: true }),
   ).toHaveCount(0);
-  await expect(dialog.getByText("Retry plugin", { exact: true })).toBeVisible();
+  const identityHeading = dialog.getByRole("heading", {
+    name: "Retry plugin",
+    level: 3,
+  });
+  await expect(identityHeading).toBeVisible();
+  await expect(
+    dialog.getByText(
+      "Review a local plugin and its computer access before installation.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      identityHeading.evaluate((node) => {
+        const container = node
+          .closest("section")
+          .querySelector(".buzz-settings-group");
+        return (
+          node.getBoundingClientRect().bottom <
+          container.getBoundingClientRect().top
+        );
+      }),
+    )
+    .toBe(true);
   await expect(
     dialog.getByText("example.retry", { exact: true }),
   ).toBeVisible();

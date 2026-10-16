@@ -1,3 +1,4 @@
+import { Header } from "../shared/design-system/ui/Header";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
 import { Field } from "../shared/design-system/ui/Field";
 import { Input } from "../shared/design-system/ui/Input";
@@ -9,7 +10,10 @@ import { readPluginFolder } from "./plugin-folder-drop";
 import styles from "./PluginImport.module.css";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FolderOpenIcon } from "../shared/design-system/icons/index";
+import {
+  FolderOpenIcon,
+  SquaresFourIcon,
+} from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
 import type { Catalog, ImportPreview } from "../plugins/types";
 import type { PluginManifest } from "../plugins/api";
@@ -196,8 +200,6 @@ export function PluginImport({
     }
   }
   const candidate = preview?.candidates.find((p) => p.path === selected);
-  const onlyCandidate =
-    preview?.candidates.length === 1 ? preview.candidates[0] : undefined;
   const existing = catalog.plugins.find(
     (p) => p.manifest.id === candidate?.manifest.id,
   );
@@ -437,27 +439,46 @@ export function PluginImport({
           {notice && <p role="status">{notice}</p>}
           {preview && (
             <section aria-label="Plugin import preview">
-              <SettingsGroup layout="form">
-                <div className="min-w-0 text-body-sm">
-                  {onlyCandidate && (
+              {candidate && (
+                <Header
+                  level={3}
+                  title={candidate.manifest.name}
+                  icon={<SquaresFourIcon size={24} />}
+                  subtitle={
                     <>
-                      <p className="m-0 text-label">
-                        {onlyCandidate.manifest.name}
-                      </p>
-                      <p className="m-0 break-all text-caption text-muted">
-                        {onlyCandidate.manifest.id}
-                      </p>
+                      {candidate.manifest.description && (
+                        <span className="mb-1 block break-words">
+                          {candidate.manifest.description}
+                        </span>
+                      )}
+                      <span className="block break-all text-caption text-muted">
+                        {candidate.manifest.id}
+                      </span>
+                      <span className="block break-all text-caption text-muted">
+                        Source: {importLocation(preview, candidate.path)}
+                      </span>
+                      {preview.commit && (
+                        <span className="block break-all text-caption text-muted">
+                          Commit: {preview.commit}
+                        </span>
+                      )}
                     </>
-                  )}
-                  <p className="m-0 break-all text-caption text-muted">
-                    Source: {importLocation(preview, onlyCandidate?.path)}
-                  </p>
-                  {preview.commit && (
+                  }
+                />
+              )}
+              <SettingsGroup layout="form">
+                {!candidate && (
+                  <div className="min-w-0 text-body-sm">
                     <p className="m-0 break-all text-caption text-muted">
-                      Commit: {preview.commit}
+                      Source: {preview.source}
                     </p>
-                  )}
-                </div>
+                    {preview.commit && (
+                      <p className="m-0 break-all text-caption text-muted">
+                        Commit: {preview.commit}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {preview.candidates.length === 0 ? (
                   <p className="m-0">
                     No built plugins found. Build the plugin first, then choose

@@ -335,6 +335,8 @@ it.each([
     expect(
       await screen.findByText(`Source: ${location}`, { exact: true }),
     ).toBeVisible();
+    const heading = screen.getByRole("heading", { name: "Example", level: 3 });
+    expect(heading.closest(".buzz-settings-group")).toBeNull();
     expect(screen.queryByText(/^Folder:/)).toBeNull();
     expect(
       screen.queryByRole("region", { name: "Skipped folders" }),
