@@ -337,6 +337,7 @@ it.each([
     ).toBeVisible();
     const heading = screen.getByRole("heading", { name: "Example", level: 3 });
     expect(heading.closest(".buzz-settings-group")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     expect(screen.queryByText(/^Folder:/)).toBeNull();
     expect(
       screen.queryByRole("region", { name: "Skipped folders" }),
@@ -346,6 +347,64 @@ it.each([
     ).toBeEnabled();
   },
 );
+
+it("separates choosing from access review and restores the chosen folder on Back", async () => {
+  const user = userEvent.setup();
+  const manifest = {
+    id: "example.plugin",
+    name: "Example",
+    apiVersion: 1,
+  } as const;
+  const preview: ImportPreview = {
+    token: "steps",
+    source: "/plugins/example",
+    commit: null,
+    warnings: [],
+    candidates: [".", "dist"].map((path) => ({
+      path,
+      manifest,
+      revision: path,
+    })),
+  };
+  const discard = vi.fn(async () => {});
+  const installImport = vi.fn(async () => true);
+  const manager = {
+    imports: { folder: vi.fn(async () => preview), discard },
+    installImport,
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Add" }));
+  await user.click(
+    screen.getByRole("button", { name: "Browse plugin folder" }),
+  );
+  const radios = await screen.findAllByRole("radio");
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  expect(screen.queryByRole("region", { name: "Computer access" })).toBeNull();
+  await user.click(radios[1] as HTMLElement);
+  expect(installImport).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Install plugin" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  expect(
+    screen.getByRole("heading", { name: "Example", level: 3 }),
+  ).toBeVisible();
+  expect(screen.getByRole("region", { name: "Computer access" })).toBeVisible();
+  expect(screen.queryByRole("radio")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Back" }));
+  const restored = screen.getAllByRole("radio");
+  expect(restored[1]).toBeChecked();
+  expect(restored[1]).toHaveFocus();
+  expect(discard).not.toHaveBeenCalled();
+  await user.click(restored[0] as HTMLElement);
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  await user.click(screen.getByRole("button", { name: "Install plugin" }));
+  expect(installImport).toHaveBeenCalledExactlyOnceWith("steps", ".");
+});
 
 const outputLimitUpdates = [
   { previous: undefined, next: 65536, changed: true },

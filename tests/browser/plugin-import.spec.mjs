@@ -396,7 +396,7 @@ test("Settings controls scale together and keep enlarged labels reachable", asyn
 test("folder/Git preview selects the exact subfolder, installs disabled and warns on enabled updates", async ({
   page,
   app,
-}) => {
+}, info) => {
   await nativeImports(page);
   await openPlugins(page, app.origin);
   await button(page, "Add").click();
@@ -416,8 +416,43 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   ).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(2);
   await expect(button(page, "Install plugin")).toHaveCount(0);
+  await expect(button(page, "Continue")).toBeDisabled();
+  await expect(
+    page.getByRole("region", { name: "Computer access" }),
+  ).toHaveCount(0);
   await page.getByRole("radio", { name: /Example two/ }).check();
   await expect(page.getByRole("radio", { name: /Example two/ })).toBeChecked();
+  await expect(
+    page.getByRole("heading", { name: "Example two", level: 3 }),
+  ).toHaveCount(0);
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-color-mode",
+    "light",
+  );
+  await page
+    .getByRole("dialog")
+    .screenshot({ path: info.outputPath("plugin-choose-light.png") });
+  await button(page, "Continue").click();
+  await expect(
+    page.getByRole("region", { name: "Skipped folders" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("radio")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Computer access" }),
+  ).toBeVisible();
+  await button(page, "Back").click();
+  await expect(page.getByRole("radio", { name: /Example two/ })).toBeChecked();
+  await expect(page.getByRole("radio", { name: /Example two/ })).toBeFocused();
+  await button(page, "Continue").click();
+  await page.setViewportSize({ width: 480, height: 700 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveAttribute("data-color-mode", "dark");
+  await page
+    .getByRole("dialog")
+    .screenshot({ path: info.outputPath("plugin-review-dark.png") });
+  await page.setViewportSize({ width: 1440, height: 950 });
   await expect(
     page.getByRole("heading", { name: "Example two", level: 3 }),
   ).toBeVisible();
@@ -428,7 +463,9 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   ).toBeVisible();
   await button(page, "Install plugin").click();
   await expect(page.getByRole("status")).toHaveText(/Example two installed/);
-  await expect(page.getByRole("radio", { name: /Example two/ })).toBeChecked();
+  await expect(
+    page.getByRole("heading", { name: "Example two", level: 3 }),
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () =>
@@ -454,10 +491,13 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   await button(page, "Add").click();
   await button(page, "Browse plugin folder").click();
   await page.getByRole("radio", { name: /Example two/ }).check();
+  await button(page, "Continue").click();
   await expect(
     page.getByText(/It stays on and may run immediately/),
   ).toBeVisible();
   await expect(button(page, "Update plugin")).toBeVisible();
+  await button(page, "Back").click();
+  await expect(page.getByRole("radio", { name: /Example two/ })).toBeChecked();
   await button(page, "Back").click();
   await page.getByLabel("Git or GitHub repository").fill("example/plugins");
   await page.getByLabel("Branch or tag (optional)").fill("feature/plugins");
@@ -567,10 +607,12 @@ test("checked-in local examples activate and work independently", async ({
     await page
       .getByRole("radio", { name: new RegExp(sample.manifest.name) })
       .check();
+    await button(page, "Continue").click();
     await button(page, "Install plugin").click();
     await expect(page.getByRole("status")).toHaveText(
       new RegExp(`${sample.manifest.name} installed`),
     );
+    await button(page, "Back").click();
   }
   await button(page, "Close").click();
   for (const sample of samples) {

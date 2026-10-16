@@ -84,6 +84,8 @@ export function PluginImport({
   const [discarding, setDiscarding] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [selected, setSelected] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const previewRegion = useRef<HTMLElement>(null);
   const [error, setError] = useState<string | null>(null);
   const browse = useRef<HTMLButtonElement>(null);
   const errorBack = useRef<HTMLButtonElement>(null);
@@ -93,13 +95,19 @@ export function PluginImport({
   const errorReturnsToBack = useRef(false);
   useLayoutEffect(() => {
     if (!open || loading || discarding) return;
-    if (preview) previewBack.current?.focus();
-    else if (sourceTrigger.current) {
+    if (preview) {
+      const checked = !reviewing
+        ? previewRegion.current?.querySelector<HTMLElement>(
+            '[role="radio"][aria-checked="true"], input[type="radio"]:checked',
+          )
+        : null;
+      (checked ?? previewBack.current)?.focus();
+    } else if (sourceTrigger.current) {
       if (sourceTrigger.current === document.body) browse.current?.focus();
       else sourceTrigger.current.focus();
       sourceTrigger.current = null;
     }
-  }, [open, preview, loading, discarding]);
+  }, [open, preview, loading, discarding, reviewing]);
   const errorTrigger = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     if (busy || loading || discarding) return;
@@ -152,6 +160,7 @@ export function PluginImport({
       }
       current.token = next?.token ?? "";
       setPreview(next);
+      setReviewing(next?.candidates.length === 1);
       setSelected(
         next?.candidates.length === 1 ? (next.candidates[0]?.path ?? "") : "",
       );
@@ -277,11 +286,26 @@ export function PluginImport({
                 ref={previewBack}
                 type="button"
                 disabled={blocked}
-                onClick={() => void dismiss()}
+                onClick={() => {
+                  if (reviewing && preview.candidates.length > 1) {
+                    setReviewing(false);
+                    setNotice(null);
+                  } else void dismiss();
+                }}
               >
                 Back
               </Button>
-              {candidate && (
+              {!reviewing && preview.candidates.length > 1 && (
+                <Button
+                  variant="prominent"
+                  type="button"
+                  disabled={blocked || !candidate}
+                  onClick={() => setReviewing(true)}
+                >
+                  Continue
+                </Button>
+              )}
+              {reviewing && candidate && (
                 <Button
                   ref={installButton}
                   variant="prominent"
@@ -438,8 +462,8 @@ export function PluginImport({
           )}
           {notice && <p role="status">{notice}</p>}
           {preview && (
-            <section aria-label="Plugin import preview">
-              {candidate && (
+            <section ref={previewRegion} aria-label="Plugin import preview">
+              {reviewing && candidate && (
                 <Header
                   level={3}
                   title={candidate.manifest.name}
@@ -467,7 +491,7 @@ export function PluginImport({
                 />
               )}
               <SettingsGroup layout="form">
-                {!candidate && (
+                {!reviewing && (
                   <div className="min-w-0 text-body-sm">
                     <p className="m-0 break-all text-caption text-muted">
                       Source: {preview.source}
@@ -485,7 +509,7 @@ export function PluginImport({
                     its output folder, or use a repository that includes built
                     artifacts.
                   </p>
-                ) : preview.candidates.length > 1 ? (
+                ) : !reviewing && preview.candidates.length > 1 ? (
                   <Field label="Choose a plugin folder">
                     <RadioGroup
                       name="plugin-folder"
@@ -512,26 +536,27 @@ export function PluginImport({
                     </RadioGroup>
                   </Field>
                 ) : null}
-                {preview.warnings.length > 0 && (
-                  <section
-                    aria-label="Skipped folders"
-                    className="text-body-sm"
-                  >
-                    <p className="m-0 text-label">
-                      Folders skipped ({preview.warnings.length})
-                    </p>
-                    <p className="mb-0 mt-1 text-muted">
-                      These folders couldn’t be loaded as plugins. Other listed
-                      plugins can still be installed.
-                    </p>
-                    <ul className="mb-0 mt-2 list-disc space-y-1 break-words pl-4">
-                      {preview.warnings.map((warning) => (
-                        <li key={warning}>{warning}</li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-                {packageContent.length > 0 && (
+                {preview.warnings.length > 0 &&
+                  (!reviewing || preview.candidates.length === 1) && (
+                    <section
+                      aria-label="Skipped folders"
+                      className="text-body-sm"
+                    >
+                      <p className="m-0 text-label">
+                        Folders skipped ({preview.warnings.length})
+                      </p>
+                      <p className="mb-0 mt-1 text-muted">
+                        These folders couldn’t be loaded as plugins. Other
+                        listed plugins can still be installed.
+                      </p>
+                      <ul className="mb-0 mt-2 list-disc space-y-1 break-words pl-4">
+                        {preview.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                {reviewing && packageContent.length > 0 && (
                   <section
                     aria-label="Package content"
                     className="text-body-sm"
@@ -548,7 +573,7 @@ export function PluginImport({
                     </p>
                   </section>
                 )}
-                {candidate && (
+                {reviewing && candidate && (
                   <section
                     aria-label="Computer access"
                     className="text-body-sm"
@@ -654,7 +679,7 @@ export function PluginImport({
                     )}
                   </section>
                 )}
-                {candidate && (
+                {reviewing && candidate && (
                   <p className="m-0 text-body-sm">
                     {existing
                       ? `This replaces ${existing.manifest.name} (${existing.manifest.id}). ${existing.enabled ? "It stays on and may run immediately unless this launch is in safe mode." : "It stays off."} ${rollbackNotice}`
