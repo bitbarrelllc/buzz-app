@@ -235,7 +235,13 @@ export function PluginImport({
                   throw new Error("Drop one folder, or choose Browse.");
                 const upload = await readPluginFolder(entry);
                 if (!current.active) return null;
-                return imports.files(upload.source, upload.files);
+                const next = await imports.files(upload.source, upload.files);
+                return next
+                  ? {
+                      ...next,
+                      warnings: [...upload.warnings, ...next.warnings],
+                    }
+                  : null;
               });
             }}
           >

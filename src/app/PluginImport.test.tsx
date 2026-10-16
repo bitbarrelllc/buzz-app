@@ -409,3 +409,77 @@ it("signs in only to repositories the community authorizes", async () => {
   await waitFor(() => expect(git).toHaveBeenCalledTimes(2));
   expect(git).toHaveBeenLastCalledWith("block/plugins", "");
 });
+
+it("shows a rejected dropped candidate's warning beside a usable sibling preview", async () => {
+  const entryFile = (name: string, size: number) => ({
+    name,
+    isFile: true,
+    isDirectory: false,
+    file: (resolve: (file: unknown) => void) =>
+      resolve({
+        size,
+        arrayBuffer: async () => new TextEncoder().encode("{}").buffer,
+      }),
+  });
+  const directory = (name: string, children: unknown[]) => ({
+    name,
+    isDirectory: true,
+    isFile: false,
+    createReader: () => {
+      let read = false;
+      return {
+        readEntries: (resolve: (entries: unknown[]) => void) => {
+          resolve(read ? [] : children);
+          read = true;
+        },
+      };
+    },
+  });
+  const files = vi.fn(async () => ({
+    token: "partial",
+    source: "Dropped folder",
+    commit: null,
+    candidates: [
+      {
+        path: "good",
+        revision: "one",
+        manifest: { id: "example.good", name: "Good plugin", apiVersion: 1 },
+      },
+    ],
+    warnings: [],
+  }));
+  const manager = {
+    imports: { files, discard: vi.fn(async () => {}) },
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  const root = directory("plugins", [
+    directory("bad", [
+      entryFile("manifest.json", 2),
+      entryFile("README.md", 300 * 1024),
+    ]),
+    directory("good", [
+      entryFile("manifest.json", 2),
+      entryFile("plugin.js", 2),
+    ]),
+  ]);
+  fireEvent.drop(screen.getByRole("region", { name: "Add from folder" }), {
+    dataTransfer: { items: [{ webkitGetAsEntry: () => root }] },
+  });
+  const warning = await screen.findByText(/bad:.*limit/);
+  fireEvent.click(
+    warning.closest("details")?.querySelector("summary") as HTMLElement,
+  );
+  expect(warning).toBeVisible();
+  expect(screen.getByRole("button", { name: "Install plugin" })).toBeEnabled();
+  expect(files).toHaveBeenCalledWith("plugins", [
+    { path: "good/manifest.json", text: "{}" },
+    { path: "good/plugin.js", text: "{}" },
+  ]);
+});
