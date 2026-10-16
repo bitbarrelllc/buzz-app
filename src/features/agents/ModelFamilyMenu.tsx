@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ModelIcon, type ModelChoice } from "./ModelPicker";
 import { CaretDownIcon, CheckIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -35,6 +35,7 @@ export function modelFamily(model: ModelChoice): string {
 }
 
 export function ModelFamilyMenu({
+  leading,
   label,
   effort,
   effortLabel,
@@ -49,6 +50,7 @@ export function ModelFamilyMenu({
   onChange,
   onCustom,
 }: {
+  leading?: ReactNode;
   label: string;
   effort?: string | undefined;
   effortLabel?: string | undefined;
@@ -80,7 +82,7 @@ export function ModelFamilyMenu({
             size="sm"
             aria-label={label}
           >
-            <ModelIcon model={selected.id || selected.label} />
+            {leading ?? <ModelIcon model={selected.id || selected.label} />}
             <span className="buzz-select-value">{selected.label}</span>
             {effortLabel && (
               <span className="text-body-sm text-subtle">{effortLabel}</span>

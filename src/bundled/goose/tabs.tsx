@@ -25,6 +25,15 @@ import type {
   AgentViewProps,
 } from "../../features/agents/service";
 import { PanelSubview } from "../../features/panels/PanelSubview";
+import {
+  AwsLogoIcon,
+  ClaudeLogoIcon,
+  DatabricksLogoIcon,
+  type DefinedIcon,
+  GoogleLogoIcon,
+  GooseLogoIcon,
+  OpenAILogoIcon,
+} from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
@@ -68,6 +77,21 @@ const SCOPES = [
 ];
 
 type Choice = Readonly<{ provider: string; model: string }>;
+
+/** Marks for goose's most-used providers, by goose's provider ID. */
+const PROVIDER_ICONS: ReadonlyMap<string, DefinedIcon> = new Map([
+  ["anthropic", ClaudeLogoIcon],
+  ["openai", OpenAILogoIcon],
+  ["google", GoogleLogoIcon],
+  ["databricks", DatabricksLogoIcon],
+  ["databricks_v2", DatabricksLogoIcon],
+  ["aws_bedrock", AwsLogoIcon],
+]);
+/** The provider's mark, or undefined for one without a mark. */
+const providerIcon = (id: string | undefined) => {
+  const Icon = id ? PROVIDER_ICONS.get(id) : undefined;
+  return Icon && <Icon size={18} aria-hidden="true" />;
+};
 type Read<T> = (
   | { status: "loading"; value?: T }
   | { status: "ready"; value: T }
@@ -327,6 +351,7 @@ export function createTabs({
             label="Provider"
             variant={rows ? "preference" : "field"}
             value={value.provider}
+            leading={providerIcon(id)}
             {...(rows && !value.provider && fallback
               ? { valueLabel: named(fallback) }
               : {})}
@@ -351,6 +376,7 @@ export function createTabs({
                   ...(providers?.providers ?? []).map((item) => ({
                     value: item.id,
                     label: item.name,
+                    leading: providerIcon(item.id),
                   })),
                 ],
               },
@@ -388,6 +414,7 @@ export function createTabs({
               <Combobox.List>
                 {(item: { id: string; name: string }) => (
                   <Combobox.Item key={item.id} value={item}>
+                    {providerIcon(item.id)}
                     {item.name}
                   </Combobox.Item>
                 )}
@@ -1053,6 +1080,12 @@ export function createTabs({
           includeDefault={false}
           allowCustomModel
           label="Goose model"
+          leading={
+            <>
+              <GooseLogoIcon size={18} aria-hidden="true" />
+              {providerIcon(provider)}
+            </>
+          }
           appearance={modelAppearance === "subtle" ? "subtle" : "outlined"}
           models={choices}
           value={current.model || fallback}

@@ -1,6 +1,12 @@
 // A type's model choice, shared by agent types for the New agent dialog and
 // their settings. Each type decides whether its catalog accepts custom IDs.
-import { useId, useRef, useState, type ComponentProps } from "react";
+import {
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+  type ComponentProps,
+} from "react";
 import {
   ClaudeLogoIcon,
   GoogleLogoIcon,
@@ -116,6 +122,7 @@ export function CustomModelDialog({
 export function ModelPicker({
   label = "Model",
   groupByFamily = false,
+  leading,
   onConfigure,
   modelLabelPrefixes,
   effort,
@@ -137,6 +144,7 @@ export function ModelPicker({
 }: {
   label?: string;
   groupByFamily?: boolean;
+  leading?: ReactNode;
   onConfigure?: (() => void) | undefined;
   modelLabelPrefixes?: readonly string[] | undefined;
   effort?: string | undefined;
@@ -201,6 +209,7 @@ export function ModelPicker({
       <div ref={control}>
         {groupByFamily ? (
           <ModelFamilyMenu
+            leading={leading}
             effort={effort}
             effortLabel={effortLabel}
             onEffortChange={onEffortChange}
