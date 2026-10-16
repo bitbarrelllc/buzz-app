@@ -771,7 +771,8 @@ establish working, typing, or online status.
 
 AgentsView is a default-off page summarising what the selected community's agents
 on this computer spent: estimated cost against the previous period, tokens, cache
-hit rate (cache reads over uncached input plus cache reads), daily cost by agent
+hit rate (cache reads over all prompt tokens: uncached input, cache reads and
+cache writes), daily cost by agent
 type, and the costliest sessions, each opening its thread.
 
 It reads nothing itself. An agent type that can report usage implements the
@@ -787,9 +788,24 @@ Claude implements it from the transcripts Claude Code keeps for the agent's
 workspace: sessions whose first prompt names the agent, plus those this app saved
 for it (prompts from before agents were named), with their subagents' requests.
 Streamed responses repeat their usage on each line, so each request is counted
-once. Codex and Goose do not report usage yet.
+once.
 
-AgentsView estimates cost at Anthropic's published first-party API rates, which
-may differ from what a subscription bills; a model without known rates is listed
-as not counted rather than priced at zero. Kind-44200 metrics remain the Channel
-Usage source; AgentsView does not read or publish them.
+Codex finds the agent's threads through app-server by the agent's name in their
+thread names, keeps those whose rollout's developer instructions name the agent's
+pubkey, and reads each rollout's per-response `token_usage_record` entries, adding
+the subagent threads each one spawned. Codex records no cost.
+
+Goose lists the agent's sessions in its workspace through `goose-acp`, as its
+Activity tab does, and reads the usage goose saves on each reply, with goose's
+own cost estimate where it has one. Both count a request's cached tokens in its
+input, which the readers subtract.
+
+All three read only the harness's own session history; none reads Buzz's saved
+agent activity or turn metrics.
+
+Where a harness recorded no cost, AgentsView estimates it at Anthropic's published
+first-party API rates, including for a Claude model a provider prefixes, such as
+`databricks-claude-sonnet-5-5`. That may differ from what a subscription or
+provider bills. A model without known rates, such as Codex's OpenAI models, is
+listed as not counted rather than priced at zero. Kind-44200 metrics remain the
+Channel Usage source; AgentsView does not read or publish them.

@@ -40,6 +40,9 @@ it("prices cache writes by how long they are kept, and dated snapshots", () => {
   expect(estimateCost("claude-haiku-4-5-20251001", { input: 1e6 })).toBeCloseTo(
     1,
   );
+  expect(
+    estimateCost("global.anthropic.claude-opus-5-5", { input: 1e6 }),
+  ).toBeCloseTo(4);
   expect(estimateCost("claude-opus-9-9", { input: 1e6 })).toBeUndefined();
   expect(estimateCost("gpt-5", { input: 1e6 })).toBeUndefined();
 });
@@ -54,7 +57,11 @@ it("totals the period, compares the previous one and ranks agents and sessions",
         harness: "x/claude",
         sessions: [
           session("big", [
-            slice(today + 9 * HOUR, { input: 1e6, cacheRead: 3e6 }),
+            slice(today + 9 * HOUR, {
+              input: 1e6,
+              cacheRead: 3e6,
+              cacheWrite: 1e5,
+            }),
             slice(today + 10 * HOUR, { output: 1e5 }, "claude-sonnet-5-5"),
           ]),
           // Only the previous period: compared, not counted.
@@ -75,17 +82,18 @@ it("totals the period, compares the previous one and ranks agents and sessions",
     now,
     7,
   );
-  // Pixel: $4 + $0.60 cache reads + $1 Sonnet output. Relay: its recorded $1.50.
-  expect(result.cost).toBeCloseTo(7.1);
+  // Pixel: $4 + $0.60 cache reads + $0.50 cache writes + $1 Sonnet output.
+  // Relay: its recorded $1.50.
+  expect(result.cost).toBeCloseTo(7.6);
   expect(result.previousCost).toBeCloseTo(2);
   expect(result.sessions).toBe(2);
   expect(result.tokens).toEqual({
     input: 1e6 + 20,
     output: 1e5,
     cacheRead: 3e6,
-    cacheWrite: 0,
+    cacheWrite: 1e5,
   });
-  expect(result.cacheHit).toBeCloseTo(3e6 / (4e6 + 20));
+  expect(result.cacheHit).toBeCloseTo(3e6 / (4e6 + 20 + 1e5));
   expect(result.agents.map((entry) => [entry.agent.name, entry.model])).toEqual(
     [
       ["pixel", "claude-opus-5-5"],
@@ -99,7 +107,7 @@ it("totals the period, compares the previous one and ranks agents and sessions",
   expect(result.unpriced).toEqual(["mystery-1"]);
   expect(result.days).toHaveLength(7);
   expect(result.days.at(-1)).toMatchObject({ start: today });
-  expect(result.days.at(-1)?.costs.get("x/claude")).toBeCloseTo(5.6);
+  expect(result.days.at(-1)?.costs.get("x/claude")).toBeCloseTo(6.1);
   expect(result.days.at(-3)?.costs.get("x/codex")).toBeCloseTo(1.5);
   // Sessions are read back far enough for the previous period.
   expect(since(now, 7)).toBe(dayStart(now, 13));
@@ -109,5 +117,7 @@ it("names Claude models", () => {
   expect(modelName("claude-opus-5-5")).toBe("Claude Opus 5.5");
   expect(modelName("claude-haiku-4-5-20251001")).toBe("Claude Haiku 4.5");
   expect(modelName("claude-sonnet-5")).toBe("Claude Sonnet 5");
+  expect(modelName("databricks-claude-sonnet-5-5")).toBe("Claude Sonnet 5.5");
+  expect(modelName("global.anthropic.claude-opus-4-8")).toBe("Claude Opus 4.8");
   expect(modelName("gpt-5")).toBe("gpt-5");
 });

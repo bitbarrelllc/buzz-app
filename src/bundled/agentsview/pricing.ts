@@ -22,11 +22,12 @@ const RATES: Readonly<Record<string, readonly [number, number, number]>> = {
   "claude-haiku-4-5": [1, 5, 0.1],
 };
 
-/** The model's rates, allowing a dated snapshot id such as
- * `claude-haiku-4-5-20251001`. */
-function rates(model: string) {
-  return RATES[model] ?? RATES[model.replace(/-\d{8}$/, "")];
-}
+/** The Claude model a provider names, without its prefix or a dated
+ * snapshot's date: `databricks-claude-sonnet-5-5`, `claude-haiku-4-5-20251001`. */
+export const claudeModel = (model: string) =>
+  model.slice(Math.max(0, model.indexOf("claude-"))).replace(/-\d{8}$/, "");
+
+const rates = (model: string) => RATES[claudeModel(model)];
 
 /** The estimated USD, or undefined when the model has no known rates. */
 export function estimateCost(model: string, tokens: TokenCounts) {

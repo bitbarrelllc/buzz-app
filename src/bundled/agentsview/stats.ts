@@ -5,7 +5,7 @@ import type {
   SessionUsage,
   UsageSlice,
 } from "../../features/agents/service";
-import { estimateCost } from "./pricing";
+import { claudeModel, estimateCost } from "./pricing";
 
 /** One agent's sessions, as its type's `usage` read them. */
 export type AgentUsage = Readonly<{
@@ -143,7 +143,8 @@ export function stats(
       sessions: agentSessions,
     });
   }
-  const prompt = tokens.input + tokens.cacheRead;
+  // Every prompt token is uncached input, a cache read or a cache write.
+  const prompt = tokens.input + tokens.cacheRead + tokens.cacheWrite;
   return {
     cost: sum(agents.map((entry) => entry.cost)),
     previousCost,
@@ -165,7 +166,7 @@ export function stats(
 /** A Claude model id as its name, e.g. `claude-opus-5-5` as Claude Opus 5.5;
  * other ids unchanged. */
 export function modelName(model: string) {
-  const match = /^claude-([a-z]+)-(\d+(?:-\d+)?)(?:-\d{8})?$/.exec(model);
+  const match = /^claude-([a-z]+)-(\d+(?:-\d+)?)$/.exec(claudeModel(model));
   if (!match?.[1] || !match[2]) return model;
   const family = match[1].charAt(0).toUpperCase() + match[1].slice(1);
   return `Claude ${family} ${match[2].replace("-", ".")}`;
