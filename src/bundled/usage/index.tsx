@@ -1,14 +1,14 @@
 import type { PluginModule } from "../../plugins/api";
-import { AgentsViewPage } from "./AgentsViewPage";
+import { UsagePage } from "./UsagePage";
 
 export const inject = ["pages", "agents", "navigation"];
 export const apply: PluginModule["apply"] = (ctx) => {
   const { agents, navigation } = ctx;
   ctx.pages.register({
-    id: "agentsview",
-    title: "AgentsView",
+    id: "usage",
+    title: "Usage",
     layout: "workspace",
     primary: true,
-    component: () => <AgentsViewPage agents={agents} open={navigation.open} />,
+    component: () => <UsagePage agents={agents} open={navigation.open} />,
   });
 };

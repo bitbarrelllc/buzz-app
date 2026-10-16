@@ -3,12 +3,15 @@
 // writes or keeps them.
 import { readFile } from "../../buzz-mcp/app-client";
 import { promptSections } from "../../features/agents/activity-transcript";
-import type { SessionUsage, UsageSlice } from "../../features/agents/service";
+import type {
+  SessionUsage,
+  UsageObservation,
+} from "../../features/agents/service";
+import { withRevision } from "../../features/agents/session-usage";
 import type { Spawn } from "./claude";
 import { searchProject, workspaceProject } from "./transcript";
 
 type Json = Record<string, unknown>;
-const HOUR = 3_600_000;
 /** Files read at once. */
 const READERS = 4;
 
@@ -21,16 +24,23 @@ const count = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : undefined;
-const lines = (file: string) =>
-  file.split("\n").flatMap((line) => {
+/** A file's entries, and how many of its finished lines are not JSON. A
+ * partial last line is still being written. */
+function lines(file: string) {
+  const all = file.split("\n");
+  const entries: Json[] = [];
+  let unreadable = 0;
+  all.forEach((line, index) => {
+    if (!line.trim()) return;
     try {
       const entry = object(JSON.parse(line));
-      return entry ? [entry] : [];
+      if (entry) entries.push(entry);
     } catch {
-      // A partial last line is still being written.
-      return [];
+      if (index < all.length - 1) unreadable += 1;
     }
   });
+  return { entries, unreadable };
+}
 const promptText = (content: unknown) =>
   typeof content === "string"
     ? content
@@ -59,23 +69,6 @@ export function buzzStart(entries: readonly Json[]) {
   };
 }
 
-/** Each model request's usage once: Claude Code repeats a streamed
- * response's usage on every content block's line. */
-function requests(entries: readonly Json[]) {
-  const seen = new Map<string, { at: number; model: string; usage: Json }>();
-  for (const entry of entries) {
-    const message = object(entry.message);
-    const usage = object(message?.usage);
-    const model = str(message?.model);
-    const at = Date.parse(str(entry.timestamp));
-    if (entry.type !== "assistant" || !usage || !model || !at) continue;
-    if (model === "<synthetic>") continue;
-    const key = `${str(message?.id)}:${str(entry.requestId)}`;
-    seen.set(key === ":" ? `${seen.size}` : key, { at, model, usage });
-  }
-  return [...seen.values()];
-}
-
 const COUNTS = {
   input: "input_tokens",
   output: "output_tokens",
@@ -83,45 +76,70 @@ const COUNTS = {
   cacheWrite: "cache_creation_input_tokens",
 } as const;
 
-/** The requests' tokens by model and hour. */
-function slices(entries: readonly Json[]): UsageSlice[] {
-  type Slice = { hour: number; model: string; tokens: Record<string, number> };
-  const byKey = new Map<string, Slice>();
-  for (const { at, model, usage } of requests(entries)) {
-    const hour = Math.floor(at / HOUR) * HOUR;
-    const key = `${hour}:${model}`;
-    const slice = byKey.get(key) ?? { hour, model, tokens: {} };
-    byKey.set(key, slice);
+/** Each model request once: Claude Code repeats a streamed response's usage
+ * on every content block's line. */
+function observations(entries: readonly Json[]) {
+  const seen = new Map<string, UsageObservation>();
+  for (const entry of entries) {
+    const message = object(entry.message);
+    const usage = object(message?.usage);
+    const model = str(message?.model);
+    const at = Date.parse(str(entry.timestamp));
+    if (entry.type !== "assistant" || !usage || !model || !at) continue;
+    if (model === "<synthetic>") continue;
     const counts = {
       ...Object.fromEntries(
         Object.entries(COUNTS).map(([name, field]) => [name, usage[field]]),
       ),
       cacheWrite1h: object(usage.cache_creation)?.ephemeral_1h_input_tokens,
     };
-    for (const [name, raw] of Object.entries(counts)) {
-      const value = count(raw);
-      if (value !== undefined)
-        slice.tokens[name] = (slice.tokens[name] ?? 0) + value;
-    }
+    const requestId = str(entry.requestId) || str(message?.id);
+    const key = `${str(message?.id)}:${str(entry.requestId)}`;
+    seen.set(key === ":" ? `${seen.size}` : key, {
+      ...(requestId ? { requestId } : {}),
+      at,
+      model,
+      tokens: Object.fromEntries(
+        Object.entries(counts).flatMap(([name, raw]) => {
+          const value = count(raw);
+          return value === undefined ? [] : [[name, value]];
+        }),
+      ),
+    });
   }
-  return [...byKey.values()];
+  return [...seen.values()];
 }
 
-/** A session file's usage, with its subagents' files, when Buzz started it for
- * `agent`. A saved session also counts when its prompt does not name an agent,
- * as prompts did before agents were named. */
+/** A session file's usage, with its subagents' files (undefined when one is
+ * gone), when Buzz started it for `agent`. A saved session also counts when
+ * its prompt does not name an agent, as prompts did before agents were named. */
 export function sessionUsage(
   id: string,
   file: string,
-  subagents: readonly string[],
+  subagents: readonly (string | undefined)[],
   agent: string,
   saved: boolean,
-): SessionUsage | undefined {
-  const entries = lines(file);
+): Omit<SessionUsage, "revision"> | undefined {
+  const { entries, unreadable } = lines(file);
   const start = buzzStart(entries);
   if (!start || (start.agent ? start.agent !== agent : !saved))
     return undefined;
-  const all = [...entries, ...subagents.flatMap(lines)];
+  const all = [...entries];
+  const gaps: string[] = [];
+  let skipped = unreadable;
+  for (const subagent of subagents) {
+    if (subagent === undefined) {
+      gaps.push("A subagent’s transcript is gone");
+      continue;
+    }
+    const read = lines(subagent);
+    all.push(...read.entries);
+    skipped += read.unreadable;
+  }
+  if (skipped)
+    gaps.push(
+      `${skipped} transcript line${skipped === 1 ? "" : "s"} unreadable`,
+    );
   const times = all
     .map((entry) => Date.parse(str(entry.timestamp)))
     .filter((at) => at > 0);
@@ -137,7 +155,8 @@ export function sessionUsage(
     ...(title ? { title } : {}),
     startedAt: Math.min(...times),
     lastAt: Math.max(...times),
-    usage: slices(all),
+    gaps,
+    observations: observations(all),
   };
 }
 
@@ -202,11 +221,12 @@ export async function readUsage(
       const session = sessionUsage(
         id,
         file,
-        files.filter((text) => text !== undefined),
+        files,
         agent,
         savedNames.has(name),
       );
-      if (session && session.lastAt >= since) found.push(session);
+      if (session && session.lastAt >= since)
+        found.push(await withRevision(session));
     }
   };
   await Promise.all(Array.from({ length: READERS }, worker));

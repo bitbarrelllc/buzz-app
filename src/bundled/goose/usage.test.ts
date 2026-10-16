@@ -7,7 +7,6 @@ import { readUsage, sessionUsage } from "./usage";
 
 const agent = "c".repeat(64);
 const other = "d".repeat(64);
-const HOUR = 3_600_000;
 const start = 1_800_000_000;
 const mention = {
   id: "1".repeat(64),
@@ -58,17 +57,16 @@ const tokens = (input: number, read: number, write: number, cost?: number) => ({
   ...(cost === undefined ? {} : { cost, costSource: "estimated" }),
 });
 
-it("counts each reply's tokens and goose's price, by model and hour", () => {
+it("observes each reply's tokens and goose's price", () => {
   const session = sessionUsage("s", [
     user(ask()),
     user("<turn-context>…</turn-context>", start, false),
-    reply(start + 1, tokens(4, 0, 100, 0.06)),
-    reply(start + 2, tokens(2, 100, 5, 0.01)),
-    // An unpriced reply leaves its slice to be priced from tokens.
+    { ...reply(start + 1, tokens(4, 0, 100, 0.06)), id: "r1" },
+    // An unpriced reply is left to be priced from its tokens.
     reply(start + 3600, tokens(1, 50, 0)),
-    reply(start + 3601, tokens(1, 50, 0, 0.02)),
+    // Without the cache counts, the uncached input is unknown.
+    reply(start + 3601, { inputTokens: 9, outputTokens: 3 }),
   ]);
-  const hour = Math.floor((start * 1000) / HOUR) * HOUR;
   expect(session).toEqual({
     id: "s",
     channelId: "chan",
@@ -76,17 +74,24 @@ it("counts each reply's tokens and goose's price, by model and hour", () => {
     title: "@Grok fix the build",
     startedAt: start * 1000,
     lastAt: (start + 3601) * 1000,
-    usage: [
+    gaps: [],
+    observations: [
       {
-        hour,
+        requestId: "r1",
+        at: (start + 1) * 1000,
         model: "databricks-claude-sonnet-5-5",
-        tokens: { input: 6, output: 20, cacheRead: 100, cacheWrite: 105 },
-        costUsd: expect.closeTo(0.07),
+        tokens: { input: 4, output: 10, cacheRead: 0, cacheWrite: 100 },
+        cost: { usd: 0.06, source: "estimated" },
       },
       {
-        hour: hour + HOUR,
+        at: (start + 3600) * 1000,
         model: "databricks-claude-sonnet-5-5",
-        tokens: { input: 2, output: 20, cacheRead: 100, cacheWrite: 0 },
+        tokens: { input: 1, output: 10, cacheRead: 50, cacheWrite: 0 },
+      },
+      {
+        at: (start + 3601) * 1000,
+        model: "databricks-claude-sonnet-5-5",
+        tokens: { output: 3 },
       },
     ],
   });
@@ -128,8 +133,8 @@ it("reads the agent's sessions in its workspace through goose", async () => {
     new AbortController().signal,
   );
   expect(sessions.map((session) => session.id)).toEqual(["mine"]);
-  expect(sessions[0]?.usage[0]).toMatchObject({
+  expect(sessions[0]?.observations[0]).toMatchObject({
     tokens: { input: 1, cacheRead: 2, cacheWrite: 3 },
-    costUsd: 0.5,
+    cost: { usd: 0.5 },
   });
 });

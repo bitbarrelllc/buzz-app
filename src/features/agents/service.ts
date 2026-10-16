@@ -231,26 +231,44 @@ export type TokenCounts = Readonly<{
   /** Of `cacheWrite`, those cached for an hour rather than five minutes. */
   cacheWrite1h?: number;
 }>;
-/** One model's use within one hour of a session. */
-export type UsageSlice = Readonly<{
-  /** Start of the hour, in milliseconds. */
-  hour: number;
+/** One model request of a session, as the harness recorded it. */
+export type UsageObservation = Readonly<{
+  /** The harness's id for the request, when it records one; unique within
+   * the session. */
+  requestId?: string;
+  /** When the harness recorded the request, in milliseconds. */
+  at: number;
   model: string;
   tokens: TokenCounts;
-  /** USD the harness itself recorded; absent when it records none. */
-  costUsd?: number;
+  /** USD the harness itself recorded, and how it says it got it, e.g.
+   * goose's `estimated`; absent when it records none. */
+  cost?: Readonly<{ usd: number; source: string }>;
 }>;
-/** One harness session an agent ran on this device. `channelId` and `root`
- * say where in Buzz it started, when the session records it. */
+/**
+ * A snapshot of one harness session an agent ran on this device: all its
+ * usage, its descendants' (subagents') included, so a consumer never adds a
+ * child session again. `channelId` and `root` say where in Buzz it started,
+ * when the session records it.
+ *
+ * A snapshot without `gaps` is complete: it replaces whatever a consumer kept
+ * for the session. An incomplete one should leave the consumer's previous
+ * snapshot in place and report the gap. A session missing from a later read
+ * is not deleted: its source may be gone, not its usage.
+ */
 export type SessionUsage = Readonly<{
   /** The harness's own session id, opaque to others. */
   id: string;
+  /** Equal for two reads that saw the same usage. Opaque and unordered: it
+   * says whether a snapshot changed, not which is newer. */
+  revision: string;
+  /** What the read could not see, e.g. a subagent's vanished file. */
+  gaps: readonly string[];
   channelId?: string;
   root?: string;
   title?: string;
   startedAt: number;
   lastAt: number;
-  usage: readonly UsageSlice[];
+  observations: readonly UsageObservation[];
 }>;
 /** The agent as `run` holds it. It works for as long as the agent exists. */
 export type AgentHandle = Readonly<{
@@ -509,9 +527,11 @@ export type AgentType<Config = unknown> = {
    * mentioning the agent. Discovery may be async but must not start a turn.
    * The picks reach that run as `Delivery.model` and `Delivery.effort`. */
   models?(agent: Agent<Config>): Models | Promise<Models>;
-  /** Read-only: the sessions the agent ran from Buzz on this device with
-   * activity since `since` (milliseconds), and their token use. Reading never
-   * starts, stops or changes a session; rejects when `signal` aborts. */
+  /** Read-only: snapshots of the sessions the agent ran from Buzz on this
+   * device with activity since `since` (milliseconds). `since` only bounds
+   * activity time; it is no checkpoint, and a session last active before it
+   * that the harness later corrected is not read again. Reading never starts,
+   * stops or changes a session; rejects when `signal` aborts. */
   usage?(
     agent: Agent<Config>,
     options: Readonly<{ since: number; signal: AbortSignal }>,

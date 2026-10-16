@@ -1,7 +1,7 @@
 import { scaleBand, scaleLinear } from "d3-scale";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Tooltip } from "../../shared/design-system/ui/Tooltip";
-import styles from "./AgentsView.module.css";
+import styles from "./Usage.module.css";
 import { cost } from "./format";
 import type { Day } from "./stats";
 

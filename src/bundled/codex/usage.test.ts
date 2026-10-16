@@ -40,6 +40,7 @@ const model = (ms: number, name: string) =>
   line(ms, "turn_context", { model: name });
 const record = (ms: number, input: number, cached: number, output: number) =>
   line(ms, "token_usage_record", {
+    response_id: `resp-${ms}`,
     usage: {
       input_tokens: input,
       cached_input_tokens: cached,
@@ -56,7 +57,7 @@ const subagent = [
   record(1500, 20, 10, 2),
 ].join("\n");
 
-it("counts each model response once, by model and hour, its input less the cached part, with its subagents", () => {
+it("observes each model response once, its input less the cached part, with its subagents", () => {
   const file = [
     line(0, "session_meta", { id: "t" }),
     instructions(),
@@ -70,7 +71,10 @@ it("counts each model response once, by model and hour, its input less the cache
     }),
     record(2000, 300, 250, 20),
     model(HOUR, "gpt-6-luna"),
-    record(HOUR + 5, 50, 40, 5),
+    // Without the cache write count, the uncached input is unknown.
+    line(HOUR + 5, "token_usage_record", {
+      usage: { input_tokens: 50, cached_input_tokens: 40, output_tokens: 5 },
+    }),
     '{"partial',
   ].join("\n");
   expect(rolloutUsage("t", file, [subagent], agent)).toEqual({
@@ -80,25 +84,39 @@ it("counts each model response once, by model and hour, its input less the cache
     title: "fix the <tests>",
     startedAt: hour,
     lastAt: hour + HOUR + 5,
-    usage: [
+    gaps: [],
+    observations: [
       {
-        hour,
+        requestId: "resp-1000",
+        at: hour + 1000,
         model: "gpt-6.1-sol",
-        tokens: { input: 150, output: 30, cacheRead: 250, cacheWrite: 0 },
+        tokens: { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 },
       },
       {
-        hour: hour + HOUR,
+        requestId: "resp-2000",
+        at: hour + 2000,
+        model: "gpt-6.1-sol",
+        tokens: { input: 50, output: 20, cacheRead: 250, cacheWrite: 0 },
+      },
+      {
+        at: hour + HOUR + 5,
         model: "gpt-6-luna",
-        tokens: { input: 10, output: 5, cacheRead: 40, cacheWrite: 0 },
+        tokens: { output: 5, cacheRead: 40 },
       },
       // The review subagent Codex spawned for the thread.
       {
-        hour,
+        requestId: "resp-1500",
+        at: hour + 1500,
         model: "gpt-6-luna",
         tokens: { input: 10, output: 2, cacheRead: 10, cacheWrite: 0 },
       },
     ],
   });
+  // A subagent's rollout gone, or a finished line unreadable, is a gap.
+  expect(
+    rolloutUsage("t", file.replace(prompt, `{x\n${prompt}`), [undefined], agent)
+      ?.gaps,
+  ).toEqual(["A subagent’s rollout is gone", "1 rollout line unreadable"]);
 });
 
 it("keeps only threads Buzz started for this agent", () => {
@@ -216,17 +234,13 @@ it("finds the agent's threads by name and reads their rollouts with the manifest
     new AbortController().signal,
   );
   expect(sessions.map((session) => session.id)).toEqual(["mine"]);
-  expect(sessions[0]?.usage).toEqual([
-    {
-      hour,
-      model: "gpt-6.1-sol",
-      tokens: { input: 4, output: 2, cacheRead: 0, cacheWrite: 0 },
-    },
-    {
-      hour,
-      model: "gpt-6-luna",
-      tokens: { input: 20, output: 4, cacheRead: 20, cacheWrite: 0 },
-    },
+  // The thread's own response, and one from each of its subagents.
+  expect(
+    sessions[0]?.observations.map((entry) => [entry.model, entry.tokens]),
+  ).toEqual([
+    ["gpt-6.1-sol", { input: 4, output: 2, cacheRead: 0, cacheWrite: 0 }],
+    ["gpt-6-luna", { input: 10, output: 2, cacheRead: 10, cacheWrite: 0 }],
+    ["gpt-6-luna", { input: 10, output: 2, cacheRead: 10, cacheWrite: 0 }],
   ]);
   // Each name match in the period, and each subagent, is asked for its own.
   expect(searches.sort()).toEqual(

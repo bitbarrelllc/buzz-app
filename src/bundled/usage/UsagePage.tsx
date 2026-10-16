@@ -26,10 +26,17 @@ import {
   PanelHeaderLabel,
 } from "../../shared/design-system/ui/PanelHeader";
 import { Select } from "../../shared/design-system/ui/Select";
-import styles from "./AgentsView.module.css";
+import styles from "./Usage.module.css";
 import { DailyCostChart, type Series } from "./DailyCostChart";
-import { cost, count, percent } from "./format";
-import { type AgentUsage, modelName, since, stats } from "./stats";
+import { amount, cost, count, percent } from "./format";
+import {
+  type AgentUsage,
+  merge,
+  modelName,
+  since,
+  stats,
+  type Total,
+} from "./stats";
 
 const RANGES = [7, 30, 90];
 /** The chart's series colors. */
@@ -41,12 +48,14 @@ type Load = Readonly<{
   /** When the shown usage was read. */
   now: number;
   usage: readonly AgentUsage[];
-  /** Agents whose sessions could not be read. */
+  /** Agents whose sessions could not be read this time. */
   failed: readonly Agent[];
 }>;
+const keyOf = (agent: Agent) => `${agent.pubkey}:${agent.type}`;
 
 /** Reads each agent's sessions from its type, again when the agents, range or
- * `reload` change; earlier results stay shown meanwhile. */
+ * `reload` change; earlier results stay shown meanwhile. Each read is merged
+ * over what earlier ones found, and an agent that cannot be read keeps it. */
 function useUsage(agents: Agents, keys: string, days: number, reload: number) {
   const [load, setLoad] = useState<Load>();
   // biome-ignore lint/correctness/useExhaustiveDependencies: Refresh reads the same agents again.
@@ -55,7 +64,7 @@ function useUsage(agents: Agents, keys: string, days: number, reload: number) {
     const types = agents.types();
     const targets = agents
       .snapshot()
-      .agents.filter((agent) => wanted.has(`${agent.pubkey}:${agent.type}`));
+      .agents.filter((agent) => wanted.has(keyOf(agent)));
     const controller = new AbortController();
     const now = Date.now();
     setLoad((current) => current && { ...current, loading: true });
@@ -74,23 +83,33 @@ function useUsage(agents: Agents, keys: string, days: number, reload: number) {
       }),
     ).then((results) => {
       if (controller.signal.aborted) return;
-      setLoad({
+      setLoad((current) => ({
         loading: false,
         now,
-        usage: results.flatMap((result) =>
-          result.status === "fulfilled" ? [result.value] : [],
-        ),
+        usage: targets.flatMap((agent, index) => {
+          const kept = current?.usage.find(
+            (entry) => keyOf(entry.agent) === keyOf(agent),
+          );
+          const result = results[index];
+          if (result?.status !== "fulfilled") return kept ? [kept] : [];
+          return [
+            {
+              ...result.value,
+              sessions: merge(kept?.sessions ?? [], result.value.sessions),
+            },
+          ];
+        }),
         failed: targets.filter(
           (_, index) => results[index]?.status === "rejected",
         ),
-      });
+      }));
     });
     return () => controller.abort();
   }, [agents, keys, days, reload]);
   return load;
 }
 
-export function AgentsViewPage({
+export function UsagePage({
   agents,
   open,
 }: {
@@ -118,7 +137,7 @@ export function AgentsViewPage({
       agent.place === "here" &&
       harnesses.some((type) => type.key === agent.type),
   );
-  const keys = targets.map((agent) => `${agent.pubkey}:${agent.type}`).join();
+  const keys = targets.map(keyOf).join();
   const load = useUsage(
     agents,
     snapshot.status === "ready" ? keys : "",
@@ -191,7 +210,7 @@ export function AgentsViewPage({
       <EmptyState
         icon={<ChartBarIcon size="1.5rem" />}
         title="No agent usage to show"
-        description="AgentsView reads the sessions your Claude agents run on this computer. Add one from Agents to see what it spends."
+        description="Usage reads the sessions your Claude Code, Codex and goose agents run on this computer. Add one from Agents to see what it spends."
       />
     );
   else
@@ -270,7 +289,12 @@ export function AgentsViewPage({
           load?.failed.length ? (
             <p className={styles.notice} role="status">
               Couldn’t read the sessions of{" "}
-              {load.failed.map((agent) => agent.name).join(", ")}.{" "}
+              {load.failed.map((agent) => agent.name).join(", ")}
+              {load.failed.some((agent) =>
+                load.usage.some((entry) => keyOf(entry.agent) === keyOf(agent)),
+              )
+                ? "; showing what was read before. "
+                : ". "}
               <Button
                 size="sm"
                 variant="ghost"
@@ -287,12 +311,12 @@ export function AgentsViewPage({
 
   return (
     <div className="h-full min-h-0">
-      <FullPageSurface aria-label="AgentsView">
+      <FullPageSurface aria-label="Usage">
         <div className="flex h-full min-h-0 flex-col">
           <PanelHeader
             title={
               <PanelHeaderLabel
-                title="AgentsView"
+                title="Usage"
                 icon={<ChartBarIcon size="1rem" />}
               />
             }
@@ -340,16 +364,17 @@ function Dashboard({
 }) {
   const period = `last ${days} days`;
   const top = result.agents[0];
-  const tokens =
-    result.tokens.input +
-    result.tokens.output +
-    result.tokens.cacheRead +
-    result.tokens.cacheWrite;
+  const spent = result.cost.value ?? 0;
+  const before = result.previousCost.value ?? 0;
+  // Compared only when both periods are fully counted.
   const change =
-    result.previousCost > 0
-      ? (result.cost - result.previousCost) / result.previousCost
+    before > 0 && !result.cost.partial && !result.previousCost.partial
+      ? (spent - before) / before
       : undefined;
-  const maxAgent = Math.max(...result.agents.map((entry) => entry.cost), 0);
+  const maxAgent = Math.max(
+    ...result.agents.map((entry) => entry.cost.value ?? 0),
+    0,
+  );
   const harnessCount = new Set(result.agents.map((entry) => entry.harness))
     .size;
   return (
@@ -383,11 +408,12 @@ function Dashboard({
               </>
             )}{" "}
             in the {period}.
-            {top && result.agents.length > 1 && result.cost > 0 && (
+            {top && result.agents.length > 1 && spent > 0 && (
               <>
                 {" "}
                 <b>{top.agent.name}</b> accounts for{" "}
-                <b>{percent(top.cost / result.cost)}</b> of the cost
+                <b>{percent((top.cost.value ?? 0) / spent)}</b> of the{" "}
+                {result.cost.partial ? "counted cost" : "cost"}
                 {top.model && (
                   <>
                     , mostly on <b>{modelName(top.model)}</b>
@@ -399,7 +425,7 @@ function Dashboard({
           </p>
           <section className={styles.hero} aria-label="Estimated cost">
             <p className={styles.label}>Estimated cost · {period}</p>
-            <p className={styles.heroValue}>{cost(result.cost)}</p>
+            <p className={styles.heroValue}>{amount(result.cost, cost)}</p>
             <p className={styles.meta}>
               {change === undefined ? null : Math.abs(change) < 0.005 ? (
                 <span>No change from the previous {days} days</span>
@@ -414,26 +440,30 @@ function Dashboard({
                   than the previous {days} days
                 </span>
               )}
-              <span>{cost(result.cost / days)} a day</span>
+              {result.cost.value !== undefined && (
+                <span>{cost(spent / days)} a day</span>
+              )}
+              {result.cost.partial && <span>Partial</span>}
             </p>
-            <p className={styles.footnote}>
-              At Anthropic API rates; your plan may bill differently.
-              {result.unpriced.length > 0 &&
-                ` Not counted: ${result.unpriced.join(", ")}, which have no known rates.`}
-            </p>
+            <p className={styles.footnote}>{footnote(result)}</p>
           </section>
           <div className={styles.tiles}>
             <Tile
               label="Tokens"
-              value={count(tokens)}
-              detail={`${count(result.tokens.output)} output`}
+              value={amount(result.tokens, count)}
+              detail={partly(
+                result.tokens,
+                `${amount(result.output, count)} output`,
+              )}
             />
             <Tile
               label="Cache hit rate"
-              value={
-                result.cacheHit === undefined ? "—" : percent(result.cacheHit)
+              value={result.cacheHit ? amount(result.cacheHit, percent) : "—"}
+              detail={
+                result.cacheHit?.partial
+                  ? "Of the prompts with cache counts"
+                  : "Prompt tokens read from cache"
               }
-              detail="Prompt tokens read from cache"
             />
             <Tile
               label="Sessions"
@@ -471,13 +501,13 @@ function Dashboard({
                         <span
                           className={styles.bar}
                           style={{
-                            inlineSize: `${maxAgent ? (entry.cost / maxAgent) * 100 : 0}%`,
+                            inlineSize: `${maxAgent ? ((entry.cost.value ?? 0) / maxAgent) * 100 : 0}%`,
                             background: colorOf(entry.harness),
                           }}
                         />
                       </span>
                     </div>
-                    <span className={styles.value}>{cost(entry.cost)}</span>
+                    <Amount total={entry.cost} />
                   </li>
                 ))}
               </ul>
@@ -485,21 +515,23 @@ function Dashboard({
             <section className={styles.section}>
               <InlineHeader title="Costliest sessions" />
               <ul className={styles.list}>
-                {result.costliest.map(({ agent, session, cost: spent }) => {
+                {result.costliest.map(({ agent, session, cost: total }) => {
                   const label = (
                     <span className={styles.sessionText}>
                       <span className={styles.name}>
                         {session.title ?? "Untitled session"}
                       </span>
                       <span className={styles.label}>
-                        {agent.name} ·{" "}
-                        {new Date(session.lastAt).toLocaleDateString(
-                          undefined,
-                          {
-                            month: "short",
-                            day: "numeric",
-                          },
-                        )}
+                        {[
+                          agent.name,
+                          new Date(session.lastAt).toLocaleDateString(
+                            undefined,
+                            { month: "short", day: "numeric" },
+                          ),
+                          session.gaps.length > 0 && "partly read",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     </span>
                   );
@@ -509,10 +541,8 @@ function Dashboard({
                       {channelId ? (
                         <NavigationItem
                           label={label}
-                          trailing={
-                            <span className={styles.value}>{cost(spent)}</span>
-                          }
-                          aria-label={`${session.title ?? "Untitled session"}, ${agent.name}, ${cost(spent)}. Open conversation`}
+                          trailing={<Amount total={total} />}
+                          aria-label={`${session.title ?? "Untitled session"}, ${agent.name}, ${costLabel(total)}. Open conversation`}
                           onClick={() =>
                             void open({
                               version: 1,
@@ -534,7 +564,7 @@ function Dashboard({
                       ) : (
                         <div className={styles.staticRow}>
                           {label}
-                          <span className={styles.value}>{cost(spent)}</span>
+                          <Amount total={total} />
                         </div>
                       )}
                     </li>
@@ -546,6 +576,40 @@ function Dashboard({
         </>
       )}
     </div>
+  );
+}
+
+/** What the cost leaves out, and why. */
+function footnote(result: ReturnType<typeof stats>) {
+  const notes = [
+    "At Anthropic API rates where the harness recorded no cost; your plan may bill differently.",
+  ];
+  if (result.unpriced.length)
+    notes.push(
+      `Not counted: ${result.unpriced.join(", ")}, which have no known rates.`,
+    );
+  if (result.incomplete)
+    notes.push(
+      `${count(result.incomplete, "session")} could not be fully read.`,
+    );
+  return notes.join(" ");
+}
+
+const partly = (total: Total, text: string) =>
+  total.partial ? `${text} · partial` : text;
+const costLabel = (total: Total) =>
+  total.value === undefined
+    ? "cost unavailable"
+    : partly(total, cost(total.value));
+
+/** A cost in a list row: `—` when unknown, marked when partial. */
+function Amount({ total }: { total: Total }) {
+  return (
+    <span className={styles.value} title={costLabel(total)}>
+      {total.value === undefined
+        ? "—"
+        : `${cost(total.value)}${total.partial ? "+" : ""}`}
+    </span>
   );
 }
 

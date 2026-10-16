@@ -52,7 +52,7 @@ const bundledIcons = new Map<string, typeof BrowserIcon>([
   ["buzz.projects/projects", FolderSimpleIcon],
   ["buzz.agents/agents", RobotIcon],
   ["buzz.workflows/workflows", LightningIcon],
-  ["buzz.agentsview/agentsview", ChartBarIcon],
+  ["buzz.usage/usage", ChartBarIcon],
 ]);
 type PagePresentation = Readonly<{
   label: string;

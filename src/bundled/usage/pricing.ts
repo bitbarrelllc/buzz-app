@@ -29,19 +29,28 @@ export const claudeModel = (model: string) =>
 
 const rates = (model: string) => RATES[claudeModel(model)];
 
-/** The estimated USD, or undefined when the model has no known rates. */
+/** The estimated USD of the known counts, `partial` when one it prices is
+ * unknown; undefined when the model has no known rates. Writes not split by
+ * how long they are kept are priced as kept five minutes, Anthropic's
+ * default. */
 export function estimateCost(model: string, tokens: TokenCounts) {
   const rate = rates(model);
   if (!rate) return undefined;
   const [input, output, read] = rate;
   const hour = tokens.cacheWrite1h ?? 0;
   const minutes = Math.max(0, (tokens.cacheWrite ?? 0) - hour);
-  return (
-    ((tokens.input ?? 0) * input +
-      (tokens.output ?? 0) * output +
-      (tokens.cacheRead ?? 0) * read +
-      minutes * input * 1.25 +
-      hour * input * 2) /
-    1_000_000
-  );
+  return {
+    usd:
+      ((tokens.input ?? 0) * input +
+        (tokens.output ?? 0) * output +
+        (tokens.cacheRead ?? 0) * read +
+        minutes * input * 1.25 +
+        hour * input * 2) /
+      1_000_000,
+    partial:
+      tokens.input === undefined ||
+      tokens.output === undefined ||
+      tokens.cacheRead === undefined ||
+      tokens.cacheWrite === undefined,
+  };
 }

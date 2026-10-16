@@ -58,13 +58,13 @@ const hourWrites = (counts: ReturnType<typeof usage>, hour: number) => ({
   },
 });
 
-it("counts each streamed request once, by model and hour, with its subagents", () => {
+it("observes each streamed request once, with its subagents, unknown counts left out", () => {
   const file = [
     threadPrompt(),
     // Claude Code repeats a response's usage on each content block's line.
     reply(1000, "m1", hourWrites(usage(2, 10, 100, 50), 40)),
     reply(1001, "m1", hourWrites(usage(2, 10, 100, 50), 40)),
-    reply(2000, "m2", usage(3, 20, 200, 0)),
+    reply(2000, "m2", { input_tokens: 3, output_tokens: 20 }),
     reply(HOUR + 5, "m3", usage(1, 5, 300, 0), "claude-sonnet-5-5"),
     reply(HOUR + 6, "m4", usage(9, 9), "<synthetic>"),
     JSON.stringify({ type: "ai-title", aiTitle: "Port the scroll patch" }),
@@ -87,30 +87,57 @@ it("counts each streamed request once, by model and hour, with its subagents", (
     title: "Port the scroll patch",
     startedAt: hour,
     lastAt: hour + HOUR + 6,
-    usage: [
+    // The partial last line is still being written: no gap.
+    gaps: [],
+    observations: [
       {
-        hour,
+        requestId: "req-m1",
+        at: hour + 1001,
         model: "claude-opus-5-5",
         tokens: {
-          input: 5,
-          output: 30,
-          cacheRead: 300,
+          input: 2,
+          output: 10,
+          cacheRead: 100,
           cacheWrite: 50,
           cacheWrite1h: 40,
         },
       },
+      // Its cache counts were not recorded, so are unknown.
       {
-        hour: hour + HOUR,
+        requestId: "req-m2",
+        at: hour + 2000,
+        model: "claude-opus-5-5",
+        tokens: { input: 3, output: 20 },
+      },
+      {
+        requestId: "req-m3",
+        at: hour + HOUR + 5,
         model: "claude-sonnet-5-5",
         tokens: { input: 1, output: 5, cacheRead: 300, cacheWrite: 0 },
       },
       {
-        hour,
+        requestId: "req-s1",
+        at: hour + 1500,
         model: "claude-haiku-5-5",
         tokens: { input: 4, output: 40, cacheRead: 400, cacheWrite: 0 },
       },
     ],
   });
+});
+
+it("reports what it could not read as the snapshot's gaps", () => {
+  const work = reply(1000, "m1", usage(1, 1));
+  const session = sessionUsage(
+    "s",
+    [threadPrompt(), "{broken", work, ""].join("\n"),
+    [undefined, `{broken\n${work}`],
+    agent,
+    false,
+  );
+  expect(session?.gaps).toEqual([
+    "A subagent’s transcript is gone",
+    "2 transcript lines unreadable",
+  ]);
 });
 
 it("keeps only sessions Buzz started for this agent", () => {
@@ -186,13 +213,13 @@ it("finds the agent's sessions with the manifest's processes", async () => {
     "named",
     "saved",
   ]);
-  expect(sessions.find((session) => session.id === "named")?.usage).toEqual([
-    {
-      hour: recent,
-      model: "claude-opus-5-5",
-      tokens: { input: 4, output: 6, cacheRead: 0, cacheWrite: 0 },
-    },
+  const named = sessions.find((session) => session.id === "named");
+  expect(named?.observations.map((entry) => entry.tokens)).toEqual([
+    { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+    { input: 3, output: 4, cacheRead: 0, cacheWrite: 0 },
   ]);
+  expect(named?.gaps).toEqual([]);
+  expect(named?.revision).toMatch(/^[0-9a-f]{64}$/);
   // Activity before `since` is left out.
   expect(
     await readUsage(

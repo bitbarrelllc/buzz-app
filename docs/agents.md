@@ -767,22 +767,45 @@ subject to the independent 90-day/byte eviction policy above, so loaded history
 is never a completeness guarantee. Restored usage is display-only and cannot
 establish working, typing, or online status.
 
-## AgentsView
+## Usage
 
-AgentsView is a default-off page summarising what the selected community's agents
+Usage is a default-off page summarising what the selected community's agents
 on this computer spent: estimated cost against the previous period, tokens, cache
 hit rate (cache reads over all prompt tokens: uncached input, cache reads and
 cache writes), daily cost by agent
 type, and the costliest sessions, each opening its thread.
 
 It reads nothing itself. An agent type that can report usage implements the
-optional, read-only `AgentType.usage(agent, { since, signal })`, returning the
-sessions the agent ran from Buzz on this device with activity since `since`. Each
-session carries its own id, where in Buzz it started, and token counts by model
-and hour. An absent count is unknown, not zero; `input` excludes cache counts,
-and `cacheWrite1h` is the subset of `cacheWrite` cached for an hour. A type sets
-`costUsd` only when its harness recorded one. Reading never starts, stops or
-changes a session.
+optional, read-only `AgentType.usage(agent, { since, signal })`, returning a
+snapshot of each session the agent ran from Buzz on this device with activity
+since `since`. A snapshot carries the harness's session id, where in Buzz it
+started, and one observation per model request: the harness's request id when it
+records one, the time, the model, the token counts, and the cost only when the
+harness recorded one, with the harness's word for how it got it. An absent count
+is unknown, not zero; `input` excludes cache counts, and `cacheWrite1h` is the
+subset of `cacheWrite` cached for an hour. Usage groups the observations into
+days itself. Reading never starts, stops or changes a session.
+
+A snapshot covers the session's descendants too, such as Claude Code and Codex
+subagents, so a consumer never adds a child session again. It also carries:
+
+- `revision`, an opaque digest that is equal for two reads that saw the same
+  usage. It says whether a snapshot changed, not which is newer.
+- `gaps`, what the read could not see, such as a subagent file that has since
+  vanished or a finished line that is not JSON. A partial last line is still
+  being written and is not a gap.
+
+A consumer that keeps snapshots follows these rules:
+
+- A snapshot without gaps replaces whatever it kept for that session.
+- An incomplete snapshot leaves the previous one in place and reports the gap.
+- A session missing from a later read is not deleted: its source may be gone,
+  not its usage.
+- `since` only bounds activity time. It is not a checkpoint, so it cannot find
+  a correction a harness made to a session last active before it.
+
+Until collected usage is persisted, Usage applies these rules to what it holds
+while the page is open. An agent whose read fails keeps what earlier reads found.
 
 Claude implements it from the transcripts Claude Code keeps for the agent's
 workspace: sessions whose first prompt names the agent, plus those this app saved
@@ -803,9 +826,12 @@ input, which the readers subtract.
 All three read only the harness's own session history; none reads Buzz's saved
 agent activity or turn metrics.
 
-Where a harness recorded no cost, AgentsView estimates it at Anthropic's published
+Where a harness recorded no cost, Usage estimates it at Anthropic's published
 first-party API rates, including for a Claude model a provider prefixes, such as
 `databricks-claude-sonnet-5-5`. That may differ from what a subscription or
-provider bills. A model without known rates, such as Codex's OpenAI models, is
-listed as not counted rather than priced at zero. Kind-44200 metrics remain the
-Channel Usage source; AgentsView does not read or publish them.
+provider bills. Totals add only known values. A total is marked partial when an
+unknown count, a model without known rates (such as Codex's OpenAI models) or an
+incomplete snapshot left something out, and unavailable when nothing was known.
+It is never priced at zero. Sessions count by activity time, whether or not they
+recorded usage. Kind-44200 metrics remain the
+Channel Usage source; Usage does not read or publish them.

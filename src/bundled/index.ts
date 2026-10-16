@@ -38,8 +38,8 @@ import * as channels from "./channels";
 import * as github from "./github";
 import bestieManifest from "./bestie/manifest.json";
 import * as bestie from "./bestie";
-import agentsviewManifest from "./agentsview/manifest.json";
-import * as agentsview from "./agentsview";
+import agentUsageManifest from "./usage/manifest.json";
+import * as agentUsage from "./usage";
 import meManifest from "./me/manifest.json";
 import * as me from "./me";
 import inboxManifest from "./inbox/manifest.json";
@@ -154,8 +154,8 @@ export const bundledPlugins: readonly BundledPlugin[] = [
     enabledByDefault: false,
   },
   {
-    manifest: { ...agentsviewManifest, apiVersion: 1 },
-    module: agentsview,
+    manifest: { ...agentUsageManifest, apiVersion: 1 },
+    module: agentUsage,
     enabledByDefault: false,
   },
   {

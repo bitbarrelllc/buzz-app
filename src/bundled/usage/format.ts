@@ -1,3 +1,5 @@
+import type { Total } from "./stats";
+
 const compact = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,
@@ -16,3 +18,6 @@ export function count(value: number, noun?: string) {
   const number = compact.format(value);
   return noun ? `${number} ${noun}${value === 1 ? "" : "s"}` : number;
 }
+/** A total's known value in `format`; `Unavailable` when none was known. */
+export const amount = (total: Total, format: (value: number) => string) =>
+  total.value === undefined ? "Unavailable" : format(total.value);

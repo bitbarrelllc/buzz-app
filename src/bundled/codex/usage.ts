@@ -3,13 +3,16 @@
 // them.
 import { readFile } from "../../buzz-mcp/app-client";
 import { promptSections } from "../../features/agents/activity-transcript";
-import type { SessionUsage, UsageSlice } from "../../features/agents/service";
+import type {
+  SessionUsage,
+  UsageObservation,
+} from "../../features/agents/service";
+import { withRevision } from "../../features/agents/session-usage";
 import type { AppServer, Spawn } from "./rpc";
 import { withServer } from "./transcript";
 
 type Json = Record<string, unknown>;
 type Thread = { id: string; path: string | null; updatedAt: number };
-const HOUR = 3_600_000;
 /** Files read at once. */
 const READERS = 4;
 
@@ -19,7 +22,9 @@ const object = (value: unknown): Json | undefined =>
     : undefined;
 const str = (value: unknown) => (typeof value === "string" ? value : "");
 const count = (value: unknown) =>
-  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
 const text = (content: unknown) =>
   (Array.isArray(content) ? content : [])
     .map((part) => str(object(part)?.text))
@@ -55,13 +60,11 @@ function buzzStart(prompt: string) {
   };
 }
 
-type Slice = UsageSlice & { tokens: Json };
-
-/** Adds a rollout's tokens to `slices`, by hour and model, and says whose it
- * is: Buzz's agent's when its developer instructions open with the agent's
- * pubkey. Codex records each model response's tokens once, its input
- * including the cached part. */
-function read(file: string, agent: string, slices: Map<string, Slice>) {
+/** Adds a rollout's model responses to `observations`, and says whose it is:
+ * Buzz's agent's when its developer instructions open with the agent's
+ * pubkey. Codex records each response's tokens once, its input including the
+ * cached part. */
+function read(file: string, agent: string, observations: UsageObservation[]) {
   // A teammate's pubkey can appear in the team section; the agent's own
   // opens a line of its instructions.
   const identity = new RegExp(`^You are .* \\(pubkey ${agent}\\)`, "m");
@@ -70,12 +73,16 @@ function read(file: string, agent: string, slices: Map<string, Slice>) {
   let model = "";
   let first = Number.POSITIVE_INFINITY;
   let last = 0;
-  for (const line of file.split("\n")) {
+  let unreadable = 0;
+  const lines = file.split("\n");
+  for (const [index, line] of lines.entries()) {
+    if (!line.trim()) continue;
     let entry: Json | undefined;
     try {
       entry = object(JSON.parse(line));
     } catch {
       // A partial last line is still being written.
+      if (index < lines.length - 1) unreadable += 1;
       continue;
     }
     const payload = object(entry?.payload);
@@ -91,48 +98,65 @@ function read(file: string, agent: string, slices: Map<string, Slice>) {
     }
     const usage = object(payload.usage);
     if (entry.type !== "token_usage_record" || !usage) continue;
-    const hour = Math.floor(at / HOUR) * HOUR;
-    const name = model || "codex";
-    const key = `${hour}:${name}`;
-    const slice = slices.get(key) ?? { hour, model: name, tokens: {} };
-    slices.set(key, slice);
-    const cached = count(usage.cached_input_tokens);
-    const written = count(usage.cache_write_input_tokens);
-    const add = {
-      input: Math.max(0, count(usage.input_tokens) - cached - written),
-      output: count(usage.output_tokens),
-      cacheRead: cached,
-      cacheWrite: written,
-    };
-    for (const [field, value] of Object.entries(add))
-      slice.tokens[field] = count(slice.tokens[field]) + value;
+    const prompt = count(usage.input_tokens);
+    const cacheRead = count(usage.cached_input_tokens);
+    const cacheWrite = count(usage.cache_write_input_tokens);
+    const output = count(usage.output_tokens);
+    const requestId = str(payload.response_id);
+    observations.push({
+      ...(requestId ? { requestId } : {}),
+      at,
+      model: model || "codex",
+      tokens: {
+        // The uncached input is known only with both cache counts.
+        ...(prompt !== undefined &&
+        cacheRead !== undefined &&
+        cacheWrite !== undefined
+          ? { input: Math.max(0, prompt - cacheRead - cacheWrite) }
+          : {}),
+        ...(output !== undefined ? { output } : {}),
+        ...(cacheRead !== undefined ? { cacheRead } : {}),
+        ...(cacheWrite !== undefined ? { cacheWrite } : {}),
+      },
+    });
   }
-  return { mine, start, first, last };
+  return { mine, start, first, last, unreadable };
 }
 
-/** A thread's usage, with the subagent threads it spawned, when Buzz started
- * it for `agent`. */
+/** A thread's usage, with the subagent threads it spawned (undefined when
+ * one's rollout is gone), when Buzz started it for `agent`. */
 export function rolloutUsage(
   id: string,
   file: string,
-  subagents: readonly string[],
+  subagents: readonly (string | undefined)[],
   agent: string,
-): SessionUsage | undefined {
-  const slices = new Map<string, Slice>();
-  const thread = read(file, agent, slices);
+): Omit<SessionUsage, "revision"> | undefined {
+  const observations: UsageObservation[] = [];
+  const thread = read(file, agent, observations);
   if (!thread.mine || !thread.start || !thread.last) return undefined;
-  let { first, last } = thread;
+  let { first, last, unreadable } = thread;
+  const gaps: string[] = [];
   for (const subagent of subagents) {
-    const spent = read(subagent, agent, slices);
+    if (subagent === undefined) {
+      gaps.push("A subagent’s rollout is gone");
+      continue;
+    }
+    const spent = read(subagent, agent, observations);
     first = Math.min(first, spent.first);
     last = Math.max(last, spent.last);
+    unreadable += spent.unreadable;
   }
+  if (unreadable)
+    gaps.push(
+      `${unreadable} rollout line${unreadable === 1 ? "" : "s"} unreadable`,
+    );
   return {
     id,
     ...thread.start,
     startedAt: first,
     lastAt: last,
-    usage: [...slices.values()],
+    gaps,
+    observations,
   };
 }
 
@@ -209,10 +233,11 @@ export async function readUsage(
       const session = rolloutUsage(
         next.thread.id,
         file,
-        subagents.filter((text) => text !== undefined),
+        subagents,
         agent.pubkey,
       );
-      if (session && session.lastAt >= since) found.push(session);
+      if (session && session.lastAt >= since)
+        found.push(await withRevision(session));
     }
   };
   await Promise.all(Array.from({ length: READERS }, worker));
