@@ -52,14 +52,19 @@ const bundledIcons = new Map<string, typeof BrowserIcon>([
   ["buzz.agents/agents", RobotIcon],
   ["buzz.workflows/workflows", LightningIcon],
 ]);
-/** Built-in global destinations live in the shell header. */
-export function isGlobalPage(key: string) {
-  return (
-    key === "buzz.channels/channels" ||
-    (bundledIcons.has(key) &&
-      key !== "buzz.inbox/inbox" &&
-      key !== "buzz.bestie/bestie")
-  );
+/** Resolve host navigation policy once, independently of icons and registrations. */
+export function pagePlacement(page: RegisteredPage) {
+  if (!page.primary || page.key === "buzz.me/me") return undefined;
+  switch (page.key) {
+    case "buzz.channels/channels":
+    case "buzz.reminders/reminders":
+    case "buzz.projects/projects":
+    case "buzz.agents/agents":
+    case "buzz.workflows/workflows":
+      return "topbar";
+    default:
+      return page.placement ?? "sidebar";
+  }
 }
 
 type PagePresentation = Readonly<{
@@ -87,21 +92,12 @@ export function headerPageSelection(
   selected: string,
 ): string {
   const page = pages.find((page) => page.key === selected);
-  if (
-    !isGlobalPage(selected) &&
-    page &&
-    // Placement applies only to primary pages.
-    (selected === "buzz.me/me" ||
-      !page.primary ||
-      page.placement === undefined ||
-      page.placement === "sidebar") &&
-    pages.some(
-      (page) =>
-        page.key === "buzz.channels/channels" &&
-        page.primary &&
-        page.placement === "topbar",
-    )
-  )
-    return "buzz.channels/channels";
-  return selected;
+  const placement = page && pagePlacement(page);
+  const messages = pages.find((page) => page.key === "buzz.channels/channels");
+  return page &&
+    (placement === undefined || placement === "sidebar") &&
+    messages &&
+    pagePlacement(messages) === "topbar"
+    ? messages.key
+    : selected;
 }

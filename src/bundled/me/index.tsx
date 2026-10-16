@@ -47,8 +47,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
   ctx.pages.register({
     id: "me",
     title: "Solo",
-    primary: true,
-    placement: "topbar",
+    primary: false,
     layout: "workspace",
     companion: true,
     route: { version: 1, validate: isMeRoute },

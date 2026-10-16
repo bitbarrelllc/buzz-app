@@ -10,6 +10,7 @@ import {
 } from "../../shared/design-system/icons/index";
 import {
   headerPageSelection,
+  pagePlacement,
   orderPages,
   pagePresentation,
 } from "./presentation";
@@ -140,9 +141,13 @@ describe("header area selection", () => {
     { ...me, primary: true, placement: "topbar" },
     { ...messages, primary: true, placement: "topbar" },
     inbox,
-    { ...page("buzz.reminders/reminders", "Reminders"), placement: "sidebar" },
-    page("buzz.agents/agents", "Agents"),
-    page("buzz.workflows/workflows", "Workflows"),
+    {
+      ...page("buzz.reminders/reminders", "Reminders"),
+      primary: true,
+      placement: "sidebar",
+    },
+    { ...page("buzz.agents/agents", "Agents"), primary: true },
+    { ...page("buzz.workflows/workflows", "Workflows"), primary: true },
     { ...page("buzz.sessions/sessions", "Sessions"), primary: false },
     page("example.sidebar/me", "External sidebar"),
     {
@@ -178,15 +183,11 @@ describe("header area selection", () => {
   ])("%s selects %s without changing the destination", (selected, expected) => {
     expect(headerPageSelection(entries, selected)).toBe(expected);
   });
-  test("never borrows an absent, non-primary or non-topbar Messages entry", () => {
+  test("never borrows an absent or non-primary Messages entry", () => {
     const others = entries.filter((entry) => entry.key !== messages.key);
     for (const registered of [
       others,
       [...others, { ...messages, placement: "topbar" as const }],
-      [
-        ...others,
-        { ...messages, primary: true, placement: "toolbar" as const },
-      ],
     ]) {
       expect(headerPageSelection(registered, inbox.key)).toBe(inbox.key);
     }
@@ -200,3 +201,25 @@ describe("header area selection", () => {
     ).toBe(messages.key);
   });
 });
+
+test.each([undefined, "sidebar", "topbar", "toolbar"] as const)(
+  "uses effective Messages placement for rendering and area selection (registered %s)",
+  (placement) => {
+    const registered = {
+      ...messages,
+      primary: true,
+      ...(placement ? { placement } : {}),
+    };
+    expect(pagePlacement(registered)).toBe("topbar");
+    expect(headerPageSelection([registered, inbox], inbox.key)).toBe(
+      messages.key,
+    );
+    expect(
+      pagePlacement({
+        ...me,
+        primary: true,
+        ...(placement ? { placement } : {}),
+      }),
+    ).toBeUndefined();
+  },
+);

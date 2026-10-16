@@ -19,7 +19,7 @@
 }
 
 /* The active community shares the shell's account capsule. */
-.rail {
+.picker {
   display: flex;
   flex: 0 0 auto;
 }

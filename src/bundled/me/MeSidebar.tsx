@@ -28,14 +28,8 @@ type Props = {
   relay: RelayData;
   navigator: Navigation;
   target: OpenTarget;
-  showCreationShortcuts?: boolean;
 };
-export function MeSidebar({
-  relay,
-  navigator,
-  target,
-  showCreationShortcuts = true,
-}: Props) {
+export function MeSidebar({ relay, navigator, target }: Props) {
   const connection = useRelayConnection(relay);
   const scope = connection.scope ?? "disconnected";
   return (
@@ -43,7 +37,6 @@ export function MeSidebar({
       {connection.status === "ready" ? (
         <PersonalHistory
           key={`${scope}:${connection.generation}`}
-          showCreationShortcuts={showCreationShortcuts}
           session={connection.session}
           scope={scope}
           navigator={navigator}
@@ -61,13 +54,11 @@ function PersonalHistory({
   scope,
   navigator,
   target,
-  showCreationShortcuts,
 }: {
   session: RelaySession;
   scope: string;
   navigator: Navigation;
   target: OpenTarget;
-  showCreationShortcuts: boolean;
 }) {
   const list = useChannelList(session.channels);
   const placement = useMePlacement(session);
@@ -118,7 +109,6 @@ function PersonalHistory({
       <SessionSections
         navigator={navigator}
         personal
-        showCreationShortcuts={showCreationShortcuts}
         visit={navigator.snapshot().attempt.signal}
         session={session}
         scope={scope}

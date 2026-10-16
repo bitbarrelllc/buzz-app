@@ -12,7 +12,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RelayData, RelaySnapshot } from "../relay/service";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { nativeIdentityEnabled } from "../identity/service";
-import { CommunityRail } from "./CommunityRail";
+import { CommunityPicker } from "./CommunityPicker";
 import type { Communities, ClientSnapshot } from "./service";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -90,7 +90,7 @@ it("offers native owners invites while keeping unsupported read sync disabled", 
   } as unknown as Communities;
   const onOpenTarget = vi.fn();
   render(
-    <CommunityRail
+    <CommunityPicker
       communities={communities}
       onOpenTarget={onOpenTarget}
       settingsCards={settingsCards}

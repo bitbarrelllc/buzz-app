@@ -201,16 +201,16 @@
     /* The shell owns one continuous dot grid, including beneath this header. */
     background: transparent;
   }
-  .shell-communities {
+  .shell-history {
     @apply flex min-w-0 shrink-0 items-center justify-start;
     gap: 0;
     margin-left: var(--space-3);
     padding-left: 0;
   }
-  .shell-communities > .navigation-item {
+  .shell-history > .navigation-item {
     flex-shrink: 1;
   }
-  .shell-header-mac .shell-communities {
+  .shell-header-mac .shell-history {
     padding-left: calc(var(--space-16) + var(--space-4));
   }
   .shell-capsule {
@@ -418,7 +418,7 @@
       padding-left: var(--space-2);
       gap: var(--space-2);
     }
-    .shell-communities {
+    .shell-history {
       padding-left: 0;
     }
   }

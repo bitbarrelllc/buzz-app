@@ -85,8 +85,8 @@ test("the app runtime exposes ready bundled pages and removes them on disable", 
     const me = services.pages
       .snapshot()
       .find((page) => page.key === "buzz.me/me");
-    assert.equal(me.primary, true);
-    assert.equal(me.placement, "topbar");
+    assert.equal(me.primary, false);
+    assert.equal(me.placement, undefined);
     assert.match(
       renderToStaticMarkup(createElement(me.component)),
       /Connect to a community to work with your agents\./,

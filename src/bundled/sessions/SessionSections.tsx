@@ -13,7 +13,6 @@ import {
 import { SessionShare, SessionAccessIndicator } from "./SessionShare";
 import { canEditSessionLifetime } from "../../features/sessions/SessionLifetime";
 import { ToastNotice } from "../../shared/design-system/ui/Toast";
-import { NewProject } from "../../features/sessions/NewProject";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { useDroppable } from "@dnd-kit/core";
 import {
@@ -54,7 +53,6 @@ import {
   DotsThreeIcon,
   FolderSimpleIcon,
   PlusIcon,
-  Cube3dSphereIcon,
   CopyIcon,
   GearIcon,
 } from "../../shared/design-system/icons";
@@ -73,12 +71,10 @@ export function SessionSections({
   renderSession,
   onNew,
   personal = false,
-  showCreationShortcuts = true,
   onConverted,
   visit,
 }: {
   personal?: boolean;
-  showCreationShortcuts?: boolean;
   onConverted?: ((id: string) => void) | undefined;
   visit?: AbortSignal;
   session: RelaySession;
@@ -166,7 +162,6 @@ export function SessionSections({
     setRowFocus(undefined);
   }, [rowFocus]);
   const [creatingFor, setCreatingFor] = useState<SessionListItem>();
-  const [creatingProject, setCreatingProject] = useState(false);
   const [settingsFor, setSettingsFor] = useState<{
     id: string;
     name: string;
@@ -212,11 +207,11 @@ export function SessionSections({
     ) ?? [];
   return (
     <>
-      {onNew && showCreationShortcuts && (
+      {onNew && !personal && (
         <div className={channelStyles.destinations}>
           <NavigationItem
             variant="row"
-            label={personal ? "New chat" : "New session"}
+            label="New session"
             icon={
               <span className="shell-page-icon">
                 <PlusIcon size={16} strokeWidth={2.5} />
@@ -224,19 +219,6 @@ export function SessionSections({
             }
             onClick={() => onNew(undefined)}
           />
-          {personal && (
-            <NavigationItem
-              variant="row"
-              label="New project"
-              disabled={!preferences.sectionCreationWritable}
-              icon={
-                <span className="shell-page-icon">
-                  <Cube3dSphereIcon size={16} strokeWidth={2} />
-                </span>
-              }
-              onClick={() => setCreatingProject(true)}
-            />
-          )}
         </div>
       )}
       {(snapshot.status === "idle" || snapshot.status === "loading") && (
@@ -614,14 +596,6 @@ export function SessionSections({
           scope={scope}
           target={{ kind: "section", ...settingsFor, personal }}
           close={() => setSettingsFor(undefined)}
-        />
-      )}
-      {creatingProject && (
-        <NewProject
-          session={session}
-          create={(section) => preferences.createSection(section)}
-          close={() => setCreatingProject(false)}
-          onCreated={(id) => toggle(id, true)}
         />
       )}
       {creatingFor && (

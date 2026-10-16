@@ -337,7 +337,7 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
     for (const control of await ghosts.all())
       await expect(control).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     for (const [group, gap] of [
-      [".shell-communities", 0],
+      [".shell-history", 0],
       [".shell-community-switcher", 0],
     ]) {
       const boxes = await header

@@ -17,8 +17,8 @@ import { SettingsCardsService } from "../settings/service";
 import type { RelayData, RelaySnapshot } from "../relay/service";
 import type { UnreadCapability } from "../relay/unread";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
-import { CommunityRail } from "./CommunityRail";
-import { MEMBERSHIP_SECTION } from "./CommunityRailItem";
+import { CommunityPicker } from "./CommunityPicker";
+import { MEMBERSHIP_SECTION } from "./CommunityPickerItem";
 import type { PurgeFailure } from "./device-state";
 import { MEMBERSHIP_KIND, type Role } from "./roster";
 import {
@@ -57,7 +57,7 @@ afterEach(() => {
 const accepted = () =>
   Response.json({ accepted: true, event_id: "1".repeat(64), message: "" });
 
-/** A rail over two saved communities; only the selected one has a session. */
+/** A picker over two saved communities; only the selected one has a session. */
 function harness({
   selected = primary,
   role = "owner" as Role,
@@ -96,7 +96,7 @@ function harness({
     notify();
   });
   // Mirrors the service: the membership goes, and a left selection lands on
-  // Personal space without the rail selecting anything. Only the save can
+  // Personal space without the picker selecting anything. Only the save can
   // throw, and it does so before anything changes. The purge option is
   // recorded for the assertions on which outcomes clear device state.
   const leave = vi.fn(async (id: string) => {
@@ -153,7 +153,7 @@ function harness({
     leave,
     relay,
   } as unknown as Communities;
-  // The broker's session contract is deliberately unanswered: the rail holds
+  // The broker's session contract is deliberately unanswered: the picker holds
   // the session already and must not ask for it again.
   const fetch = vi.fn(async (url: string) => {
     const path = String(url);
@@ -199,7 +199,7 @@ const items = (menu: HTMLElement) =>
   within(menu)
     .getAllByRole("menuitem")
     .map((item) => item.textContent);
-/** Session contract requests to the broker. The rail verifies the roster
+/** Session contract requests to the broker. The picker verifies the roster
  * against the relay authority its session already holds, so it makes none;
  * icon discovery is separate. */
 const sessionRequests = (fetch: ReturnType<typeof vi.fn>) =>
@@ -209,7 +209,7 @@ const sessionRequests = (fetch: ReturnType<typeof vi.fn>) =>
 
 it("switches using the shared membership owner without acquiring other sessions on render", () => {
   const h = harness();
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   expect(h.select).not.toHaveBeenCalled();
   expect(
     screen.getByRole("navigation", { name: "Communities" }),
@@ -238,7 +238,7 @@ it("switches using the shared membership owner without acquiring other sessions 
     screen.queryByRole("button", { name: "Switch to Primary" }),
   ).not.toBeInTheDocument();
   // Without host navigation there is no Settings to open, so no roster was read
-  // for a rail that only switches communities.
+  // for a picker that only switches communities.
   expect(h.read).not.toHaveBeenCalled();
   expect(sessionRequests(h.fetch)).toEqual([]);
 });
@@ -246,7 +246,7 @@ it("switches using the shared membership owner without acquiring other sessions 
 it("offers the original's actions on the selected community and only reads its roster", async () => {
   const h = harness();
   render(
-    <CommunityRail
+    <CommunityPicker
       communities={h.communities}
       onOpenTarget={h.onOpenTarget}
       settingsCards={settingsCards}
@@ -304,7 +304,7 @@ it("offers the original's actions on the selected community and only reads its r
 it("offers no Invite and reads nothing while the session carries no relay authority", async () => {
   const h = harness({ relayAuthor: null });
   render(
-    <CommunityRail
+    <CommunityPicker
       communities={h.communities}
       onOpenTarget={h.onOpenTarget}
       settingsCards={settingsCards}
@@ -329,7 +329,7 @@ it.each(["ContextMenu", "F10"])(
   async (key) => {
     const h = harness();
     render(
-      <CommunityRail
+      <CommunityPicker
         communities={h.communities}
         onOpenTarget={h.onOpenTarget}
         settingsCards={settingsCards}
@@ -342,7 +342,7 @@ it.each(["ContextMenu", "F10"])(
       name: "Actions for Secondary",
     });
     expect(h.select).not.toHaveBeenCalled();
-    // Anchored beside the rail item, not at a cursor point.
+    // Anchored beside the picker item, not at a cursor point.
     expect(menu).toHaveAttribute("data-side", "right");
     await waitFor(() =>
       expect(menu.contains(document.activeElement)).toBe(true),
@@ -356,7 +356,7 @@ it.each(["ContextMenu", "F10"])(
 it("keeps the keyboard anchor when a synthesised contextmenu event re-enters the open", async () => {
   const h = harness();
   render(
-    <CommunityRail
+    <CommunityPicker
       communities={h.communities}
       onOpenTarget={h.onOpenTarget}
       settingsCards={settingsCards}
@@ -388,7 +388,7 @@ it("keeps the keyboard anchor when a synthesised contextmenu event re-enters the
 it("re-reads the roster for a keyboard open exactly as for a pointer open", async () => {
   const h = harness();
   render(
-    <CommunityRail
+    <CommunityPicker
       communities={h.communities}
       onOpenTarget={h.onOpenTarget}
       settingsCards={settingsCards}
@@ -408,20 +408,20 @@ it("re-reads the roster for a keyboard open exactly as for a pointer open", asyn
   await waitFor(() => expect(h.read).toHaveBeenCalledTimes(3));
 });
 
-it("returns focus after a pointer open to the field the right-click interrupted, not to the rail", async () => {
+it("returns focus after a pointer open to the field the right-click interrupted, not to the picker", async () => {
   const user = userEvent.setup();
   vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
   const h = harness();
   const ui = (composer: boolean) => (
     <>
       {composer && <input aria-label="Composer" />}
-      <CommunityRail communities={h.communities} />
+      <CommunityPicker communities={h.communities} />
     </>
   );
   const { rerender } = render(ui(true));
   const composer = screen.getByRole("textbox", { name: "Composer" });
   const target = button("Primary");
-  // Browsers focus the rail button on the right-click's mousedown, before the
+  // Browsers focus the picker button on the right-click's mousedown, before the
   // contextmenu event opens the menu; jsdom only moves focus when asked to.
   const rightClick = () => {
     fireEvent.pointerDown(target, { button: 2 });
@@ -437,12 +437,12 @@ it("returns focus after a pointer open to the field the right-click interrupted,
   );
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
   // Right-clicking a community while typing must not leave the caret on the
-  // rail, where the click itself put focus.
+  // picker, where the click itself put focus.
   await waitFor(() => expect(composer).toHaveFocus());
   expect(target).not.toHaveFocus();
 
   // A field gone by the time the menu closes cannot take focus back; Base UI's
-  // default then lands on the rail button the right-click focused.
+  // default then lands on the picker button the right-click focused.
   composer.focus();
   const reopened = await rightClick();
   await waitFor(() =>
@@ -462,7 +462,7 @@ it("copies the canonical community origin and reports the outcome", async () => 
     .mockResolvedValueOnce()
     .mockRejectedValueOnce(new Error("denied"));
   const h = harness({ selected: secondary });
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   let menu = await openMenu("Primary");
   await user.click(
     within(menu).getByRole("menuitem", { name: "Copy community URL" }),
@@ -489,7 +489,7 @@ it("marks every channel read through the selected session and reports failures",
   h.markAllChannelsRead
     .mockResolvedValueOnce([])
     .mockRejectedValueOnce(new Error("disk full"));
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   let menu = await openMenu("Primary");
   await user.click(
     within(menu).getByRole("menuitem", { name: "Mark all as read" }),
@@ -519,7 +519,7 @@ it.each([
   },
 ])("disables Mark all as read while $name", async ({ options, note }) => {
   const h = harness(options);
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   const menu = await openMenu("Primary");
   const markAll = within(menu).getByRole("menuitem", {
     name: "Mark all as read",
@@ -534,7 +534,7 @@ it("opens Invites and Community settings scoped to the community", async () => {
   const user = userEvent.setup();
   const h = harness();
   render(
-    <CommunityRail
+    <CommunityPicker
       communities={h.communities}
       onOpenTarget={h.onOpenTarget}
       settingsCards={settingsCards}
@@ -553,7 +553,7 @@ it("opens Invites and Community settings scoped to the community", async () => {
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
   // Settings for an inactive community: the scoped target selects it on the
-  // way, so the rail itself neither selects nor connects.
+  // way, so the picker itself neither selects nor connects.
   menu = await openMenu("Secondary");
   await user.click(
     within(menu).getByRole("menuitem", { name: "Community settings" }),
@@ -576,7 +576,7 @@ it.each([
   async ({ role, invites }) => {
     const h = harness({ role });
     render(
-      <CommunityRail
+      <CommunityPicker
         communities={h.communities}
         onOpenTarget={h.onOpenTarget}
         settingsCards={settingsCards}
@@ -619,7 +619,7 @@ const confirmLeave = (dialog: HTMLElement) =>
 it("leaves an inactive community after confirming: the relay releases it before the device forgets it", async () => {
   const user = userEvent.setup();
   const h = harness();
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   const dialog = await askToLeave(user, "Secondary");
   expect(dialog).toHaveTextContent(
     "removes Secondary from this device along with its saved drafts and reading positions",
@@ -660,7 +660,7 @@ it("leaves an inactive community after confirming: the relay releases it before 
 it("leaving the selected community tells the host to select Personal space; an inactive one does not", async () => {
   const user = userEvent.setup();
   const h = harness();
-  render(<CommunityRail communities={h.communities} onSelect={h.onSelect} />);
+  render(<CommunityPicker communities={h.communities} onSelect={h.onSelect} />);
   let dialog = await askToLeave(user, "Primary");
   await user.click(confirmLeave(dialog));
   await screen.findByText("Left Primary.");
@@ -706,7 +706,7 @@ it("leaving the selected community tells the host to select Personal space; an i
 it("cancelling the confirmation keeps the membership and returns focus to the community", async () => {
   const user = userEvent.setup();
   const h = harness();
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   let dialog = await askToLeave(user, "Secondary");
   await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
@@ -757,7 +757,7 @@ it.each([
   async ({ response, toast }) => {
     const user = userEvent.setup();
     const h = harness({ leaveResponse: response });
-    render(<CommunityRail communities={h.communities} />);
+    render(<CommunityPicker communities={h.communities} />);
     const dialog = await askToLeave(user, "Secondary");
     await user.click(confirmLeave(dialog));
     await screen.findByText(toast);
@@ -804,7 +804,7 @@ it.each([
     const h = harness({
       leaveResponse: () => Response.json({ error }, { status: 400 }),
     });
-    render(<CommunityRail communities={h.communities} />);
+    render(<CommunityPicker communities={h.communities} />);
     const dialog = await askToLeave(user, "Secondary");
     await user.click(confirmLeave(dialog));
     const notice = await screen.findByText(toast);
@@ -830,7 +830,7 @@ it("reports a device that could not finish forgetting a left community without b
       { cause: new Error("Setting the value exceeded the quota.") },
     ),
   });
-  render(<CommunityRail communities={h.communities} onSelect={h.onSelect} />);
+  render(<CommunityPicker communities={h.communities} onSelect={h.onSelect} />);
   const dialog = await askToLeave(user, "Secondary");
   await user.click(confirmLeave(dialog));
   // A store that never saves would otherwise show the identical promise on
@@ -845,7 +845,7 @@ it("reports a device that could not finish forgetting a left community without b
     ),
   ).toBeNull();
   // The relay released the membership; only the device record failed, so the
-  // community stays in the rail for the retry that reaches the absent path.
+  // community stays in the picker for the retry that reaches the absent path.
   expect(h.leaveRequests()).toHaveLength(1);
   expect(h.leave).toHaveBeenCalledWith(secondary, { purge: true });
   expect(h.onSelect).not.toHaveBeenCalled();
@@ -857,7 +857,7 @@ it("reports a device that could not finish forgetting a left community without b
 it("falls back to the save failure's own message when it carries no cause", async () => {
   const user = userEvent.setup();
   const h = harness({ leaveError: new Error("Storage is read-only.") });
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   const dialog = await askToLeave(user, "Secondary");
   await user.click(confirmLeave(dialog));
   await screen.findByText(
@@ -874,7 +874,7 @@ it("still reports a successful leave when the host's selection callback throws",
   const onSelect = vi.fn(() => {
     throw hostError;
   });
-  render(<CommunityRail communities={h.communities} onSelect={onSelect} />);
+  render(<CommunityPicker communities={h.communities} onSelect={onSelect} />);
   const dialog = await askToLeave(user, "Primary");
   await user.click(confirmLeave(dialog));
   // The device did finish: the community is gone and the relay released it.
@@ -900,7 +900,7 @@ it("says when some saved data outlived the purge", async () => {
   const h = harness({
     leaveResidue: [{ store: "outbox", error: new Error("blocked") }],
   });
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   const dialog = await askToLeave(user, "Secondary");
   await user.click(confirmLeave(dialog));
   const notice = await screen.findByText(
@@ -923,7 +923,7 @@ it("keeps the pending leave modal and prevents another submission until the rela
         release = resolve;
       }),
   });
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   const dialog = await askToLeave(user, "Secondary");
   const confirm = confirmLeave(dialog);
   await user.click(confirm);
@@ -948,23 +948,23 @@ it("keeps the pending leave modal and prevents another submission until the rela
 it("leaving the selected community lands on Personal space, and the last one leaves only Personal space and Add", async () => {
   const user = userEvent.setup();
   const h = harness();
-  render(<CommunityRail communities={h.communities} />);
+  render(<CommunityPicker communities={h.communities} />);
   let dialog = await askToLeave(user, "Primary");
   await user.click(confirmLeave(dialog));
   await screen.findByText("Left Primary.");
   expect(h.leave).toHaveBeenCalledWith(primary, { purge: true });
   await waitFor(() => expect(switcher()).toHaveFocus());
   expect(switcher()).toHaveAccessibleName("Community switcher: Personal space");
-  // The service owns the fallback; the rail itself selected nothing.
+  // The service owns the fallback; the picker itself selected nothing.
   expect(h.select).not.toHaveBeenCalled();
 
   dialog = await askToLeave(user, "Secondary");
   await user.click(confirmLeave(dialog));
   await screen.findByText("Left Secondary.");
-  const rail = screen.getByRole("navigation", { name: "Communities" });
+  const picker = screen.getByRole("navigation", { name: "Communities" });
   await waitFor(() =>
     expect(
-      within(rail)
+      within(picker)
         .getAllByRole("button")
         .map((b) => b.getAttribute("aria-label")),
     ).toEqual(["Community switcher: Personal space"]),
@@ -997,7 +997,7 @@ it("does not discover saved community icons without a relay host", async () => {
   );
   try {
     await waitFor(() => expect(communities.snapshot().status).toBe("ready"));
-    render(<CommunityRail communities={communities} />);
+    render(<CommunityPicker communities={communities} />);
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Switch to Saved" }),
@@ -1039,7 +1039,7 @@ it("removes the Invite shortcut with its Settings contribution and restores it o
       });
   try {
     render(
-      <CommunityRail
+      <CommunityPicker
         communities={h.communities}
         onOpenTarget={h.onOpenTarget}
         settingsCards={cards}
@@ -1092,7 +1092,7 @@ it("opens a deep-link invite on Personal space without claiming until the user c
   t.update({ selected: null });
   const onInviteClose = vi.fn();
   render(
-    <CommunityRail
+    <CommunityPicker
       communities={t.communities}
       invite={{
         community: "https://invited.example",
@@ -1119,7 +1119,7 @@ it("shows only the active community until opened and routes creation through Hos
   const h = harness();
   const onOpenTarget = vi.fn();
   rtlRender(
-    <CommunityRail
+    <CommunityPicker
       communities={h.communities}
       onOpenTarget={onOpenTarget}
       settingsCards={{

@@ -18,7 +18,7 @@ import {
 } from "./departure";
 import { CommunityDialog } from "./CommunityDialog";
 import type { InviteLink } from "./invite-link";
-import { CommunityRailItem, MEMBERSHIP_SECTION } from "./CommunityRailItem";
+import { CommunityPickerItem, MEMBERSHIP_SECTION } from "./CommunityPickerItem";
 import { communityDestination } from "./destination";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import {
@@ -34,7 +34,7 @@ import { useCommunityRole } from "./useCommunityRole";
 const noSubscription = () => () => {};
 
 /** Shell navigation only: selecting a community remains owned by Communities. */
-export function CommunityRail({
+export function CommunityPicker({
   communities,
   invite,
   onInviteClose,
@@ -59,7 +59,7 @@ export function CommunityRail({
     if (wasJoining.current && !joining) triggerRef.current?.focus();
     wasJoining.current = joining;
   }, [joining]);
-  // The confirm dialog belongs to the rail so it outlives the item it removes.
+  // The confirm dialog belongs to the picker so it outlives the item it removes.
   const [leaving, setLeaving] = useState<{
     membership: Membership;
     pending: boolean;
@@ -94,7 +94,7 @@ export function CommunityRail({
   // item could use it.
   const membershipAvailable = useSyncExternalStore(
     settingsCards?.subscribe ?? noSubscription,
-    // Registration is not authorization: the rail refreshes the role on menu
+    // Registration is not authorization: the picker refreshes the role on menu
     // open even if Settings last cached a non-admin role.
     () => settingsCards?.has(MEMBERSHIP_SECTION) ?? false,
   );
@@ -199,7 +199,7 @@ export function CommunityRail({
   );
   return (
     <>
-      <nav aria-label="Communities" className={styles.rail}>
+      <nav aria-label="Communities" className={styles.picker}>
         <PopoverRoot
           open={switcherOpen}
           onOpenChange={(open) => {
@@ -278,7 +278,7 @@ export function CommunityRail({
             {client.memberships.map((membership) => {
               const selected = client.selected === membership.id;
               return (
-                <CommunityRailItem
+                <CommunityPickerItem
                   key={membership.id}
                   membership={membership}
                   icon={icons[membership.id] ?? membership.icon}
@@ -354,7 +354,7 @@ export function CommunityRail({
           description={`This sends a leave request to the community’s relay, then removes ${leaving.membership.name} from this device along with its saved drafts and reading positions. Rejoining may need a new invite.`}
           pending={leaving.pending}
           onClose={() => setLeaving(null)}
-          // The rail's own effect places focus once the dialog is gone.
+          // The picker's own effect places focus once the dialog is gone.
           finalFocus={false}
           actions={
             <>

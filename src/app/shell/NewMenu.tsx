@@ -1,7 +1,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import type { Agents } from "../../features/agents/service";
 import { CreateChannelDialog } from "../../bundled/channels/CreateChannelDialog";
-import { expandSidebarSection } from "../../bundled/channels/useSidebarView";
+import { revealCreatedChannel } from "../../features/channel-navigation/created-channel";
 import { useSidebarPreferences } from "../../bundled/channels/useSidebarPreferences";
 import type { Navigation } from "../../features/navigation/controller";
 import { useRelayConnection } from "../../features/relay/react";
@@ -18,7 +18,7 @@ import {
   MenuPopup,
   MenuItem,
 } from "../../shared/design-system/ui/Menu";
-import styles from "../../bundled/channels/Channels.module.css";
+import styles from "./NewMenu.module.css";
 import { PlusIcon } from "../../shared/design-system/icons";
 
 type Props = {
@@ -75,7 +75,7 @@ function ReadyNewMenu({
               variant="ghost"
               shape="round"
               size="sm"
-              icon={<PlusIcon className={styles.sidebarCreateIcon} size={18} />}
+              icon={<PlusIcon className={styles.createIcon} size={18} />}
             />
           }
         />
@@ -136,22 +136,7 @@ function ReadyNewMenu({
         groupsReady={preferences.writable}
         onCreate={async (input) => {
           const channelId = await session.channelCreation.create(input);
-          if (current() && scope) {
-            expandSidebarSection(
-              session.scope,
-              input.setup?.starred
-                ? "starred"
-                : input.setup?.groupId
-                  ? `group:${input.setup.groupId}`
-                  : "channels",
-            );
-            void navigator.open({
-              version: 1,
-              kind: "conversation",
-              channelId,
-              scope,
-            });
-          }
+          revealCreatedChannel(relay, session, navigator, input, channelId);
         }}
       />
       {creatingProject && (

@@ -217,9 +217,6 @@ function ConnectedApp({ services }: { services: AppServices }) {
                   meEnabled={route.pages.some(
                     (page) => page.key === "buzz.me/me",
                   )}
-                  sessionsEnabled={route.pages.some(
-                    (page) => page.pluginId === "buzz.sessions",
-                  )}
                 >
                   {pageNavigation}
                 </PrimarySidebar>

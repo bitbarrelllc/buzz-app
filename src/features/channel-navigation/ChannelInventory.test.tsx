@@ -23,14 +23,14 @@ import type { Navigation } from "../navigation/controller";
 import { createRef, type ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { ChannelHeaderMenu } from "../../bundled/channels/ChannelHeaderMenu";
-import { ChannelSidebar } from "./ChannelSidebar";
+import { PrimarySidebar } from "../../app/shell/PrimarySidebar";
 import { buzzLinkTarget } from "../navigation/buzz-links";
 import {
   ChannelNavigationProvider,
   useChannelNavigation,
 } from "./ChannelNavigationState";
 import { readView, writeView } from "../../shared/view-state";
-import styles from "../../bundled/channels/Channels.module.css";
+import styles from "../../app/shell/PrimarySidebar.module.css";
 
 const { rowRender, menuRender } = vi.hoisted(() => ({
   rowRender: vi.fn(),
@@ -114,6 +114,7 @@ function fixture(
   };
   const session = {
     ...owner.session,
+    scope: `https://relay.test:${"a".repeat(64)}`,
     ...(sidebarPreferences ? { sidebarPreferences } : {}),
     live: { ...owner.session.live, snapshot: () => live },
     channels: {
@@ -143,7 +144,7 @@ function fixture(
   const snapshot: RelaySnapshot = {
     status,
     ...(status === "ready"
-      ? { scope: "https://relay.test:viewer", viewer: "viewer" }
+      ? { scope: session.scope, viewer: "a".repeat(64) }
       : {}),
     generation: 1,
     session,
@@ -157,10 +158,11 @@ function fixture(
   } satisfies RelayData;
   const navigator = {
     open: vi.fn().mockResolvedValue({ status: "opened" }),
+    subscribe: () => () => {},
+    snapshot: () => ({ attempt: { id: "visit" } }),
   } as unknown as Navigation;
   const view = (
     id: string,
-    sessionsEnabled = true,
     pages: ReactNode = (
       <nav aria-label="Pages">
         <button type="button">Projects</button>
@@ -172,7 +174,7 @@ function fixture(
     <ToastProvider>
       <ChannelNavigationProvider relay={relay}>
         {sidebarVisible && (
-          <ChannelSidebar
+          <PrimarySidebar
             relay={relay}
             navigator={navigator}
             target={{
@@ -180,15 +182,14 @@ function fixture(
               kind: "conversation",
               channelId: id,
               scope: {
-                viewer: "viewer",
+                viewer: "a".repeat(64),
                 communityOrigin: "https://relay.test",
               },
             }}
-            sessionsEnabled={sessionsEnabled}
             meEnabled={meEnabled}
           >
             {pages}
-          </ChannelSidebar>
+          </PrimarySidebar>
         )}
       </ChannelNavigationProvider>
     </ToastProvider>
@@ -228,7 +229,7 @@ it("does not rebuild unchanged rows on channel switches or plugin toggles", asyn
   expect(alpha).toBeDefined();
   // Plugin toggles cannot restore nested-session creation.
   rowRender.mockClear();
-  mounted.rerender(h.view("beta", false));
+  mounted.rerender(h.view("beta", null));
   alpha.onNewSession("alpha");
   expect(h.navigator.open).not.toHaveBeenCalled();
   // Ordinary selection still uses the current session and navigator.
@@ -448,7 +449,7 @@ it.each(["ready", "connecting"] as const)(
   "omits the page destinations wrapper when the shell passes none while %s",
   (status) => {
     const h = fixture(undefined, status);
-    const { container } = render(h.view("alpha", true, null));
+    const { container } = render(h.view("alpha", null));
     expect(screen.queryByRole("navigation", { name: "Pages" })).toBeNull();
     expect(container.querySelector(`.${styles.destinations}`)).toBeNull();
     expect(screen.queryByRole("img", { name: "Buzz" })).not.toBeInTheDocument();
@@ -580,7 +581,6 @@ it("rejects a deferred header Create section after its navigation origin retires
   render(
     h.view(
       "alpha",
-      true,
       <ChannelHeaderMenu
         channel={h.list.channels[0]}
         session={h.session}
@@ -716,7 +716,9 @@ it.each([true, false])(
   async (enabled) => {
     const h = fixture();
     h.publish("beta", { channelType: "session", parentChannelId: "alpha" });
-    render(h.view("alpha", enabled));
+    render(
+      h.view("alpha", enabled ? <button type="button">Sessions</button> : null),
+    );
     await screen.findByRole("button", { name: "gamma" });
     expect(
       screen.queryByRole("button", { name: /sessions in alpha/ }),
@@ -812,7 +814,6 @@ it.each(["archive", "delete"] as const)(
     render(
       h.view(
         "beta",
-        true,
         <>
           <StartAction />
           <button type="button">Other control</button>
@@ -887,7 +888,7 @@ function pendingLifecycle(action: "archive" | "delete" | "leave" | "hide") {
     );
   }
   const view = (target = "beta", visible = true) =>
-    h.view(target, true, <Start />, visible);
+    h.view(target, <Start />, visible);
   const mounted = render(view());
   return {
     ...h,
@@ -1048,7 +1049,9 @@ it.each([true, false])(
       snapshot: () => placement,
     };
     h.publish("beta", { channelType: "session", private: true });
-    render(h.view("alpha", true, undefined, true, enabled));
+    render(h.view("alpha", undefined, true, enabled));
+    if (enabled)
+      await userEvent.click(screen.getByRole("tab", { name: "Team" }));
     await screen.findByRole("button", { name: "gamma" });
     expect(!!screen.queryByRole("button", { name: "beta" })).toBe(!enabled);
     h.publish("beta", { channelType: "stream" });

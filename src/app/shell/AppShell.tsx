@@ -16,11 +16,11 @@ import type { AccountActionsService } from "../../features/account-actions/servi
 import type { Communities } from "../../features/communities/service";
 import type { InviteLink } from "../../features/communities/invite-link";
 import type { OpenTarget } from "../../features/navigation/targets";
-import { CommunityRail } from "../../features/communities/CommunityRail";
+import { CommunityPicker } from "../../features/communities/CommunityPicker";
 import { ProfileButton } from "./ProfileButton";
 import type { Appearance } from "../../shared/theme/service";
 import { PageSearch, type SearchServices } from "./PageSearch";
-import { headerPageSelection, isGlobalPage, orderPages } from "./presentation";
+import { headerPageSelection, pagePlacement, orderPages } from "./presentation";
 import { PageNavigation } from "./PageNavigation";
 import type { NavigationOpenOptions } from "../../features/navigation/controller";
 import {
@@ -128,12 +128,7 @@ export function AppShell({
   // sidebar subtree instead of re-rendering every row on each click.
   const navigation = useMemo(() => {
     const sidebarPages = orderPages(
-      pages.filter(
-        (page) =>
-          page.primary &&
-          !isGlobalPage(page.key) &&
-          (page.placement === undefined || page.placement === "sidebar"),
-      ),
+      pages.filter((page) => pagePlacement(page) === "sidebar"),
     );
     const pageNavigation = sidebarPages.length ? (
       <nav aria-label="Pages" className="shell-pages">
@@ -159,27 +154,22 @@ export function AppShell({
       orderPages(
         pages.filter(
           (page) =>
-            page.primary &&
-            page.key !== "buzz.me/me" &&
-            (isGlobalPage(page.key) ||
-              page.placement === "topbar" ||
-              page.placement === "toolbar"),
+            pagePlacement(page) === "topbar" ||
+            pagePlacement(page) === "toolbar",
         ),
       ),
     [pages],
   );
   const topbarPages = headerPages.filter(
-    (page) => isGlobalPage(page.key) || page.placement === "topbar",
+    (page) => pagePlacement(page) === "topbar",
   );
-  const selectedHeader = isGlobalPage(selected)
-    ? selected
-    : headerPageSelection(pages, selected);
+  const selectedHeader = headerPageSelection(pages, selected);
   const selectedTopbarPage = topbarPages.some(
     (page) => page.key === selectedHeader,
   );
   const panelKey = selectedTopbarPage ? selectedHeader : selected;
   const toolbarPages = headerPages.filter(
-    (page) => !isGlobalPage(page.key) && page.placement === "toolbar",
+    (page) => pagePlacement(page) === "toolbar",
   );
   const headerRef = useRef<HTMLElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
@@ -289,7 +279,7 @@ export function AppShell({
       >
         <div
           ref={historyRef}
-          className="shell-communities"
+          className="shell-history"
           data-tauri-drag-region={macDesktop ? undefined : true}
           {...titleBarDragProps}
         >
@@ -421,7 +411,7 @@ export function AppShell({
           <div ref={actionsRef} className="shell-actions-fixed">
             {launchers}
             <div className="shell-community-switcher">
-              <CommunityRail
+              <CommunityPicker
                 communities={communities}
                 invite={invite}
                 onInviteClose={onInviteClose}

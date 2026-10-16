@@ -276,7 +276,7 @@ test("header pages remain reachable without overlap through scale and resize", a
       const rect = (selector) =>
         header.querySelector(selector).getBoundingClientRect();
       return {
-        left: rect(".shell-communities").right,
+        left: rect(".shell-history").right,
         center: rect(".shell-topbar-pages").toJSON(),
         create: rect(".shell-create-action").toJSON(),
         search: rect(".shell-search-action").toJSON(),

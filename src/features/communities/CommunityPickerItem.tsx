@@ -47,8 +47,8 @@ export type SelectedSession = {
 
 const noSubscription = () => () => {};
 
-/** One rail button and its context menu. Selection stays with the rail. */
-export function CommunityRailItem({
+/** One picker row and its context menu. Selection stays with the picker. */
+export function CommunityPickerItem({
   membership,
   icon,
   selected,
@@ -74,10 +74,10 @@ export function CommunityRailItem({
   onSelect: (id: string) => void;
   onOpenTarget?: ((target: OpenTarget) => void) | undefined;
   onMenuOpen?: (() => void) | undefined;
-  /** Asks the rail to confirm and run a leave; the rail owns the dialog. */
+  /** Asks the picker to confirm and run a leave; the picker owns the dialog. */
   onLeave: (membership: Membership) => void;
 }) {
-  // A keyboard open anchors to the rail item; a pointer open leaves the anchor
+  // A keyboard open anchors to the picker item; a pointer open leaves the anchor
   // to Base UI's cursor point.
   const [menu, setMenu] = useState<{
     anchor: HTMLElement | undefined;
@@ -90,7 +90,7 @@ export function CommunityRailItem({
   useEffect(() => {
     if (menu) fromKeyboard.current = menu.anchor !== undefined;
   }, [menu]);
-  // Browsers focus the rail button on a right-click's mousedown, before the
+  // Browsers focus the picker row on a right-click's mousedown, before the
   // contextmenu event opens the menu, so Base UI's own "previous focus" is
   // the button rather than the field the pointer interrupted. Remember that
   // field at pointerdown, ahead of the focus move.
@@ -179,11 +179,11 @@ export function CommunityRailItem({
               ? main
               : false;
           }
-          // A keyboard open came from the rail, so focus goes back there.
+          // A keyboard open came from the picker, so focus goes back there.
           if (fromKeyboard.current) return button.current ?? false;
           // A pointer open may have interrupted typing elsewhere; that field
           // takes focus back while it is still in the document. With nothing
-          // interrupted, Base UI's default lands on the rail button the
+          // interrupted, Base UI's default lands on the picker row the
           // right-click focused.
           const field = interrupted.current;
           return field?.isConnected ? field : true;
