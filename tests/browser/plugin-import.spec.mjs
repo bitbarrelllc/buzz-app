@@ -467,7 +467,7 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
     "Review plugin access",
   );
   await expect(page.getByRole("dialog")).toHaveAccessibleDescription(
-    "Only install code you trust. Plugins aren’t sandboxed.",
+    "Review what this plugin asks Buzz to do.",
   );
   await expect(
     page.getByRole("region", { name: "Skipped folders" }),
@@ -755,17 +755,22 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
     dialog.getByRole("region", { name: "Skipped folders" }),
   ).toHaveCount(0);
   const access = dialog.getByRole("region", { name: "Computer access" });
-  await expect(access.getByText("Run python3 on your computer.")).toBeVisible();
+  await expect(access.getByText("Run python3")).toBeVisible();
   const summaryList = access
     .getByRole("list")
-    .filter({ hasText: "Run python3 on your computer." });
-  await expect(summaryList).toHaveCSS("list-style-type", "disc");
+    .filter({ hasText: "Run python3" });
+  await expect(
+    access.getByRole("region", { name: "Plugin safety" }),
+  ).toContainText("Plugins aren’t sandboxed");
+  await expect(
+    access.getByText(/Viewing them grants no access and runs nothing/),
+  ).toBeVisible();
   await expect(summaryList.getByRole("listitem")).toHaveCount(2);
-  await expect(summaryList).toContainText(
-    "Make web requests to https://api.example.com.",
-  );
+  await expect(summaryList).toContainText("Connect to https://api.example.com");
   await expect(access.getByText(/^Command status:/)).toHaveCount(0);
-  const details = access.getByRole("button", { name: "Technical details" });
+  const details = access.getByRole("button", {
+    name: "View exact access declarations",
+  });
   await details.focus();
   await details.press("Enter");
   await expect(access.getByText(/^Command status:/)).toContainText(

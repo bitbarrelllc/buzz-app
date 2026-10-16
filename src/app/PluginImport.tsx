@@ -9,7 +9,13 @@ import { readPluginFolder } from "./plugin-folder-drop";
 import styles from "./PluginImport.module.css";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FolderOpenIcon } from "../shared/design-system/icons/index";
+import {
+  FolderOpenIcon,
+  GlobeIcon,
+  PlugIcon,
+  TerminalWindowIcon,
+  WarningCircleIcon,
+} from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
 import type { Catalog, ImportPreview } from "../plugins/types";
 import type { PluginManifest } from "../plugins/api";
@@ -239,7 +245,7 @@ export function PluginImport({
             ? undefined
             : preview
               ? reviewing
-                ? "Only install code you trust. Plugins aren’t sandboxed."
+                ? "Review what this plugin asks Buzz to do."
                 : preview.candidates.length
                   ? "Select a plugin to review before installing."
                   : "Try another folder or repository."
@@ -515,43 +521,119 @@ export function PluginImport({
                     aria-label="Computer access"
                     className="text-body-sm"
                   >
+                    <section
+                      aria-label="Plugin safety"
+                      className="mb-4 border-l-2 border-warning pl-3"
+                    >
+                      <p className="m-0 flex items-center gap-2 font-medium text-warning">
+                        <WarningCircleIcon size={20} aria-hidden="true" />
+                        Plugins aren’t sandboxed
+                      </p>
+                      <p className="mb-0 mt-1">
+                        This list does not limit everything the plugin can
+                        access. Only install code you trust.
+                      </p>
+                    </section>
                     <p className="m-0 font-medium">Computer access</p>
                     {declaredGrants.length ? (
                       <>
                         <p className="m-0">This plugin asks Buzz to:</p>
-                        <ul className="my-2 list-disc space-y-1 break-words pl-4">
+                        <ul
+                          // biome-ignore lint/a11y/noRedundantRoles: Preserve WebKit list semantics when icons replace markers.
+                          role="list"
+                          className="my-3 list-none space-y-3 break-words p-0"
+                        >
                           {candidate.manifest.host?.commands?.map((command) => (
-                            <li key={command.id}>
-                              Run {command.program} on your computer.
+                            <li
+                              key={command.id}
+                              className="flex items-start gap-3"
+                            >
+                              <TerminalWindowIcon
+                                size={20}
+                                aria-hidden="true"
+                                className="shrink-0 text-muted"
+                              />
+                              <div className="min-w-0">
+                                <p className="m-0 font-medium">
+                                  Run {command.program}
+                                </p>
+                                <p className="m-0 text-muted">
+                                  Buzz can run this program on your computer
+                                  with the plugin’s configured arguments.
+                                </p>
+                              </div>
                             </li>
                           ))}
                           {candidate.manifest.host?.processes?.map(
                             (process) => (
-                              <li key={process.id}>
-                                Start {process.program} with additional
-                                arguments, using your account’s full access.
+                              <li
+                                key={process.id}
+                                className="flex items-start gap-3"
+                              >
+                                <TerminalWindowIcon
+                                  size={20}
+                                  aria-hidden="true"
+                                  className="shrink-0 text-muted"
+                                />
+                                <div className="min-w-0">
+                                  <p className="m-0 font-medium">
+                                    Start {process.program}
+                                  </p>
+                                  <p className="m-0 text-muted">
+                                    Can start a background process with
+                                    additional arguments, using your account’s
+                                    full access.
+                                  </p>
+                                </div>
                               </li>
                             ),
                           )}
                           {candidate.manifest.host?.networkOrigins?.map(
                             (origin) => (
-                              <li key={origin}>
-                                Make web requests to {origin}.
+                              <li
+                                key={origin}
+                                className="flex items-start gap-3"
+                              >
+                                <GlobeIcon
+                                  size={20}
+                                  aria-hidden="true"
+                                  className="shrink-0 text-muted"
+                                />
+                                <div className="min-w-0">
+                                  <p className="m-0 font-medium">
+                                    Connect to {origin}
+                                  </p>
+                                  <p className="m-0 text-muted">
+                                    Buzz can make HTTPS requests to this address
+                                    for the plugin.
+                                  </p>
+                                </div>
                               </li>
                             ),
                           )}
                           {candidate.manifest.host?.mcp && (
-                            <li>Provide tools to local agents.</li>
+                            <li className="flex items-start gap-3">
+                              <PlugIcon
+                                size={20}
+                                aria-hidden="true"
+                                className="shrink-0 text-muted"
+                              />
+                              <div className="min-w-0">
+                                <p className="m-0 font-medium">
+                                  Provide tools to local agents
+                                </p>
+                                <p className="m-0 text-muted">
+                                  Exposes plugin tools through Buzz’s local MCP
+                                  server.
+                                </p>
+                              </div>
+                            </li>
                           )}
                         </ul>
                       </>
                     ) : (
                       <p className="m-0">No computer access declared.</p>
                     )}
-                    <p className="m-0 text-caption text-muted">
-                      Plugins aren’t sandboxed. This list doesn’t describe
-                      everything they may access.
-                    </p>
                     {existing &&
                       (declaredGrants.some(
                         (grant) => !previousGrants.includes(grant),
@@ -561,58 +643,66 @@ export function PluginImport({
                         )) && (
                         <p className="m-0">
                           Computer access changes with this update. Review the
-                          technical details below.
+                          exact declarations below.
                         </p>
                       )}
                     {(declaredGrants.length > 0 ||
                       previousGrants.length > 0) && (
-                      <Accordion
-                        key={selected}
-                        items={[
-                          {
-                            value: "host-access",
-                            title: "Technical details",
-                            content: (
-                              <section
-                                aria-label="Plugin technical details"
-                                // biome-ignore lint/a11y/noNoninteractiveTabindex: Scroll owner supports keyboard access to long command details.
-                                tabIndex={0}
-                                className={styles.technicalDetails}
-                              >
-                                {declaredGrants.length > 0 && (
-                                  <ul className="m-0 break-all">
-                                    {declaredGrants.map((grant) => (
-                                      <li key={grant}>
-                                        <code>{grant}</code>
-                                        {existing &&
-                                        !previousGrants.includes(grant)
-                                          ? " (new or changed)"
-                                          : ""}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                                {existing &&
-                                  previousGrants.filter(
-                                    (grant) => !declaredGrants.includes(grant),
-                                  ).length > 0 && (
-                                    <p className="m-0 break-all">
-                                      Removed:{" "}
-                                      <code>
-                                        {previousGrants
-                                          .filter(
-                                            (grant) =>
-                                              !declaredGrants.includes(grant),
-                                          )
-                                          .join(", ")}
-                                      </code>
-                                    </p>
+                      <>
+                        <p className="mb-1 mt-4 text-caption text-muted">
+                          Inspect exact commands, arguments, network addresses
+                          and limits. Viewing them grants no access and runs
+                          nothing.
+                        </p>
+                        <Accordion
+                          key={selected}
+                          items={[
+                            {
+                              value: "host-access",
+                              title: "View exact access declarations",
+                              content: (
+                                <section
+                                  aria-label="Plugin technical details"
+                                  // biome-ignore lint/a11y/noNoninteractiveTabindex: Scroll owner supports keyboard access to long command details.
+                                  tabIndex={0}
+                                  className={styles.technicalDetails}
+                                >
+                                  {declaredGrants.length > 0 && (
+                                    <ul className="m-0 break-all">
+                                      {declaredGrants.map((grant) => (
+                                        <li key={grant}>
+                                          <code>{grant}</code>
+                                          {existing &&
+                                          !previousGrants.includes(grant)
+                                            ? " (new or changed)"
+                                            : ""}
+                                        </li>
+                                      ))}
+                                    </ul>
                                   )}
-                              </section>
-                            ),
-                          },
-                        ]}
-                      />
+                                  {existing &&
+                                    previousGrants.filter(
+                                      (grant) =>
+                                        !declaredGrants.includes(grant),
+                                    ).length > 0 && (
+                                      <p className="m-0 break-all">
+                                        Removed:{" "}
+                                        <code>
+                                          {previousGrants
+                                            .filter(
+                                              (grant) =>
+                                                !declaredGrants.includes(grant),
+                                            )
+                                            .join(", ")}
+                                        </code>
+                                      </p>
+                                    )}
+                                </section>
+                              ),
+                            },
+                          ]}
+                        />
+                      </>
                     )}
                   </section>
                 )}

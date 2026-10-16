@@ -219,14 +219,17 @@ it("shows exact declared access and changes before an enabled update", async () 
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   fireEvent.click(screen.getByRole("button", { name: "Browse plugin folder" }));
   await screen.findByRole("region", { name: "Computer access" });
-  expect(screen.getByText("Run example-cli on your computer.")).toBeVisible();
+  expect(screen.getByText("Run example-cli")).toBeVisible();
+  expect(screen.getByText("Start example-worker")).toBeVisible();
+  expect(screen.getByText("Provide tools to local agents")).toBeVisible();
   expect(
-    screen.getByText(/Start example-worker with additional arguments/),
-  ).toBeVisible();
-  expect(screen.getByText("Provide tools to local agents.")).toBeVisible();
-  expect(
-    screen.getByText(/This list doesn’t describe everything/),
-  ).toBeVisible();
+    screen.getByRole("region", { name: "Plugin safety" }),
+  ).toHaveTextContent("Plugins aren’t sandboxed");
+  expect(screen.getByText(/plugin’s configured arguments/)).toBeVisible();
+  expect(screen.getByText(/account’s full access/)).toBeVisible();
+  expect(screen.getByText(/HTTPS requests to this address/)).toBeVisible();
+  expect(screen.getByText(/Buzz’s local MCP server/)).toBeVisible();
+  expect(screen.getByText(/This list does not limit everything/)).toBeVisible();
   expect(
     screen.getByText(/Computer access changes with this update/),
   ).toBeVisible();
@@ -235,7 +238,9 @@ it("shows exact declared access and changes before an enabled update", async () 
     "data-variant",
     "prominent",
   );
-  fireEvent.click(screen.getByRole("button", { name: "Technical details" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "View exact access declarations" }),
+  );
   const command = screen
     .getByText(/^Command check:/, { selector: "li code" })
     .closest("li");
@@ -532,7 +537,9 @@ it.each([
     const access = within(
       await screen.findByRole("region", { name: "Computer access" }),
     );
-    fireEvent.click(access.getByRole("button", { name: "Technical details" }));
+    fireEvent.click(
+      access.getByRole("button", { name: "View exact access declarations" }),
+    );
     const grant = access
       .getByText(/^Command /, { selector: "li code" })
       .closest("li");
