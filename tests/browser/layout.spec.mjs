@@ -59,7 +59,7 @@ const companionLauncher = (page, name) =>
 const destinationTitles = ["Inbox", "Bestie"];
 const sidebarDestinations = (page, options = {}) =>
   page
-    .getByRole("complementary", { name: "Channel sidebar", ...options })
+    .getByRole("complementary", { name: "Sidebar", exact: true, ...options })
     .getByRole("navigation", { name: "Pages", ...options })
     .getByRole("button", options);
 const companionReadingTest = readingTest.extend({ companionFixture: true });
@@ -154,7 +154,7 @@ async function shellFits(page, width) {
   else await expect(destinations).toHaveText(destinationTitles);
   const sidebar = await box(
     page.getByRole("complementary", {
-      name: inSettings ? "Settings sidebar" : "Channel sidebar",
+      name: inSettings ? "Settings sidebar" : "Sidebar",
     }),
   );
   const first = await box(destinations.first());
@@ -254,7 +254,7 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
   await open(page, app);
   await shellFits(page, 1280);
   const sidebar = await box(
-    page.getByRole("complementary", { name: "Channel sidebar" }),
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
   );
   const conversation = page.getByRole("article", {
     name: "Conversation",
@@ -270,7 +270,8 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
     "rgba(0, 0, 0, 0)",
   );
   const navigation = page.getByRole("complementary", {
-    name: "Channel sidebar",
+    name: "Sidebar",
+    exact: true,
   });
   await expect(navigation).toHaveCSS("background-color", "rgb(255, 255, 255)");
   await expect(navigation).toHaveCSS("border-radius", "16px");
@@ -520,7 +521,7 @@ test("narrow link panels begin after the rendered sidebar", async ({
   await link(page, app, "https://github.com/block/buzz/pull/7");
 
   const sidebar = await box(
-    page.getByRole("complementary", { name: "Channel sidebar" }),
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
   );
   const conversation = await box(
     page.getByRole("article", { name: "Conversation", exact: true }),

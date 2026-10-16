@@ -29,7 +29,7 @@ test("Settings replaces the channel sidenav and Back restores the prior view", a
     page.getByRole("heading", { name: "Settings", level: 1, exact: true }),
   ).toHaveCount(1);
   await expect(
-    page.getByRole("complementary", { name: "Channel sidebar" }),
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
   ).toHaveCount(0);
   await expect(communityRail).toBeVisible();
 
@@ -50,7 +50,7 @@ test("Settings replaces the channel sidenav and Back restores the prior view", a
     page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("complementary", { name: "Channel sidebar" }),
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
   ).toBeVisible();
   await expect(settingsSidebar).toHaveCount(0);
   await expect(communityRail).toBeVisible();
@@ -135,7 +135,8 @@ test("short narrow Settings keeps plugin copy and controls reachable at 200% int
     page.getByRole("region", { name: "Channels", exact: true }),
   ).toBeVisible();
   const channelsSidebar = page.getByRole("complementary", {
-    name: "Channel sidebar",
+    name: "Sidebar",
+    exact: true,
   });
   await expect(channelsSidebar).toBeHidden();
   await showNavigation.click();

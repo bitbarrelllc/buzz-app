@@ -158,7 +158,7 @@ it.each(["disconnected", "connecting", "error"] as const)(
         target={meTarget(scope)}
       />,
     );
-    const sidebar = screen.getByRole("region", { name: "Solo sidebar" });
+    const sidebar = screen.getByRole("region", { name: "Solo" });
     expect(
       within(sidebar).queryByRole("img", { name: "Berd" }),
     ).not.toBeInTheDocument();

@@ -183,7 +183,7 @@ export function fixture(combined = false, canCreate = false, agents?: Agents) {
               relay={relay}
               navigator={navigator}
               agents={agents}
-              meEnabled
+              meEnabled={meEnabled}
             />
             {sidebarVisible && (
               <PrimarySidebar

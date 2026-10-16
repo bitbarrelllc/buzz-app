@@ -296,7 +296,7 @@ test("dragging a channel between a group and Channels saves, reloads, and rolls 
   await expect(beta).toBeVisible();
   // Like the Move menu, dragging waits for the confirmed preference read.
   await expect(
-    page.getByRole("complementary", { name: "Channel sidebar" }),
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
   ).not.toHaveAttribute("aria-busy");
 
   // Dropping back on the row's own section is not a move.
@@ -390,7 +390,7 @@ test("dragging keeps empty Starred hidden and visible Starred moves save and rel
   await page.reload();
   await expect(starred).toBeVisible();
   await expect(
-    page.getByRole("complementary", { name: "Channel sidebar" }),
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
   ).not.toHaveAttribute("aria-busy");
   await pull(page, starred, "starred");
   await expect(page.locator("[data-channel-dragging]")).toBeVisible();

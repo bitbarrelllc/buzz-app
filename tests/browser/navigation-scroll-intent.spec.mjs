@@ -83,7 +83,8 @@ for (const cachedStartup of [false, true]) {
           .toBeGreaterThan(100);
         await expect.poll(() => pendingRoutes.length).toBeGreaterThan(0);
         const panel = page.getByRole("complementary", {
-          name: "Channel sidebar",
+          name: "Sidebar",
+          exact: true,
         });
         await expect(panel).toHaveAttribute("aria-busy", "true");
         await expect(

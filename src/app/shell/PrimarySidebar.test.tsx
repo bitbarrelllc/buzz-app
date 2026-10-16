@@ -174,13 +174,18 @@ it("retains scope across Settings remounts and reveals navigation outside the fi
   );
 });
 
-it("omits the scope switcher when Solo is disabled", () => {
+it("omits the scope switcher and Solo creation when Solo is disabled", async () => {
+  const user = userEvent.setup();
   const f = fixture(true);
   f.meEnabled(false);
   expect(
     screen.queryByRole("tablist", { name: "Navigation scope" }),
   ).not.toBeInTheDocument();
   expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "New" }));
+  expect(
+    (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
+  ).toEqual(["New DM", "New channel"]);
 });
 
 it.each([

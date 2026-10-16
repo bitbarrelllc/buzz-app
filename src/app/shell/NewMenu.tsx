@@ -80,24 +80,25 @@ function ReadyNewMenu({
           }
         />
         <MenuPopup>
-          <MenuItem
-            disabled={!meEnabled}
-            onClick={() => {
-              if (current()) void navigator.open(meTarget(session.scope));
-            }}
-          >
-            New chat
-          </MenuItem>
-          <MenuItem
-            disabled={
-              !meEnabled || !session.mePreferences.sectionCreationWritable
-            }
-            onClick={() => {
-              if (current()) setCreatingProject(true);
-            }}
-          >
-            New project
-          </MenuItem>
+          {meEnabled && (
+            <>
+              <MenuItem
+                onClick={() => {
+                  if (current()) void navigator.open(meTarget(session.scope));
+                }}
+              >
+                New chat
+              </MenuItem>
+              <MenuItem
+                disabled={!session.mePreferences.sectionCreationWritable}
+                onClick={() => {
+                  if (current()) setCreatingProject(true);
+                }}
+              >
+                New project
+              </MenuItem>
+            </>
+          )}
           <MenuItem
             disabled={!scope}
             onClick={() => {
