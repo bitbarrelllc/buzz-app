@@ -15,7 +15,7 @@ import { SidebarSection } from "./SidebarSection";
 
 afterEach(cleanup);
 
-it("chooses a filter with the keyboard and lists all channels independently of visible children", async () => {
+it("chooses a filter with the keyboard and appends hidden channels below its options", async () => {
   const user = userEvent.setup();
   const change = vi.fn();
   const select = vi.fn();
@@ -40,8 +40,8 @@ it("chooses a filter with the keyboard and lists all channels independently of v
     within(
       await screen.findByRole("menu", { name: "More actions for Channels" }),
     ).getAllByRole("menuitem")[0],
-  ).toHaveTextContent("View All");
-  await user.keyboard("{ArrowDown}{ArrowDown}{ArrowRight}");
+  ).toHaveTextContent("Filter");
+  await user.keyboard("{ArrowDown}{ArrowRight}");
   expect(
     await screen.findByRole("menuitemradio", { name: "Unreads" }),
   ).toHaveAttribute("aria-checked", "true");
@@ -51,11 +51,18 @@ it("chooses a filter with the keyboard and lists all channels independently of v
   expect(change).toHaveBeenCalledExactlyOnceWith("active");
   await waitFor(() => expect(trigger).toHaveFocus());
   await user.click(trigger);
-  await user.click(await screen.findByRole("menuitem", { name: "View All" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
+  const quiet = await screen.findByRole("menuitem", { name: "Quiet channel" });
+  const popup = quiet.closest('[role="menu"]');
+  expect(popup?.querySelectorAll('[role^="menuitem"]')).toHaveLength(4);
+  expect(popup?.querySelector('[role="separator"]')).toBeInTheDocument();
+  expect(
+    screen
+      .getByRole("menuitemradio", { name: "Active in last 30 days" })
+      .compareDocumentPosition(quiet) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   // jsdom has no submenu geometry; browser checks own pointer travel/focus.
-  fireEvent.click(
-    await screen.findByRole("menuitem", { name: "Quiet channel" }),
-  );
+  fireEvent.click(quiet);
   expect(select).toHaveBeenCalledExactlyOnceWith("quiet");
   expect(toggle).toHaveBeenCalledExactlyOnceWith(true);
   expect(change).toHaveBeenCalledOnce();
@@ -432,4 +439,34 @@ it("never offers moves without a move capability", async () => {
   await screen.findByRole("menu", { name: "More actions for Channels" });
   expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
   expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
+});
+
+it("keeps hidden-channel navigation available when filter choices are read-only", async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  const select = vi.fn();
+  render(
+    <SidebarSection
+      sectionKey="channels"
+      title="Channels"
+      open
+      onToggle={() => {}}
+      filter={{ value: "unreads", disabled: true, change }}
+      channels={{ rows: [{ id: "quiet", name: "Quiet channel" }], select }}
+    >
+      <p>No channels match this filter.</p>
+    </SidebarSection>,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "More actions for Channels" }),
+  );
+  expect(screen.queryByRole("menuitem", { name: "View All" })).toBeNull();
+  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
+  for (const choice of await screen.findAllByRole("menuitemradio"))
+    expect(choice).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Quiet channel" }),
+  );
+  expect(select).toHaveBeenCalledExactlyOnceWith("quiet");
+  expect(change).not.toHaveBeenCalled();
 });

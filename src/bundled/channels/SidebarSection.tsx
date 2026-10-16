@@ -28,7 +28,6 @@ import {
   ChatsCircleIcon,
   ChatUnreadIcon,
   DotsThreeIcon,
-  EyeIcon,
   PlusIcon,
   SlidersHorizontalIcon,
   TextAaIcon,
@@ -214,55 +213,9 @@ export function SidebarSection({
               )}
             />
             <MenuPopup align="end" aria-label={`More actions for ${title}`}>
-              {channels && filter && filter.value !== "all" && (
-                <>
-                  <MenuSubmenu>
-                    <MenuSubmenuTrigger disabled={!channels.rows.length}>
-                      <MenuIcon>
-                        <EyeIcon size={14} />
-                      </MenuIcon>
-                      View All
-                    </MenuSubmenuTrigger>
-                    <MenuSubmenuPopup
-                      aria-label={`Hidden channels in ${title}`}
-                      finalFocus={false}
-                    >
-                      {channels.rows.map((channel) => {
-                        const select = () => {
-                          onToggle(true);
-                          channels.select(channel.id);
-                          setMenuOpen(false);
-                        };
-                        return session ? (
-                          <ChannelSidebarMenuItem
-                            key={channel.id}
-                            channel={channel}
-                            session={session}
-                            selected={channels.selected === channel.id}
-                            onSelect={select}
-                          />
-                        ) : (
-                          <MenuItem
-                            key={channel.id}
-                            aria-current={
-                              channels.selected === channel.id
-                                ? "page"
-                                : undefined
-                            }
-                            onClick={select}
-                          >
-                            {channel.name}
-                          </MenuItem>
-                        );
-                      })}
-                    </MenuSubmenuPopup>
-                  </MenuSubmenu>
-                  <MenuSeparator />
-                </>
-              )}
               {filter && (
                 <MenuSubmenu>
-                  <MenuSubmenuTrigger disabled={filter.disabled}>
+                  <MenuSubmenuTrigger>
                     <MenuIcon>
                       <SlidersHorizontalIcon size={14} />
                     </MenuIcon>
@@ -279,25 +232,72 @@ export function SidebarSection({
                         setMenuOpen(false);
                       }}
                     >
-                      <MenuRadioItem closeOnClick={false} value="all">
+                      <MenuRadioItem
+                        disabled={filter.disabled}
+                        closeOnClick={false}
+                        value="all"
+                      >
                         <MenuIcon>
                           <ChatsCircleIcon size={14} />
                         </MenuIcon>
                         All
                       </MenuRadioItem>
-                      <MenuRadioItem closeOnClick={false} value="unreads">
+                      <MenuRadioItem
+                        disabled={filter.disabled}
+                        closeOnClick={false}
+                        value="unreads"
+                      >
                         <MenuIcon>
                           <ChatUnreadIcon size={14} />
                         </MenuIcon>
                         Unreads
                       </MenuRadioItem>
-                      <MenuRadioItem closeOnClick={false} value="active">
+                      <MenuRadioItem
+                        disabled={filter.disabled}
+                        closeOnClick={false}
+                        value="active"
+                      >
                         <MenuIcon>
                           <TimerIcon size={14} />
                         </MenuIcon>
                         Active in last 30 days
                       </MenuRadioItem>
                     </MenuRadioGroup>
+                    {channels &&
+                      filter.value !== "all" &&
+                      channels.rows.length > 0 && (
+                        <>
+                          <MenuSeparator />
+                          {channels.rows.map((channel) => {
+                            const select = () => {
+                              onToggle(true);
+                              channels.select(channel.id);
+                              setMenuOpen(false);
+                            };
+                            return session ? (
+                              <ChannelSidebarMenuItem
+                                key={channel.id}
+                                channel={channel}
+                                session={session}
+                                selected={channels.selected === channel.id}
+                                onSelect={select}
+                              />
+                            ) : (
+                              <MenuItem
+                                key={channel.id}
+                                aria-current={
+                                  channels.selected === channel.id
+                                    ? "page"
+                                    : undefined
+                                }
+                                onClick={select}
+                              >
+                                {channel.name}
+                              </MenuItem>
+                            );
+                          })}
+                        </>
+                      )}
                   </MenuSubmenuPopup>
                 </MenuSubmenu>
               )}

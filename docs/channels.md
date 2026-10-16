@@ -181,13 +181,14 @@ activity within the last 30 days. These filters are encrypted account preference
 separate kind-30078 `channel-filter` record. They leave saved sorting and section
 membership unchanged; earlier device-only filter choices are ignored, not automatically published.
 The currently open channel remains visible in its section regardless of its filter,
-however it was opened. Navigating away removes that exception. **View All**
-appears first in the section menu only when Unreads or Active in last 30 days is selected. It
-lists only eligible channels not currently visible in the section, in its existing order; choosing one opens
+however it was opened. Navigating away removes that exception. When a filter hides
+channels, the **Filter** submenu appends those eligible channels below its three
+options and a separator, in the existing section order; choosing one opens
 the section and channel without changing the filter. Choices reuse the sidebar's
 channel-type icons, unread emphasis, attention/thread dots and working-agent
 indicators. The temporarily visible open channel is excluded. Empty filtered sections retain
-their header and menu so the filter can be changed or a hidden row opened. The saved-groups
+their header and menu so the filter can be changed or a hidden row opened.
+Read-only hosts disable the filter choices while keeping hidden-channel navigation available. The saved-groups
 browser regression records every visible return frame and holds the redundant
 decode path, so eventual restoration cannot conceal a fallback-group/scroll jump.
 

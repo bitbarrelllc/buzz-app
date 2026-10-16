@@ -240,7 +240,7 @@ it("uses relay section filters across navigation and remount, and offers only hi
   await user.click(
     screen.getByRole("button", { name: "More actions for Channels" }),
   );
-  await user.click(await screen.findByRole("menuitem", { name: "View All" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
   const betaChoice = await screen.findByRole("menuitem", { name: "beta" });
   const choices = betaChoice.closest('[role="menu"]');
   assert(choices instanceof HTMLElement);
