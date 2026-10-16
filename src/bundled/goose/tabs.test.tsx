@@ -49,7 +49,7 @@ const PROVIDERS = [
     defaultModel: "claude-sonnet-5-5",
     visibleInSetup: true,
     configKeys: [{ name: "ANTHROPIC_API_KEY", required: true, secret: true }],
-    models: [{ id: "claude-opus-5-5", name: "Claude Opus 5.5" }],
+    models: [{ id: "claude-opus-5-5", name: "claude-opus-5-5" }],
   },
   {
     providerId: "databricks",
@@ -78,6 +78,12 @@ function created(
     defaults: { providerId: "databricks", modelId: "goose-claude" },
     saved,
     reply: options.reply ?? "OK",
+    thinking: {
+      "claude-opus-5-5": {
+        current: "medium",
+        levels: ["low", "medium", "high"],
+      },
+    },
   });
   const { Create, CreateModel } = createTabs({
     setup: options.spawn?.(fake) ?? new GooseSetup(fake.spawn),
@@ -118,23 +124,21 @@ async function choose(label: string, option: string) {
 }
 
 /** The model field, labeled with goose's default or the agent's choice. */
-const modelButton = () =>
-  screen.getByRole("button", { name: /goose default|Anthropic/ });
+const modelButton = () => screen.getByRole("button", { name: "Goose model" });
 
 /** Opens the provider dialog from the model field. */
 async function openChoices() {
   await userEvent.setup().click(modelButton());
-  return screen.findByRole("dialog", { name: "Provider and model" });
+  await userEvent
+    .setup()
+    .click(await screen.findByRole("menuitem", { name: "Edit configuration" }));
+  return screen.findByRole("dialog", { name: "Edit configuration" });
 }
 
 it("keeps New agent's card to instructions; the model field shows goose's default", async () => {
   created();
   expect(screen.queryByRole("combobox", { name: "Provider" })).toBeNull();
-  await waitFor(() =>
-    expect(modelButton()).toHaveTextContent(
-      "goose default (Databricks · claude)",
-    ),
-  );
+  await waitFor(() => expect(modelButton()).toHaveTextContent("claude"));
 });
 
 it("keeps provider fields visible while saving its key and selecting a model", async () => {
@@ -159,30 +163,30 @@ it("keeps provider fields visible while saving its key and selecting a model", a
   });
   expect(key).toHaveAttribute("type", "password");
   await user.type(key, "sk-test");
-  await user.click(
-    within(dialog).getByRole("button", { name: "Save to goose" }),
-  );
-  await waitFor(() =>
-    expect(key).toHaveAttribute(
-      "placeholder",
-      "Saved in goose. Enter a new value to replace it.",
-    ),
-  );
-  expect(key).toBeVisible();
-  expect(saved.get("anthropic")).toEqual(new Set(["ANTHROPIC_API_KEY"]));
-
-  await choose("Model", "claude-opus-5-5");
-  // Nothing reaches the agent until the choice is used.
+  expect(
+    within(dialog).queryByRole("button", { name: "Save to goose" }),
+  ).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: "Model" })).toBeNull();
   expect(changes).toEqual([]);
-  await user.click(within(dialog).getByRole("button", { name: "Use" }));
-  expect(changes.at(-1)).toMatchObject({
-    provider: "anthropic",
-    model: "claude-opus-5-5",
-  });
+  await user.click(within(dialog).getByRole("button", { name: "Save" }));
   await waitFor(() =>
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
   );
-  expect(modelButton()).toHaveTextContent("Anthropic · claude-opus-5-5");
+  expect(saved.get("anthropic")).toEqual(new Set(["ANTHROPIC_API_KEY"]));
+  expect(changes.at(-1)).toMatchObject({ provider: "anthropic", model: "" });
+  await user.click(modelButton());
+  (await screen.findByRole("menuitem", { name: "Claude" })).focus();
+  await user.keyboard("{ArrowRight}");
+  (await screen.findByRole("menuitem", { name: "claude-opus-5-5" })).focus();
+  await user.keyboard("{ArrowRight}");
+  await user.click(
+    await screen.findByRole("menuitemradio", { name: "Automatic" }),
+  );
+  expect(changes.at(-1)).toMatchObject({
+    model: "claude-opus-5-5",
+    effort: "",
+  });
+  expect(modelButton()).toHaveTextContent("Automatic");
 });
 
 it("saves a key on Enter in Settings, and only an absolute or ~/ workspace", async () => {
@@ -405,10 +409,10 @@ it("keeps the providers shown when reading them again fails", async () => {
   });
   // Saving reads the providers again, which fails.
   vi.spyOn(setup, "providers").mockRejectedValue(new Error("goose went away"));
-  await userEvent.setup().type(key, "sk-test{Enter}");
-  expect(
-    await within(dialog).findByRole("button", { name: "Try again" }),
-  ).toBeVisible();
+  await userEvent.setup().type(key, "sk-test");
+  await userEvent
+    .setup()
+    .click(within(dialog).getByRole("button", { name: "Save" }));
   expect(within(dialog).getByText("goose went away")).toBeVisible();
   const provider = within(dialog).getByRole("combobox", { name: "Provider" });
   expect(provider).toBeEnabled();
@@ -480,9 +484,7 @@ it("reads a provider's models again after its fields are saved", async () => {
     within(dialog).getByRole("textbox", { name: /host/i }),
     "https://new.test",
   );
-  await user.click(
-    within(dialog).getByRole("button", { name: "Save to goose" }),
-  );
+  await user.click(within(dialog).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(listed()).toBe(2));
 });
 
@@ -730,4 +732,31 @@ it("filters provider names with Search and selects a matching provider", async (
   await user.click(screen.getByRole("option", { name: "Anthropic" }));
   expect(trigger).toHaveTextContent("Anthropic");
   expect(await screen.findByLabelText("API key")).toBeVisible();
+});
+
+it("keeps the creation menu open when its provider finishes loading", async () => {
+  let release = () => {};
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  created({
+    spawn: (fake) => {
+      const setup = new GooseSetup(fake.spawn);
+      const providers = setup.providers.bind(setup);
+      vi.spyOn(setup, "providers").mockImplementation(async () => {
+        await ready;
+        return providers();
+      });
+      return setup;
+    },
+  });
+  await userEvent.setup().click(modelButton());
+  expect(
+    await screen.findByRole("menuitem", { name: "Edit configuration" }),
+  ).toBeVisible();
+  release();
+  await waitFor(() => expect(modelButton()).toHaveTextContent("claude"));
+  expect(
+    screen.getByRole("menuitem", { name: "Edit configuration" }),
+  ).toBeVisible();
 });

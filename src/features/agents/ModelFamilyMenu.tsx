@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ModelIcon, type ModelChoice } from "./ModelPicker";
 import { CaretDownIcon, CheckIcon } from "../../shared/design-system/icons";
 import { Button } from "../../shared/design-system/ui/Button";
@@ -115,37 +116,15 @@ export function ModelFamilyMenu({
                   onValueChange={(id) => onChange(id)}
                 >
                   {choices.map((model) =>
-                    onEffortChange && model.efforts?.length ? (
-                      <MenuSubmenu key={model.id}>
-                        <MenuSubmenuTrigger>
-                          {model.label}
-                          {selected.id === model.id && (
-                            <CheckIcon size={16} aria-hidden="true" />
-                          )}
-                        </MenuSubmenuTrigger>
-                        <MenuSubmenuPopup
-                          aria-label={`${model.label} thinking effort`}
-                        >
-                          <MenuRadioGroup
-                            value={
-                              selected.id === model.id ? (effort ?? "") : null
-                            }
-                            onValueChange={(level) =>
-                              onEffortChange(model.id, level)
-                            }
-                          >
-                            {model.efforts.map((level) => (
-                              <MenuRadioItem
-                                key={level.id}
-                                value={level.id}
-                                closeOnClick
-                              >
-                                {level.label}
-                              </MenuRadioItem>
-                            ))}
-                          </MenuRadioGroup>
-                        </MenuSubmenuPopup>
-                      </MenuSubmenu>
+                    onEffortChange &&
+                    (model.efforts?.length || model.loadEfforts) ? (
+                      <EffortMenu
+                        key={`${model.effortScope ?? ""}:${model.id}`}
+                        model={model}
+                        selected={selected.id === model.id}
+                        effort={effort ?? ""}
+                        onChange={onEffortChange}
+                      />
                     ) : (
                       <MenuRadioItem
                         key={model.id}
@@ -171,5 +150,56 @@ export function ModelFamilyMenu({
     menu
   ) : (
     <PreferenceRow title={label} subtitle={description} trailing={menu} />
+  );
+}
+
+function EffortMenu({
+  model,
+  selected,
+  effort,
+  onChange,
+}: {
+  model: ModelChoice;
+  selected: boolean;
+  effort: string;
+  onChange(model: string, effort: string): void;
+}) {
+  const [levels, setLevels] = useState(model.efforts);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <MenuSubmenu
+      onOpenChange={(open) => {
+        if (!open || levels || loading || !model.loadEfforts) return;
+        setLoading(true);
+        setError("");
+        void model
+          .loadEfforts()
+          .then(setLevels, (reason) => setError(String(reason)))
+          .finally(() => setLoading(false));
+      }}
+    >
+      <MenuSubmenuTrigger>
+        {model.label}
+        {selected && <CheckIcon size={16} aria-hidden="true" />}
+      </MenuSubmenuTrigger>
+      <MenuSubmenuPopup aria-label={`${model.label} thinking effort`}>
+        {loading && <MenuItem disabled>Loading thinking levels…</MenuItem>}
+        {error && <MenuItem disabled>Could not load thinking levels</MenuItem>}
+        {(!levels?.length || error) && (
+          <MenuItem onClick={() => onChange(model.id, "")}>Use model</MenuItem>
+        )}
+        <MenuRadioGroup
+          value={selected ? effort : null}
+          onValueChange={(level) => onChange(model.id, level)}
+        >
+          {(levels ?? []).map((level) => (
+            <MenuRadioItem key={level.id} value={level.id} closeOnClick>
+              {level.label}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+      </MenuSubmenuPopup>
+    </MenuSubmenu>
   );
 }

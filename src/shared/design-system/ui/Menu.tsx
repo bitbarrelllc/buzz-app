@@ -79,8 +79,10 @@ export function MenuPopup(props: PopupProps) {
   return <PositionedPopup {...props} />;
 }
 
-export function MenuSubmenu({ children }: { children: ReactNode }) {
-  return <BaseMenu.SubmenuRoot>{children}</BaseMenu.SubmenuRoot>;
+export function MenuSubmenu(
+  props: ComponentProps<typeof BaseMenu.SubmenuRoot>,
+) {
+  return <BaseMenu.SubmenuRoot {...props} />;
 }
 
 export function MenuSubmenuPopup(props: PopupProps) {

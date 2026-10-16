@@ -21,6 +21,8 @@ export type ModelChoice = Readonly<{
   label: string;
   description?: string | undefined;
   efforts?: readonly { id: string; label: string }[];
+  effortScope?: string;
+  loadEfforts?: () => Promise<readonly { id: string; label: string }[]>;
 }>;
 
 const CUSTOM_MODEL_ACTION: ModelChoice = {

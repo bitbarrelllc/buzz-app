@@ -119,17 +119,6 @@ const modelLabel = (provider: string | undefined, model: string | undefined) =>
   provider?.startsWith("databricks")
     ? model?.replace(/^(?:databricks|goose)-/i, "")
     : model;
-/** `Anthropic · claude-opus-5-5`, or undefined for goose's own default. */
-const choiceLabel = (
-  { provider, model }: Choice,
-  named: (id: string) => string | undefined = (id) => id,
-) =>
-  [
-    provider && named(provider),
-    modelLabel(provider, model) || (provider && "default model"),
-  ]
-    .filter(Boolean)
-    .join(" · ") || undefined;
 const placeOf = (key: string): Place => {
   const [channelId = key, root] = key.split("/");
   return { channelId, ...(root ? { root } : {}) };
@@ -282,10 +271,12 @@ export function createTabs({
     onChange,
     disabled = false,
     deviceDefaults = false,
+    hideModel = deviceDefaults,
     keyDraft,
     rows = false,
   }: Readonly<{
     deviceDefaults?: boolean;
+    hideModel?: boolean;
     keyDraft?: {
       value: Record<string, string>;
       onChange(value: Record<string, string>): void;
@@ -421,7 +412,7 @@ export function createTabs({
             }}
           />
         )}
-        {!deviceDefaults && provider?.configured && (
+        {!hideModel && provider?.configured && (
           <ModelPicker
             key={`models:${id}`}
             groupByFamily
@@ -952,33 +943,66 @@ export function createTabs({
       provider: value.provider,
       model: value.model,
     });
+    const [keys, setKeys] = useState<Record<string, string>>({});
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
     return (
       <Dialog
         open
         onOpenChange={(open) => {
-          if (!open) onClose();
+          if (!open && !saving) onClose();
         }}
         height="stable"
-        title="Provider and model"
-        description="goose's own config is the default. Keys are saved in goose, for every agent and the goose CLI."
+        title="Edit configuration"
         actions={
           <>
-            <Button onClick={onClose}>Cancel</Button>
-            <Button variant="prominent" onClick={() => onChange(draft)}>
-              Use
+            <Button disabled={saving} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="prominent"
+              loading={saving}
+              onClick={async () => {
+                setSaving(true);
+                setError("");
+                try {
+                  const listing = await setup.providers();
+                  const provider = draft.provider || listing.defaults.provider;
+                  const entered = Object.fromEntries(
+                    Object.entries(keys).filter(([, text]) => text.trim()),
+                  );
+                  if (provider && Object.keys(entered).length)
+                    await setup.save(provider, entered);
+                  onChange(draft);
+                } catch (reason) {
+                  setError(message(reason));
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              Save
             </Button>
           </>
         }
       >
         <div className="grid gap-4">
-          <ProviderFields value={draft} onChange={setDraft} />
+          <ProviderFields
+            hideModel
+            value={draft}
+            disabled={saving}
+            keyDraft={{ value: keys, onChange: setKeys }}
+            onChange={(choice) => {
+              if (choice.provider !== draft.provider) setKeys({});
+              setDraft(choice);
+            }}
+          />
+          {error && <p role="alert">{error}</p>}
         </div>
       </Dialog>
     );
   }
 
-  /** goose's own default or the agent's provider and model, on New agent and
-   * library cards; it opens the provider dialog. */
   function CreateModel({
     config,
     onChange,
@@ -987,39 +1011,87 @@ export function createTabs({
   }: AgentCreateProps<Config>) {
     const current = readConfig(config);
     const [open, setOpen] = useState(false);
-    const [listing] = useRead(() => setup.providers(), "providers");
-    const defaults = listing.value?.defaults;
-    const named = (id: string | undefined) =>
-      listing.value?.providers.find((item) => item.id === id)?.name ?? id;
-    const fallback = [
-      named(defaults?.provider),
-      modelLabel(defaults?.provider, defaults?.model),
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    const label =
-      choiceLabel(current, named) ??
-      (fallback ? `goose default (${fallback})` : "goose default");
+    const [listing, reload] = useRead(() => setup.providers(), "providers");
+    const provider = current.provider || listing.value?.defaults.provider || "";
+    const [models, reloadModels] = useRead(
+      () => (provider ? setup.models(provider) : Promise.resolve([])),
+      provider,
+    );
+    const fallback =
+      (current.provider
+        ? listing.value?.providers.find((item) => item.id === provider)
+            ?.defaultModel
+        : listing.value?.defaults.model) || "";
+    const selectedModel = current.model || fallback;
+    const [thinking] = useRead(
+      () =>
+        provider && selectedModel
+          ? setup.efforts({ provider, model: selectedModel })
+          : Promise.resolve({ current: "", levels: [] }),
+      `${provider}\u0000${selectedModel}`,
+    );
+    const choices = (models.value ?? []).map((model) => ({
+      ...model,
+      effortScope: provider,
+      loadEfforts: async () => {
+        const offered = await setup.efforts({ provider, model: model.id });
+        if (!offered.levels.length) return [];
+        return [
+          { id: "", label: "Automatic" },
+          ...offered.levels.map((id) => ({
+            id,
+            label: id.charAt(0).toUpperCase() + id.slice(1),
+          })),
+        ];
+      },
+    }));
     return (
       <>
-        {/* The compact select recipe ellipsizes long model names in cards. */}
-        <div className="buzz-select" data-variant="compact">
-          <Button
-            size="sm"
-            variant={modelAppearance === "subtle" ? "ghost" : "outline"}
-            disabled={disabled}
-            title="Choose provider and model"
-            onClick={() => setOpen(true)}
-          >
-            <span className="buzz-select-value">{label}</span>
-          </Button>
-        </div>
+        <ModelPicker
+          compact
+          groupByFamily
+          includeDefault={false}
+          allowCustomModel
+          label="Goose model"
+          appearance={modelAppearance === "subtle" ? "subtle" : "outlined"}
+          models={choices}
+          value={current.model || fallback}
+          defaultLabel="Choose model"
+          effort={current.effort}
+          effortLabel={
+            thinking.value?.levels.length
+              ? current.effort
+                ? current.effort.charAt(0).toUpperCase() +
+                  current.effort.slice(1)
+                : "Automatic"
+              : undefined
+          }
+          modelLabelPrefixes={
+            provider.startsWith("databricks")
+              ? ["databricks-", "goose-"]
+              : undefined
+          }
+          disabled={disabled}
+          loading={models.status === "loading"}
+          onConfigure={() => setOpen(true)}
+          onChange={(model) => onChange({ ...current, model, effort: "" })}
+          onEffortChange={(model, effort) =>
+            onChange({ ...current, model, effort })
+          }
+        />
         {open && (
           <ChooseDialog
             value={current}
             onClose={() => setOpen(false)}
             onChange={(choice) => {
-              onChange({ ...current, ...choice });
+              onChange({
+                ...current,
+                ...choice,
+                effort:
+                  choice.provider === current.provider ? current.effort : "",
+              });
+              reload();
+              reloadModels();
               setOpen(false);
             }}
           />
