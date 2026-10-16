@@ -476,10 +476,12 @@
 .untitledSectionContent {
   padding-inline-end: calc(var(--space-8) + var(--space-1));
 }
-.sectionActions:focus-within,
+html[data-keyboard-navigation] .sectionActions:focus-within,
 .sectionHeader:hover :is(.sectionActions, .sectionChevron),
 .channelSection[data-menu-open] :is(.sectionActions, .sectionChevron),
-.sectionHeader:focus-within :is(.sectionActions, .sectionChevron) {
+html[data-keyboard-navigation]
+  .sectionHeader:focus-within
+  :is(.sectionActions, .sectionChevron) {
   opacity: 1;
   pointer-events: auto;
 }

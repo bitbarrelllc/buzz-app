@@ -12,10 +12,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { createRelaySession } from "../../features/relay/session";
 import type { RelaySession } from "../../features/relay/session";
-import type { RelayData } from "../../features/relay/service";
+import type { RelayData, RelaySnapshot } from "../../features/relay/service";
 import type { Navigation } from "../../features/navigation/controller";
 import { ChannelNavigationProvider } from "../../features/channel-navigation/ChannelNavigationState";
 import { stubAvatarBrowserApis } from "../../features/agents/avatar-testing";
+import { readView, writeView } from "../../shared/view-state";
+import type { OpenTarget } from "../../features/navigation/targets";
 import { NewMenu } from "../../app/shell/NewMenu";
 import type { Agents } from "../../features/agents/service";
 import { PrimarySidebar } from "../../app/shell/PrimarySidebar";
@@ -154,7 +156,12 @@ function fixture(combined = false, canCreate = false, agents?: Agents) {
       markThrough,
     },
   };
-  let snapshot = { status: "ready" as const, session, generation: 1, scope };
+  let snapshot: RelaySnapshot = {
+    status: "ready",
+    session,
+    generation: 1,
+    scope,
+  };
   const relay: RelayData = {
     snapshot: () => snapshot,
     subscribe,
@@ -162,16 +169,28 @@ function fixture(combined = false, canCreate = false, agents?: Agents) {
     disconnect() {},
     async clearCache() {},
   };
-  const open = vi.fn(async () => ({ status: "opened" as const }));
+  let attempt = 0;
+  const open = vi.fn(async (next: OpenTarget) => {
+    target = next;
+    attempt++;
+    rendered.rerender(tree());
+    publish();
+    return { status: "opened" as const };
+  });
   const navigator = {
     open,
-    snapshot: () => ({ attempt: { signal: new AbortController().signal } }),
+    subscribe,
+    snapshot: () => ({
+      attempt: { id: String(attempt), signal: new AbortController().signal },
+    }),
   } as unknown as Navigation;
-  const target = meTarget(scope, other);
+  let target: OpenTarget = meTarget(scope, other);
+  let sidebarVisible = true;
+  let meEnabled = true;
   const publish = () => {
     for (const listener of listeners) listener();
   };
-  render(
+  const tree = () => (
     <ChannelNavigationProvider relay={relay}>
       <ToastProvider>
         {combined ? (
@@ -182,24 +201,45 @@ function fixture(combined = false, canCreate = false, agents?: Agents) {
               agents={agents}
               meEnabled
             />
-            <PrimarySidebar
-              relay={relay}
-              navigator={navigator}
-              target={target}
-              meEnabled
-              sessionsEnabled
-            >
-              <button type="button">Inbox</button>
-            </PrimarySidebar>
+            {sidebarVisible && (
+              <PrimarySidebar
+                relay={relay}
+                navigator={navigator}
+                target={target}
+                meEnabled={meEnabled}
+                sessionsEnabled
+              >
+                <button type="button">Inbox</button>
+              </PrimarySidebar>
+            )}
           </>
         ) : (
           <MeSidebar relay={relay} navigator={navigator} target={target} />
         )}
       </ToastProvider>
-    </ChannelNavigationProvider>,
+    </ChannelNavigationProvider>
   );
+  const rendered = render(tree());
   return {
     session,
+    navigate(next: OpenTarget) {
+      target = next;
+      rendered.rerender(tree());
+    },
+    sidebar(visible: boolean) {
+      sidebarVisible = visible;
+      rendered.rerender(tree());
+    },
+    meEnabled(enabled: boolean) {
+      meEnabled = enabled;
+      rendered.rerender(tree());
+    },
+    connection(change: Partial<RelaySnapshot>) {
+      act(() => {
+        snapshot = { ...snapshot, ...change };
+        publish();
+      });
+    },
     replaceSession() {
       act(() => {
         snapshot = { ...snapshot, session: { ...session }, generation: 2 };
@@ -506,4 +546,146 @@ it("does not navigate to a replaced session after project creation completes", a
     });
   }
   expect(f.open).not.toHaveBeenCalled();
+});
+
+it("retains scope across Settings remounts and reveals navigation outside the filter", async () => {
+  const f = fixture(true);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("tab", { name: "Team" }));
+  f.sidebar(false);
+  f.sidebar(true);
+  expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  f.navigate(meTarget(scope, "new"));
+  expect(screen.getByRole("tab", { name: "Solo" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  f.navigate({
+    version: 1,
+    kind: "conversation",
+    channelId: "team-channel",
+    scope: { viewer, communityOrigin: "https://relay.test" },
+  });
+  expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await user.click(screen.getByRole("tab", { name: "All" }));
+  f.navigate(meTarget(scope, id));
+  expect(screen.getByRole("tab", { name: "All" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
+
+it("omits the scope switcher when Solo is disabled", () => {
+  const f = fixture(true);
+  f.meEnabled(false);
+  expect(
+    screen.queryByRole("tablist", { name: "Navigation scope" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["New project", "New project"],
+  ["New channel", "Create a channel"],
+])(
+  "retains typed %s input through cached reconnect and session replacement",
+  async (item, title) => {
+    const f = fixture(true, true);
+    const user = userEvent.setup();
+    f.connection({ status: "connecting", cached: true });
+    await user.click(screen.getByRole("button", { name: "New" }));
+    await user.click(await screen.findByRole("menuitem", { name: item }));
+    const input = within(
+      await screen.findByRole("dialog", { name: title }),
+    ).getByRole("textbox", { name: "Name" });
+    await user.type(input, "Keep this draft");
+    f.connection({ status: "error" });
+    expect(input).toHaveValue("Keep this draft");
+    f.replaceSession();
+    expect(
+      within(screen.getByRole("dialog", { name: title })).getByRole("textbox", {
+        name: "Name",
+      }),
+    ).toHaveValue("Keep this draft");
+  },
+);
+
+it("keeps navigation scope preferences partitioned by community", async () => {
+  const f = fixture(true);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("tab", { name: "Team" }));
+  const second = `https://second.test:${viewer}`;
+  f.connection({ scope: second, session: { ...f.session, scope: second } });
+  expect(screen.getByRole("tab", { name: "All" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await user.click(screen.getByRole("tab", { name: "Solo" }));
+  f.connection({ scope, session: f.session });
+  expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
+
+it("header channel creation expands the saved destination without changing other collapsed sections", async () => {
+  writeView(scope, "channel-sidebar", {
+    collapsed: ["channels", "starred"],
+    width: 280,
+  });
+  const f = fixture(true, true);
+  const create = vi
+    .spyOn(f.session.channelCreation, "create")
+    .mockResolvedValue("new-channel");
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "New" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "New channel" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Create a channel",
+  });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "Name" }),
+    "Planning",
+  );
+  await user.click(
+    within(dialog).getByRole("button", { name: /^Create channel$/ }),
+  );
+  await waitFor(() => expect(create).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(f.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "conversation",
+        channelId: "new-channel",
+      }),
+    ),
+  );
+  expect(readView(scope, "channel-sidebar", null)).toMatchObject({
+    collapsed: ["starred"],
+    width: 280,
+  });
+});
+
+it("reveals Solo when New chat reopens the same destination after filtering it out", async () => {
+  const f = fixture(true);
+  const user = userEvent.setup();
+  f.navigate(meTarget(scope));
+  await user.click(screen.getByRole("tab", { name: "Team" }));
+  expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await user.click(screen.getByRole("button", { name: "New" }));
+  await user.click(await screen.findByRole("menuitem", { name: "New chat" }));
+  expect(screen.getByRole("tab", { name: "Solo" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 });

@@ -1,6 +1,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import type { Agents } from "../../features/agents/service";
 import { CreateChannelDialog } from "../../bundled/channels/CreateChannelDialog";
+import { expandSidebarSection } from "../../bundled/channels/useSidebarView";
 import { useSidebarPreferences } from "../../bundled/channels/useSidebarPreferences";
 import type { Navigation } from "../../features/navigation/controller";
 import { useRelayConnection } from "../../features/relay/react";
@@ -29,21 +30,12 @@ type Props = {
 
 export function NewMenu(props: Props) {
   const connection = useRelayConnection(props.relay);
-  return connection.status === "ready" ? (
+  return (
     <ReadyNewMenu
       {...props}
-      key={`${connection.scope}:${connection.generation}`}
+      key={connection.scope ?? "disconnected"}
       session={connection.session}
-    />
-  ) : (
-    <IconButton
-      aria-label="New"
-      title="New"
-      variant="ghost"
-      shape="round"
-      size="sm"
-      disabled
-      icon={<PlusIcon className={styles.sidebarCreateIcon} size={18} />}
+      available={connection.status === "ready" || !!connection.cached}
     />
   );
 }
@@ -54,7 +46,8 @@ function ReadyNewMenu({
   meEnabled,
   agents,
   session,
-}: Props & { session: RelaySession }) {
+  available,
+}: Props & { session: RelaySession; available: boolean }) {
   useSyncExternalStore(
     session.mePreferences.subscribe,
     session.mePreferences.snapshot,
@@ -76,6 +69,7 @@ function ReadyNewMenu({
           render={
             <IconButton
               ref={trigger}
+              disabled={!available}
               aria-label="New"
               title="New"
               variant="ghost"
@@ -142,13 +136,22 @@ function ReadyNewMenu({
         groupsReady={preferences.writable}
         onCreate={async (input) => {
           const channelId = await session.channelCreation.create(input);
-          if (current() && scope)
+          if (current() && scope) {
+            expandSidebarSection(
+              session.scope,
+              input.setup?.starred
+                ? "starred"
+                : input.setup?.groupId
+                  ? `group:${input.setup.groupId}`
+                  : "channels",
+            );
             void navigator.open({
               version: 1,
               kind: "conversation",
               channelId,
               scope,
             });
+          }
         }}
       />
       {creatingProject && (
