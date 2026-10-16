@@ -98,3 +98,32 @@ it("preserves a BOM and rejects invalid UTF-8 instead of replacing bytes", async
     readPluginFolder(folder("invalid", [[invalid]])),
   ).rejects.toThrow();
 });
+
+it("preserves conventional README and binary icon bytes in a dropped package", async () => {
+  const png = file("icon.png");
+  const jpg = file("icon.jpg");
+  png.read.mockResolvedValueOnce(new Uint8Array([0x89, 0x50, 0xff, 0]).buffer);
+  jpg.read.mockResolvedValueOnce(new Uint8Array([0xff, 0xd8, 0, 0xff]).buffer);
+  const ignored = file("readme.md");
+  const result = await readPluginFolder(
+    folder("assets", [[file("README.md", "# Hello"), png, jpg, ignored]]),
+  );
+  expect(result.files).toEqual([
+    { path: "README.md", text: "# Hello" },
+    { path: "icon.png", base64: "iVD/AA==" },
+    { path: "icon.jpg", base64: "/9gA/w==" },
+  ]);
+  expect(ignored.read).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["README.md", 256 * 1024],
+  ["icon.png", 1024 * 1024],
+  ["icon.jpg", 1024 * 1024],
+])("rejects oversized %s before reading it", async (name, limit) => {
+  const large = file(name, "", limit + 1);
+  await expect(readPluginFolder(folder("large", [[large]]))).rejects.toThrow(
+    "limit",
+  );
+  expect(large.read).not.toHaveBeenCalled();
+});
