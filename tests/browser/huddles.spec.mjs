@@ -123,10 +123,22 @@ test("connected Huddles keep compact controls beside the default window", async 
     const style = getComputedStyle(el);
     return [style.backgroundColor, style.backdropFilter, style.boxShadow];
   };
-  // The container reuses the shell material.
+  // The capsule uses the shared glass material; shell icons now use ghost.
   await page.mouse.move(0, 0);
   expect(await capsule.evaluate(material)).toEqual(
-    await page.getByRole("button", { name: "Search Buzz" }).evaluate(material),
+    await page.evaluate(() => {
+      const reference = document.createElement("div");
+      reference.className = "glass-primary";
+      document.body.append(reference);
+      const style = getComputedStyle(reference);
+      const values = [
+        style.backgroundColor,
+        style.backdropFilter,
+        style.boxShadow,
+      ];
+      reference.remove();
+      return values;
+    }),
   );
   for (const name of ["Search Buzz", "Mute"]) {
     expect(
