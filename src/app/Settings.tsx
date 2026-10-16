@@ -497,6 +497,7 @@ export function Settings({
   const externalPluginsPaused = ready?.externalPluginsPaused;
   const [pluginFilter, setPluginFilter] = useState<"all" | "essentials">("all");
   const [pluginQuery, setPluginQuery] = useState("");
+  const pluginSearch = useRef<HTMLElement>(null);
   const reducedMotion = useReducedMotion();
   const listMotion = {
     layout: reducedMotion ? (false as const) : ("position" as const),
@@ -901,6 +902,7 @@ export function Settings({
                       className={styles.pluginSearch}
                     >
                       <SearchField
+                        inputRef={pluginSearch}
                         label="Search plugins"
                         placeholder="Search plugins…"
                         value={pluginQuery}
@@ -973,6 +975,7 @@ export function Settings({
                             onClick={() => {
                               setPluginQuery("");
                               setPluginFilter("all");
+                              pluginSearch.current?.focus();
                             }}
                           >
                             Clear filters

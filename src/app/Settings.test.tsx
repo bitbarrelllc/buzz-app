@@ -366,10 +366,13 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   fireEvent.change(search, { target: { value: "no-match" } });
   expect(within(content).queryAllByRole("article")).toHaveLength(0);
   expect(within(content).getByText("No plugins found")).toBeVisible();
-  fireEvent.click(
-    within(content).getByRole("button", { name: "Clear filters" }),
-  );
+  const clearFilters = within(content).getByRole("button", {
+    name: "Clear filters",
+  });
+  clearFilters.focus();
+  fireEvent.click(clearFilters);
   expect(search).toHaveValue("");
+  expect(search).toHaveFocus();
   expect(within(content).getAllByRole("article")).toHaveLength(5);
 
   fireEvent.click(
