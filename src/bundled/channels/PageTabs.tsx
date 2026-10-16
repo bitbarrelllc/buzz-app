@@ -1,7 +1,12 @@
-import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import type { RelaySession } from "../../features/relay/session";
-import type { ConversationExtensions } from "../../features/conversation/contracts";
+import type {
+  ConversationExtensions,
+  PageTabOptions,
+  PageTabsProps,
+  PageTabTarget,
+} from "../../features/conversation/contracts";
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
 import {
   buzzLinkTarget,
@@ -21,21 +26,7 @@ import { threadTab, useChannelTabState } from "./useChannelTabState";
 import { useConversationTabs } from "./useConversationTabs";
 import styles from "./Channels.module.css";
 
-export type PageTabTarget = { channelId: string; threadId?: string };
-/** `keep` opens a tab beside the others instead of in place of the last. */
-export type PageTabOptions = { keep?: boolean };
-export type PageTabsProps = {
-  /** Keys the page's tabs, which last as long as its community session. */
-  id: string;
-  session: RelaySession;
-  scope: string;
-  label: string;
-  icon?: ReactNode;
-  /** The page's own first tab. `open` shows a joined conversation in a host tab. */
-  children(
-    open: (target: PageTabTarget, options?: PageTabOptions) => boolean,
-  ): ReactNode;
-};
+export type { PageTabOptions, PageTabsProps, PageTabTarget };
 
 // The tab each page's next plain open replaces, for as long as its tabs last.
 const previews = new WeakMap<RelaySession, Map<string, string>>();

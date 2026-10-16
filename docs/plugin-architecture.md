@@ -978,7 +978,7 @@ unambiguous signed person/agent mentions share the inline hover styling. Names i
 ordinary prose never create notification intent or establish an identity.
 
 The conversation preview exposes top-level `registerTool`, `registerCompletion` and `registerInline`
-methods and stable `conversation.ui.Composer` / `.Message` / `.Thread` / `.Tabs` components. Generated
+methods and stable `conversation.ui.Composer` / `.Message` / `.Thread` components, plus `.Tabs` while a plugin provides it. Generated
 type-only `@buzz/author` declarations are exercised by a source-only external consumer
 fixture in `tests/fixtures/conversation-consumer`; it is built and installed only in
 the browser test's temporary profile.
@@ -1018,6 +1018,10 @@ the page stays in view; any thread can then move to the main pane. A plain open
 replaces the tab the previous one added, and `keep: true` adds a tab beside it;
 an already-open conversation's tab is selected wherever it is. `id` keys the page's tabs, which last for its community session as
 Channels tabs do; they keep no Back/Forward visits.
+The tab workspace belongs to Channels, which supplies it with
+`conversation.registerTabs(component)`; the conversation service only holds that
+slot. `ui.Tabs` is undefined while no enabled plugin provides it, so a page reads
+it at render and falls back to its own layout.
 
 ### Composer ownership and mention tools
 
