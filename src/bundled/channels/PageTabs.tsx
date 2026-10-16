@@ -39,6 +39,7 @@ export type PageTabsProps = {
   /** The page's own first tab. `open` shows a joined conversation in a host tab. */
   children(
     open: (target: PageTabTarget, options?: PageTabOptions) => boolean,
+    close: (target: PageTabTarget) => boolean,
   ): ReactNode;
 };
 
@@ -58,7 +59,7 @@ export function PageTabs({
   visits,
 }: PageTabsProps & {
   host: ConversationHostServices;
-  extensions: ConversationExtensions;
+  extensions?: ConversationExtensions | undefined;
   /** Whether showing a tab visits its conversation, as Channels does. */
   visits?: boolean | undefined;
 }) {
@@ -119,7 +120,16 @@ export function PageTabs({
   const opening = useRef<
     (target: PageTabTarget, options?: PageTabOptions) => boolean
   >(() => false);
+  const closing = useRef<(target: PageTabTarget) => boolean>(() => false);
   useLayoutEffect(() => {
+    closing.current = ({ channelId, threadId }) => {
+      const tab = threadId
+        ? threadTab(tabState.tabs, channelId, threadId)
+        : tabState.tabs.find((item) => item.id === `conversation:${channelId}`);
+      if (!mounted.current || !tab) return false;
+      tabState.setTabs((tabs) => tabs.filter((item) => item.id !== tab.id));
+      return true;
+    };
     opening.current = ({ channelId, threadId, messageId }, { keep } = {}) => {
       if (!mounted.current || !secondary.canOpenConversation(channelId))
         return false;
@@ -168,6 +178,10 @@ export function PageTabs({
   const open = useCallback(
     (target: PageTabTarget, options?: PageTabOptions) =>
       opening.current(target, options),
+    [],
+  );
+  const close = useCallback(
+    (target: PageTabTarget) => closing.current(target),
     [],
   );
   const focusPage = useRef(false);
@@ -267,7 +281,12 @@ export function PageTabs({
                 )
               }
               items={[
-                { id: "conversation", label, icon, content: children(open) },
+                {
+                  id: "conversation",
+                  label,
+                  icon,
+                  content: children(open, close),
+                },
                 ...secondary.mainItems,
               ]}
             />
