@@ -24,7 +24,11 @@ export async function readPluginFolder(root: FileSystemEntry) {
     path: string,
     depth: number,
   ): Promise<void> {
-    if (++entries > 20_000 || depth > 32 || Date.now() > deadline)
+    if (
+      ++entries > 20_000 ||
+      (entry.isDirectory && depth > 32) ||
+      Date.now() > deadline
+    )
       throw new Error(
         "Folder is too large or deeply nested. Choose a smaller folder.",
       );

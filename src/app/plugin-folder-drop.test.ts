@@ -127,3 +127,13 @@ it.each([
   );
   expect(large.read).not.toHaveBeenCalled();
 });
+
+it("accepts package files in a directory at depth 32 and rejects depth 33", async () => {
+  let nested = folder("package", [[file("manifest.json"), file("plugin.js")]]);
+  for (let depth = 0; depth < 32; depth++)
+    nested = folder(`level-${depth}`, [[nested]]);
+  expect((await readPluginFolder(nested)).files).toHaveLength(2);
+  await expect(
+    readPluginFolder(folder("one-too-many", [[nested]])),
+  ).rejects.toThrow("deeply nested");
+});
