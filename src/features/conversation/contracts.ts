@@ -276,5 +276,6 @@ export type PageTabsProps = {
   children(
     open: (target: PageTabTarget, options?: PageTabOptions) => boolean,
     close: (target: PageTabTarget) => boolean,
+    isOpen: (target: PageTabTarget) => boolean,
   ): ReactNode;
 };
