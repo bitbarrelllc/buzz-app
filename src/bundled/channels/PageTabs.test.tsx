@@ -177,6 +177,10 @@ it("opens a thread moved to the main pane where it is", () => {
   expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
   expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
+  // The next plain open does not replace it.
+  expect(page.open({ channelId: "beta" })).toBe(true);
+  expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
+  expect(side()).toEqual(["beta"]);
 });
 
 it("reveals a message in its thread, without visiting when the page asks", () => {
