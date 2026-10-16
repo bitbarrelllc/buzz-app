@@ -717,6 +717,22 @@ export function Settings({
                                     className={styles.pluginRow}
                                     data-enabled={plugin.enabled}
                                     aria-label={`View ${plugin.manifest.name} details`}
+                                    aria-describedby={
+                                      [
+                                        plugin.manifest.description
+                                          ? `plugin-description-${id}`
+                                          : null,
+                                        plugin.source === "external" &&
+                                        plugin.publisher
+                                          ? `plugin-publisher-${id}`
+                                          : null,
+                                        isEssentialPlugin(plugin)
+                                          ? `plugin-essential-${id}`
+                                          : null,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(" ") || undefined
+                                    }
                                     aria-expanded={active}
                                     aria-controls={
                                       active ? "plugin-details" : undefined
@@ -729,6 +745,14 @@ export function Settings({
                                       );
                                     }}
                                   >
+                                    {isEssentialPlugin(plugin) && (
+                                      <span
+                                        id={`plugin-essential-${id}`}
+                                        className="sr-only"
+                                      >
+                                        Essential
+                                      </span>
+                                    )}
                                     <ChoiceRow
                                       leading={<PluginIcon plugin={plugin} />}
                                       label={
@@ -752,14 +776,22 @@ export function Settings({
                                           )}
                                         </span>
                                       }
-                                      description={plugin.manifest.description}
+                                      description={
+                                        plugin.manifest.description ? (
+                                          <span id={`plugin-description-${id}`}>
+                                            {plugin.manifest.description}
+                                          </span>
+                                        ) : undefined
+                                      }
                                     />
                                     {plugin.source === "external" && (
-                                      <PluginProvenance
-                                        source={plugin.source}
-                                        publisher={plugin.publisher}
-                                        className={styles.pluginRowAuthor}
-                                      />
+                                      <span id={`plugin-publisher-${id}`}>
+                                        <PluginProvenance
+                                          source={plugin.source}
+                                          publisher={plugin.publisher}
+                                          className={styles.pluginRowAuthor}
+                                        />
+                                      </span>
                                     )}
                                   </button>
                                   <div className={styles.pluginRowAction}>

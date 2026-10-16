@@ -283,7 +283,9 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
   expect(
     within(content).queryAllByRole("img", { name: "Essential" }),
   ).toHaveLength(essentials ? 3 : 0);
-  expect(within(content).queryByText("Essential")).toBeNull();
+  expect(
+    within(content).queryByText("Essential", { selector: ":not(.sr-only)" }),
+  ).toBeNull();
   if (essentials) {
     const name = within(content).getByText("Voice Notes");
     const marker = within(name).getByRole("img", { name: "Essential" });
@@ -1253,4 +1255,22 @@ it("focuses details on open and restores the row after Escape", () => {
     screen.queryByRole("complementary", { name: "Zebra external details" }),
   ).toBeNull();
   expect(row).toHaveFocus();
+});
+
+it("describes plugin rows with their supporting copy, publisher and curated marker", () => {
+  const fixture = reviewPluginFixture();
+  Object.assign(fixture.external.manifest, {
+    description: "Works with agents",
+  });
+  Object.assign(fixture.external, { publisher: "publisher-key" });
+  const bundled = fixture.snapshot.configuration.catalog.plugins[0];
+  if (!bundled) throw new Error("Missing bundled fixture");
+  bundled.manifest.discovery.tags = ["essentials"];
+  act(() => fixture.publish());
+  expect(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  ).toHaveAccessibleDescription("Works with agents publisher-key");
+  expect(
+    screen.getByRole("button", { name: "View Alphabet bundled details" }),
+  ).toHaveAccessibleDescription("Essential");
 });
