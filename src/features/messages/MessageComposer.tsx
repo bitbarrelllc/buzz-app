@@ -1243,7 +1243,12 @@ function Composer({
       setError("Tag an agent to send");
       return;
     }
-    if (!draft.trim() && !sessionCards?.length && !attachments.items.length)
+    // A new conversation is named from its message, so files alone cannot start it.
+    if (
+      !draft.trim() &&
+      !sessionCards?.length &&
+      (!!submission || !attachments.items.length)
+    )
       return;
     const recovering = !submission && recoveryFor(session).get(recoveryKey);
     if (recovering) {
@@ -1967,7 +1972,7 @@ function Composer({
                 (!editing.target && attachments.blocked) ||
                 (!draft.trim() &&
                   !sessionCards?.length &&
-                  !attachments.items.length &&
+                  (!!submission || !attachments.items.length) &&
                   !(
                     editing.target &&
                     requestDeletion &&

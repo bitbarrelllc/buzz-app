@@ -2504,3 +2504,60 @@ it("a recovered start says when its attached files were lost, then sends without
     ["a".repeat(64)],
   );
 });
+
+it("a start interrupted mid-upload reopens editable so its files can be retried", async () => {
+  const test = setup(),
+    onStarted = vi.fn(),
+    user = userEvent.setup();
+  const attachment = {
+    name: "notes.txt",
+    url: `https://relay.test/media/${"f".repeat(64)}.txt`,
+    type: "text/plain",
+    size: 5,
+    sha256: "f".repeat(64),
+  };
+  const upload = vi.fn(
+    (_file: File, _channelId: string, signal: AbortSignal) =>
+      new Promise<typeof attachment>((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason)),
+      ),
+  );
+  Object.assign(test.session, { attachments: { upload } });
+  const view = render(
+    <NewSessionComposer
+      session={test.session}
+      scope="test"
+      onStarted={onStarted}
+    />,
+  );
+  await user.type(screen.getByRole("textbox"), "See attached");
+  await user.upload(
+    screen.getByLabelText("Choose attachments"),
+    new File(["notes"], "notes.txt", { type: "text/plain" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+  view.unmount();
+
+  upload.mockImplementation(async () => attachment);
+  render(
+    <NewSessionComposer
+      session={test.session}
+      scope="test"
+      onStarted={onStarted}
+    />,
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "Retry notes.txt" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
+  const id = test.workSessions.create.mock.calls[0]?.[0];
+  expect(test.workSessions.create).toHaveBeenCalledOnce();
+  expect(test.messages.send).toHaveBeenCalledWith(
+    id,
+    "See attached",
+    ["a".repeat(64)],
+    [attachment],
+  );
+});

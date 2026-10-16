@@ -172,13 +172,16 @@ export function NewSessionComposer({
   const [editing, setEditing] = useState(
     // Older builds admitted untagged drafts. Preserve their creation/placement
     // progress, but let their author add a tag before any unsigned send.
+    // An unsent start with files stays editable: they may need retry,
+    // removal, or reattachment after this view closed or the app reloaded.
     () =>
       !!(
-        personal &&
         pending &&
         !pending.messageId &&
-        !pending.agent &&
-        !mentionDraft(pending.draft).recipients.length
+        (pending.attachmentCount ||
+          (personal &&
+            !pending.agent &&
+            !mentionDraft(pending.draft).recipients.length))
       ),
   );
   const [busy, setBusy] = useState(false);
@@ -202,7 +205,7 @@ export function NewSessionComposer({
     const selected = files.snapshot().length;
     if (
       submitting.current ||
-      (!(pending?.text ?? composerMarkdown(draft)).trim() && !selected) ||
+      !(pending?.text ?? composerMarkdown(draft)).trim() ||
       !available
     )
       return;
@@ -454,7 +457,7 @@ export function NewSessionComposer({
               "This conversation is no longer in Solo. Open it in Multiplayer.",
             );
         }
-        // Uploads finish even if this view unmounts, so a retry reuses them.
+        // Files already uploaded by an earlier attempt are reused.
         const uploaded = await files.prepareForSend(
           new AbortController().signal,
           current.id,
