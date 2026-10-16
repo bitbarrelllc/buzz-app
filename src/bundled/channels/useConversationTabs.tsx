@@ -64,6 +64,8 @@ export function useConversationTabs({
   threadId,
   onOpenDrawer,
   mainPane = false,
+  anyMainThread = false,
+  threadPane,
   routed,
   onCloseThread,
   onRetryNavigation,
@@ -88,6 +90,10 @@ export function useConversationTabs({
   onOpenDrawer?(): void;
   /** This page hosts thread tabs in its main pane too. */
   mainPane?: boolean | undefined;
+  /** Any thread may use the main pane, not only the current conversation's. */
+  anyMainThread?: boolean | undefined;
+  /** Where new thread tabs open; by default, per the thread placement setting. */
+  threadPane?: TabPane | undefined;
   /** The route's thread request, handed only to the tab that matches it. */
   routed?:
     | { channelId: string; messageId: string; navigation: PageNavigation }
@@ -292,9 +298,8 @@ export function useConversationTabs({
         : undefined,
     [scope, viewer, current, threadId],
   );
-  // A page without its own conversation can host any thread in its main pane.
   const mainThread = (channelId: string) =>
-    mainPane && (!current || channelId === currentId);
+    mainPane && (anyMainThread || channelId === currentId);
   const sideTabs = tabState.tabs.filter((tab) => tabPane(tab) === "side");
   const mainTabs = mainPane
     ? tabState.tabs.filter((tab) => tabPane(tab) === "main")
@@ -493,7 +498,7 @@ export function useConversationTabs({
       messageId,
       rootId,
       intent,
-      mainPane ? undefined : "side",
+      threadPane ?? (mainPane ? undefined : "side"),
     );
     if (
       opening.current &&
@@ -571,7 +576,7 @@ export function useConversationTabs({
         messageId,
         rootId,
         undefined,
-        mainThread(channelId) ? undefined : "side",
+        threadPane ?? (mainThread(channelId) ? undefined : "side"),
       );
       if (
         opening.current &&

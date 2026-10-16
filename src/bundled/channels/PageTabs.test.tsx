@@ -7,7 +7,7 @@ import type { ConversationExtensions } from "../../features/conversation/contrac
 import { setThreadPlacementPreference } from "../../features/messages/thread-preferences";
 import type { RelaySession } from "../../features/relay/session";
 import type { ConversationTab as Tab } from "./useChannelTabState";
-import { PageTabs, type PageTabTarget } from "./PageTabs";
+import { PageTabs, type PageTabOptions, type PageTabTarget } from "./PageTabs";
 
 // The tab's own conversation has its mounted suite; this owner places it.
 vi.mock("./ConversationTab", () => ({
@@ -28,6 +28,7 @@ beforeEach(() => {
     "ResizeObserver",
     class {
       observe() {}
+      unobserve() {}
       disconnect() {}
     },
   );
@@ -68,7 +69,8 @@ function fixture() {
     },
     navigation: { open: vi.fn() },
   } as unknown as ConversationHostServices;
-  let open: (target: PageTabTarget) => boolean = () => false;
+  let open: (target: PageTabTarget, options?: PageTabOptions) => boolean = () =>
+    false;
   const openers = new Set<typeof open>();
   render(
     <PageTabs
@@ -88,10 +90,10 @@ function fixture() {
   );
   return {
     openers,
-    open(target: PageTabTarget) {
+    open(target: PageTabTarget, options?: PageTabOptions) {
       let opened = false;
       act(() => {
-        opened = open(target);
+        opened = open(target, options);
       });
       return opened;
     },
@@ -102,34 +104,40 @@ const tabs = (name: string) =>
     .getAllByRole("tab")
     .map((tab) => tab.textContent);
 
-it("opens threads beside the page's own tab in the preferred pane", () => {
+const side = () => {
+  const list = screen
+    .getAllByRole("tablist")
+    .find((item) => item.getAttribute("aria-label") !== "Switchboard tabs");
+  return within(list as HTMLElement)
+    .getAllByRole("tab")
+    .map((tab) => tab.textContent);
+};
+
+it("keeps the page in view, opening threads in the side pane", () => {
   setThreadPlacementPreference("main");
   const page = fixture();
   expect(screen.getByText("Session list")).toBeVisible();
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
-  expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
+  expect(tabs("Switchboard tabs")).toEqual(["Switchboard"]);
+  expect(side()).toEqual(["Root text"]);
+  expect(screen.getByText("Session list")).toBeVisible();
   expect(screen.getByText("thread in alpha")).toBeVisible();
 });
 
-it("opens whole conversations as side tabs and refuses unknown ones", () => {
-  setThreadPlacementPreference("side");
+it("replaces the last opened tab unless asked to keep it", () => {
   const page = fixture();
   expect(page.open({ channelId: "missing" })).toBe(false);
   // Membership a cached channel has not confirmed cannot show a tab.
   expect(page.open({ channelId: "pending" })).toBe(false);
   expect(page.open({ channelId: "beta" })).toBe(true);
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
-  expect(screen.getAllByRole("tablist")).toHaveLength(2);
-  const side = screen
-    .getAllByRole("tablist")
-    .find((list) => list.getAttribute("aria-label") !== "Switchboard tabs");
-  expect(
-    within(side as HTMLElement)
-      .getAllByRole("tab")
-      .map((tab) => tab.textContent),
-  ).toEqual(["beta", "Root text"]);
-  // Opening the same conversation again selects its tab.
+  expect(side()).toEqual(["Root text"]);
+  expect(page.open({ channelId: "beta" }, { keep: true })).toBe(true);
+  expect(page.open({ channelId: "alpha" })).toBe(true);
+  expect(side()).toEqual(["beta", "alpha"]);
+  // Opening a kept tab's conversation again selects it in place.
   expect(page.open({ channelId: "beta" })).toBe(true);
+  expect(side()).toEqual(["beta", "alpha"]);
   expect(screen.getByText("conversation in beta")).toBeVisible();
   // Pages can depend on one opener across the renders its tabs cause.
   expect(page.openers.size).toBe(1);

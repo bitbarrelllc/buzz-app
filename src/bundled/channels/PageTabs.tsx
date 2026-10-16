@@ -22,6 +22,8 @@ import { useConversationTabs } from "./useConversationTabs";
 import styles from "./Channels.module.css";
 
 export type PageTabTarget = { channelId: string; threadId?: string };
+/** `keep` opens a tab beside the others instead of in place of the last. */
+export type PageTabOptions = { keep?: boolean };
 export type PageTabsProps = {
   /** Keys the page's tabs, which last as long as its community session. */
   id: string;
@@ -29,9 +31,14 @@ export type PageTabsProps = {
   scope: string;
   label: string;
   icon?: ReactNode;
-  /** The page's own first tab. `open` adds a host tab for a joined conversation. */
-  children(open: (target: PageTabTarget) => boolean): ReactNode;
+  /** The page's own first tab. `open` shows a joined conversation in a host tab. */
+  children(
+    open: (target: PageTabTarget, options?: PageTabOptions) => boolean,
+  ): ReactNode;
 };
+
+// The tab each page's next plain open replaces, for as long as its tabs last.
+const previews = new WeakMap<RelaySession, Map<string, string>>();
 
 /** A page's content as the first tab, with conversations it opens beside it. */
 export function PageTabs({
@@ -90,6 +97,9 @@ export function PageTabs({
     },
     fallbackFocus,
     mainPane: true,
+    anyMainThread: true,
+    // The page stays in view; a thread reaches the main pane only when moved.
+    threadPane: "side",
     conversationIcon: (item) => {
       const Icon = channelIcon(item);
       return <Icon size="1rem" />;
@@ -97,27 +107,44 @@ export function PageTabs({
   });
   // One stable opener, so a page's effects can depend on it; it reads the
   // live workspace when called.
-  const opening = useRef<(target: PageTabTarget) => boolean>(() => false);
+  const opening = useRef<
+    (target: PageTabTarget, options?: PageTabOptions) => boolean
+  >(() => false);
   useLayoutEffect(() => {
-    opening.current = ({ channelId, threadId }) => {
+    opening.current = ({ channelId, threadId }, { keep } = {}) => {
       if (!mounted.current || !secondary.canOpenConversation(channelId))
         return false;
-      if (threadId) {
+      const known = new Set(tabState.tabs.map((tab) => tab.id));
+      if (threadId)
         secondary.openConversationThread(channelId, threadId, threadId);
-        return true;
+      else {
+        const tab = `conversation:${channelId}`;
+        tabState.setTabs((tabs) =>
+          tabs.some((item) => item.id === tab)
+            ? tabs
+            : [...tabs, { id: tab, kind: "conversation", channelId }],
+        );
+        tabState.select(tab);
       }
-      const tab = `conversation:${channelId}`;
-      tabState.setTabs((tabs) =>
-        tabs.some((item) => item.id === tab)
-          ? tabs
-          : [...tabs, { id: tab, kind: "conversation", channelId }],
-      );
-      tabState.select(tab);
+      // A plain open replaces the tab the last one added; a kept or
+      // already-open tab stays.
+      const page = previews.get(session) ?? new Map<string, string>();
+      previews.set(session, page);
+      const opened = tabState.getSelected();
+      const preview = page.get(id);
+      if (known.has(opened)) {
+        if (keep && opened === preview) page.delete(id);
+      } else if (!keep) {
+        if (preview && known.has(preview))
+          tabState.setTabs((tabs) => tabs.filter((tab) => tab.id !== preview));
+        page.set(id, opened);
+      }
       return true;
     };
   });
   const open = useCallback(
-    (target: PageTabTarget) => opening.current(target),
+    (target: PageTabTarget, options?: PageTabOptions) =>
+      opening.current(target, options),
     [],
   );
   const focusPage = useRef(false);

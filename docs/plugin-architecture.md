@@ -1010,12 +1010,13 @@ Exact message links still navigate to Channels rather than the page's route.
 
 `conversation.ui.Tabs({ id, session, scope, label, icon, children })` makes the
 page's content the first main tab of the host's conversation tab workspace.
-`children(open)` renders that tab; `open({ channelId, threadId? })` adds a host
-tab for a joined conversation and returns false for any other. A thread opens
-as a thread tab in the main or side pane per the thread placement setting, and
-a whole conversation opens as a side-pane conversation tab, each with the same
-reader and composer as Channels tabs. On such a page any thread can move between
-panes. `id` keys the page's tabs, which last for its community session as
+`children(open)` renders that tab; `open({ channelId, threadId? }, { keep? })`
+shows a joined conversation in a host tab and returns false for any other. A
+thread opens as a side-pane thread tab and a whole conversation as a side-pane
+conversation tab, each with the same reader and composer as Channels tabs, so
+the page stays in view; any thread can then move to the main pane. A plain open
+replaces the tab the previous one added, and `keep: true` adds a tab beside it;
+an already-open conversation's tab is selected wherever it is. `id` keys the page's tabs, which last for its community session as
 Channels tabs do; they keep no Back/Forward visits.
 
 ### Composer ownership and mention tools
