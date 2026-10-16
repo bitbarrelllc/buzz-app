@@ -169,10 +169,7 @@ test("context menus appear immediately and retain their source highlight through
       );
       const background = () =>
         frame.evaluate(
-          (element, channel) =>
-            getComputedStyle(element, channel ? "::before" : null)
-              .backgroundColor,
-          surface === "channel",
+          (element) => getComputedStyle(element, "::before").backgroundColor,
         );
       await source.hover();
       await expect.poll(background).not.toBe("rgba(0, 0, 0, 0)");
