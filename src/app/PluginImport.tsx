@@ -187,6 +187,8 @@ export function PluginImport({
     }
   }
   const candidate = preview?.candidates.find((p) => p.path === selected);
+  const onlyCandidate =
+    preview?.candidates.length === 1 ? preview.candidates[0] : undefined;
   const existing = catalog.plugins.find(
     (p) => p.manifest.id === candidate?.manifest.id,
   );
@@ -428,7 +430,24 @@ export function PluginImport({
             <section aria-label="Plugin import preview">
               <SettingsGroup layout="form">
                 <div className="min-w-0 text-body-sm">
-                  <p className="m-0 break-all font-medium">{preview.source}</p>
+                  {onlyCandidate && (
+                    <>
+                      <p className="m-0 text-label">
+                        {onlyCandidate.manifest.name}
+                      </p>
+                      <p className="m-0 break-all text-caption text-muted">
+                        {onlyCandidate.manifest.id}
+                      </p>
+                      {onlyCandidate.path !== "." && (
+                        <p className="m-0 break-all text-caption text-muted">
+                          Folder: {onlyCandidate.path}
+                        </p>
+                      )}
+                    </>
+                  )}
+                  <p className="m-0 break-all text-caption text-muted">
+                    Source: {preview.source}
+                  </p>
                   {preview.commit && (
                     <p className="m-0 break-all text-caption text-muted">
                       Commit: {preview.commit}
@@ -441,7 +460,7 @@ export function PluginImport({
                     its output folder, or use a repository that includes built
                     artifacts.
                   </p>
-                ) : (
+                ) : preview.candidates.length > 1 ? (
                   <Field label="Choose a plugin folder">
                     <RadioGroup
                       name="plugin-folder"
@@ -467,7 +486,7 @@ export function PluginImport({
                       ))}
                     </RadioGroup>
                   </Field>
-                )}
+                ) : null}
                 {preview.warnings.length > 0 && (
                   <details className="text-body-sm text-muted">
                     <summary>

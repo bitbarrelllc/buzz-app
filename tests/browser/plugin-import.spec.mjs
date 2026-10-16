@@ -614,6 +614,15 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await button(page, "Add").click();
   await button(page, "Browse plugin folder").click();
   const dialog = page.getByRole("dialog", { name: "Add a plugin" });
+  await expect(dialog.getByRole("radio")).toHaveCount(0);
+  await expect(
+    dialog.getByText("Choose a plugin folder", { exact: true }),
+  ).toHaveCount(0);
+  await expect(dialog.getByText("Retry plugin", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByText("example.retry", { exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByText("Folder: dist", { exact: true })).toBeVisible();
   await expect(
     dialog.getByRole("region", { name: "Plugin import preview" }),
   ).toBeVisible();

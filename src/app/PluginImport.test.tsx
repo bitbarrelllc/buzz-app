@@ -494,6 +494,10 @@ it("replaces Add with an error view and returns to the retained preview for retr
   const install = await within(dialog).findByRole("button", {
     name: "Install plugin",
   });
+  expect(within(dialog).queryByRole("radio")).toBeNull();
+  expect(within(dialog).queryByText("Choose a plugin folder")).toBeNull();
+  expect(within(dialog).getByText("Retry plugin")).toBeVisible();
+  expect(within(dialog).getByText("example.retry")).toBeVisible();
   expect(install).toHaveAttribute("data-variant", "prominent");
   install.focus();
   fireEvent.click(install);
