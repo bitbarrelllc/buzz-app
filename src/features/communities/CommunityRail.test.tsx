@@ -650,22 +650,51 @@ it("leaves an inactive community after confirming: the relay releases it before 
   ).not.toHaveFocus();
 });
 
-it("leaving the selected community leaves the landing to the host's snapshot effect; the rail selects nothing itself", async () => {
+it("leaving the selected community tells the host to select Personal space; an inactive one does not", async () => {
   const user = userEvent.setup();
   const h = harness();
   render(<CommunityRail communities={h.communities} onSelect={h.onSelect} />);
-  const dialog = await askToLeave(user, "Primary");
+  let dialog = await askToLeave(user, "Primary");
   await user.click(confirmLeave(dialog));
   await screen.findByText("Left Primary.");
-  // The service dropped the selection with the membership; the host reacts to
-  // that snapshot (as it does to a removal synced from another device), so the
-  // rail asks for no selection of its own.
+  // The service owns the store state; the host adds the navigation and ingress
+  // recovery that clicking Personal space would, so a Settings card scoped to
+  // the gone community is not left open.
   expect(h.leave).toHaveBeenCalledWith(primary, { purge: true });
-  expect(h.onSelect).not.toHaveBeenCalled();
-  expect(h.select).not.toHaveBeenCalled();
+  expect(h.onSelect).toHaveBeenCalledTimes(1);
+  expect(h.onSelect).toHaveBeenCalledWith(null);
+  expect(h.leave.mock.invocationCallOrder[0]).toBeLessThan(
+    h.onSelect.mock.invocationCallOrder[0] ?? 0,
+  );
   const personal = screen.getByRole("button", { name: "Personal space" });
   expect(personal).toHaveAttribute("aria-current", "true");
   await waitFor(() => expect(personal).toHaveFocus());
+
+  h.update({ selected: secondary });
+  dialog = await askToLeave(user, "Secondary");
+  await user.click(confirmLeave(dialog));
+  await screen.findByText("Left Secondary.");
+  expect(h.onSelect).toHaveBeenCalledTimes(2);
+  expect(h.onSelect).toHaveBeenLastCalledWith(null);
+
+  // Leaving a community that is not selected changes nothing about selection.
+  h.update({
+    memberships: [
+      { id: primary, name: "Primary" },
+      { id: secondary, name: "Secondary" },
+    ],
+    selected: primary,
+  });
+  dialog = await askToLeave(user, "Secondary");
+  await user.click(confirmLeave(dialog));
+  // The earlier "Left Secondary." toast is still showing, so wait on the
+  // leave itself rather than on a second copy of the same text.
+  await waitFor(() => expect(h.leave).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(await screen.findAllByText("Left Secondary.")).toHaveLength(2);
+  expect(h.onSelect).toHaveBeenCalledTimes(2);
+  expect(button("Primary")).toHaveAttribute("aria-current", "true");
+  await waitFor(() => expect(button("Primary")).toHaveFocus());
 });
 
 it("cancelling the confirmation keeps the membership and returns focus to the community", async () => {
@@ -829,6 +858,36 @@ it("falls back to the save failure's own message when it carries no cause", asyn
     "Left Secondary, but this device couldn’t finish cleaning up (Storage is read-only). Leave it again to finish.",
   );
   expect(button("Secondary")).toBeInTheDocument();
+});
+
+it("still reports a successful leave when the host's selection callback throws", async () => {
+  const user = userEvent.setup();
+  const h = harness();
+  const hostError = new Error("Navigation failed");
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const onSelect = vi.fn(() => {
+    throw hostError;
+  });
+  render(<CommunityRail communities={h.communities} onSelect={onSelect} />);
+  const dialog = await askToLeave(user, "Primary");
+  await user.click(confirmLeave(dialog));
+  // The device did finish: the community is gone and the relay released it.
+  // A host that cannot navigate afterwards must not read as a device failure.
+  const notice = await screen.findByText("Left Primary.");
+  expect(notice.closest(".buzz-toast")).toHaveAttribute("data-type", "success");
+  expect(screen.queryByText(/couldn’t finish cleaning up/)).toBeNull();
+  expect(onSelect).toHaveBeenCalledWith(null);
+  expect(error).toHaveBeenCalledWith(
+    "Couldn't select Personal space after leaving Primary",
+    hostError,
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(
+    screen.queryByRole("button", { name: "Switch to Primary" }),
+  ).toBeNull();
+  const personal = screen.getByRole("button", { name: "Personal space" });
+  expect(personal).toHaveAttribute("aria-current", "true");
+  await waitFor(() => expect(personal).toHaveFocus());
 });
 
 it("says when some saved data outlived the purge", async () => {

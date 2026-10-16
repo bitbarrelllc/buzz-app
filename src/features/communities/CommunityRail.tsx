@@ -254,11 +254,23 @@ export function CommunityRail({
       setLeaving(null);
       return;
     }
-    const { residue, outcome } = result;
+    const { wasSelected, residue, outcome } = result;
     // The community is gone from this device whatever happens next, so only
-    // the service call above may read as a cleanup failure. A left selection
-    // already fell back to Personal space in the service; the host lands it
-    // from the snapshot, as it does a removal synced from another device.
+    // the service call above may read as a cleanup failure.
+    if (wasSelected) {
+      // The service already fell back to Personal space. Telling the host too
+      // gives the leave the same navigation and ingress recovery as clicking
+      // Personal space, instead of leaving a page scoped to a gone community.
+      try {
+        onSelect?.(null);
+      } catch (error) {
+        // A host that cannot navigate is the host's failure, not the device's.
+        console.error(
+          `Couldn't select Personal space after leaving ${membership.name}`,
+          error,
+        );
+      }
+    }
     notify(
       leftCommunityText(membership.name, outcome, residue.length > 0),
       outcome === "left" ? "success" : "info",

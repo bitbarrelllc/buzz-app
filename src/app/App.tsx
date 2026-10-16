@@ -118,28 +118,6 @@ function ConnectedApp({ services }: { services: AppServices }) {
     [launchReady, terminal],
   );
   const select = route.select;
-  // Where a changed community selection lands: Channels, unless ingress
-  // recovery is under way and owns the next destination.
-  const land = () => {
-    const navigation = services.navigation.snapshot();
-    if (!(navigation.ingress && navigation.retryable))
-      select("buzz.channels/channels");
-  };
-  // A selection the service dropped with its community (a leave here) lands
-  // as clicking Personal space does, so no page stays scoped to a community
-  // that is gone.
-  const wasSelected = useRef(client.selected);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Only a dropped selection lands; `land` reads the route as it is then.
-  useEffect(() => {
-    const previous = wasSelected.current;
-    wasSelected.current = client.selected;
-    if (
-      previous &&
-      client.selected === null &&
-      !client.memberships.some((m) => m.id === previous)
-    )
-      land();
-  }, [client.selected, client.memberships]);
   useEffect(
     () =>
       registerAppShortcuts(
@@ -247,8 +225,11 @@ function ConnectedApp({ services }: { services: AppServices }) {
               <NavigationControls navigation={services.navigation} />
             }
             onCommunitySelect={(id) => {
+              const recovering =
+                services.navigation.snapshot().ingress &&
+                services.navigation.snapshot().retryable;
               services.communities.select(id);
-              land();
+              if (!recovering) select("buzz.channels/channels");
             }}
             // A scoped Settings target selects its community on the way.
             onOpenTarget={(target) => void services.navigation.open(target)}

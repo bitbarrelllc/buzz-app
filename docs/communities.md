@@ -104,10 +104,10 @@ in the rail and says so, naming the storage error so a store that never saves
 is not the same promise every attempt, and leaving it again finishes through
 the not-a-member answer; a store that will not clear is logged by name and the
 success notice says some saved data remains. A left community that was selected
-falls back to Personal space in the service, and the app lands that dropped
-selection exactly as clicking Personal space would (Channels, unless ingress
-recovery owns the next destination), through one reaction to the snapshot
-rather than a callback from the rail. Messages shows an intentional
+lands on Personal space through the host's selection path, exactly as clicking
+Personal space would; a host callback that fails there is logged as the host's
+own error, and the leave still reports success because the device did finish.
+Messages shows an intentional
 empty state there. Try drafting in A, switching to B, then returning to A.
 Selected channels, drafts and reading offsets are partitioned by the canonical
 community origin and viewer; channel IDs alone are not sufficient keys.
