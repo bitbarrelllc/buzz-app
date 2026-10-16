@@ -261,6 +261,90 @@ it("shows exact declared access and changes before an enabled update", async () 
   expect(manager.installImport).not.toHaveBeenCalled();
 });
 
+it.each([
+  {
+    source: "/plugins/example",
+    path: "dist",
+    commit: null,
+    location: "/plugins/example/dist",
+  },
+  {
+    source: "/plugins/example/",
+    path: "dist/nested",
+    commit: null,
+    location: "/plugins/example/dist/nested",
+  },
+  { source: "/", path: "dist", commit: null, location: "/dist" },
+  {
+    source: "C:\\plugins\\example",
+    path: "dist/nested",
+    commit: null,
+    location: "C:\\plugins\\example\\dist\\nested",
+  },
+  {
+    source: "Dropped folder: example",
+    path: "dist",
+    commit: null,
+    location: "Dropped folder: example/dist",
+  },
+  {
+    source: "https://github.com/example/plugins",
+    path: "dist",
+    commit: "abc",
+    location: "https://github.com/example/plugins · dist",
+  },
+  {
+    source: "/plugins/example",
+    path: ".",
+    commit: null,
+    location: "/plugins/example",
+  },
+])(
+  "shows one source location for $source and $path",
+  async ({ source, path, commit, location }) => {
+    const preview: ImportPreview = {
+      token: "preview",
+      source,
+      commit,
+      warnings: [],
+      candidates: [
+        {
+          path,
+          manifest: { id: "example.plugin", name: "Example", apiVersion: 1 },
+          revision: "one",
+        },
+      ],
+    };
+    const manager = {
+      imports: {
+        folder: vi.fn(async () => preview),
+        discard: vi.fn(async () => {}),
+      },
+    } as unknown as PluginManager;
+    render(
+      <PluginImport
+        plugins={manager}
+        catalog={{ profile: "test", location: "test", plugins: [] }}
+        busy={false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Browse plugin folder" }),
+    );
+    expect(
+      await screen.findByText(`Source: ${location}`, { exact: true }),
+    ).toBeVisible();
+    expect(screen.queryByText(/^Folder:/)).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Skipped folders" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Install plugin" }),
+    ).toBeEnabled();
+  },
+);
+
 const outputLimitUpdates = [
   { previous: undefined, next: 65536, changed: true },
   { previous: 4096, next: 1048576, changed: true },

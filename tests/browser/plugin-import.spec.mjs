@@ -13,8 +13,9 @@ async function openPlugins(page, origin) {
   await selectSettingsSection(page, "Plugins");
 }
 // Native IPC is the boundary fixture; Settings -> manager -> platform adapter are production.
-async function nativeImports(page, samples = []) {
-  await page.addInitScript((samples) => {
+async function nativeImports(page, samples = [], previewOptions = {}) {
+  const input = { samples, previewOptions };
+  await page.addInitScript(({ samples, previewOptions }) => {
     window.isTauri = true;
     window.importCalls = [];
     window.importDelay = false;
@@ -44,7 +45,8 @@ async function nativeImports(page, samples = []) {
       token: "preview-one",
       source: "https://github.com/example/plugins",
       commit: "a".repeat(40),
-      warnings: ["Selected folder: Missing file: plugin.js"],
+      warnings: ["broken: Missing file: broken/plugin.js"],
+      ...previewOptions,
       candidates: samples.length
         ? samples
         : ["one", "two"].map((name) => ({
@@ -139,7 +141,7 @@ async function nativeImports(page, samples = []) {
         throw new Error(`Unexpected command ${command}`);
       },
     };
-  }, samples);
+  }, input);
 }
 
 test("browser omits native import acquisition controls", async ({
@@ -399,6 +401,19 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   await openPlugins(page, app.origin);
   await button(page, "Add").click();
   await button(page, "Browse plugin folder").click();
+  const skippedFolders = page.getByRole("region", {
+    name: "Skipped folders",
+  });
+  await expect(skippedFolders.getByRole("list")).toHaveCSS(
+    "list-style-type",
+    "disc",
+  );
+  await expect(skippedFolders.getByRole("button")).toHaveCount(0);
+  await expect(
+    skippedFolders.getByText("broken: Missing file: broken/plugin.js", {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(2);
   await expect(button(page, "Install plugin")).toHaveCount(0);
   await page.getByRole("radio", { name: /Example two/ }).check();
@@ -589,27 +604,31 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   page,
   app,
 }, info) => {
-  await nativeImports(page, [
-    {
-      path: "dist",
-      revision: "one",
-      manifest: {
-        id: "example.retry",
-        name: "Retry plugin",
-        apiVersion: 1,
-        host: {
-          networkOrigins: ["https://api.example.com"],
-          commands: [
-            {
-              id: "status",
-              program: "python3",
-              args: ["-c", "print('plugin status')\n".repeat(80)],
-            },
-          ],
+  await nativeImports(
+    page,
+    [
+      {
+        path: "dist",
+        revision: "one",
+        manifest: {
+          id: "example.retry",
+          name: "Retry plugin",
+          apiVersion: 1,
+          host: {
+            networkOrigins: ["https://api.example.com"],
+            commands: [
+              {
+                id: "status",
+                program: "python3",
+                args: ["-c", "print('plugin status')\n".repeat(80)],
+              },
+            ],
+          },
         },
       },
-    },
-  ]);
+    ],
+    { source: "/plugins/example", commit: null, warnings: [] },
+  );
   await openPlugins(page, app.origin);
   await button(page, "Add").click();
   await button(page, "Browse plugin folder").click();
@@ -622,7 +641,12 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(
     dialog.getByText("example.retry", { exact: true }),
   ).toBeVisible();
-  await expect(dialog.getByText("Folder: dist", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByText("Source: /plugins/example/dist", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(dialog.getByText(/^Folder:/)).toHaveCount(0);
   await expect(
     dialog.getByRole("region", { name: "Plugin import preview" }),
   ).toBeVisible();
@@ -636,6 +660,9 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(
     dialog.getByRole("button", { name: "Install plugin", exact: true }),
   ).toHaveAttribute("data-variant", "prominent");
+  await expect(
+    dialog.getByRole("region", { name: "Skipped folders" }),
+  ).toHaveCount(0);
   const access = dialog.getByRole("region", { name: "Computer access" });
   await expect(access.getByText("Run python3 on your computer.")).toBeVisible();
   const summaryList = access
@@ -657,19 +684,6 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
     "font-family",
     /monospace/,
   );
-  const skippedFolders = dialog.getByRole("region", {
-    name: "Skipped folders",
-  });
-  await expect(skippedFolders.getByRole("list")).toHaveCSS(
-    "list-style-type",
-    "disc",
-  );
-  await expect(skippedFolders.getByRole("button")).toHaveCount(0);
-  await expect(
-    skippedFolders.getByText("Selected folder: Missing file: plugin.js", {
-      exact: true,
-    }),
-  ).toBeVisible();
   const codeRegion = access.getByRole("region", {
     name: "Plugin technical details",
   });

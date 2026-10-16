@@ -14,6 +14,15 @@ import type { PluginManager } from "../plugins/manager";
 import type { Catalog, ImportPreview } from "../plugins/types";
 import type { PluginManifest } from "../plugins/api";
 
+function importLocation(preview: ImportPreview, path: string | undefined) {
+  if (!path || path === ".") return preview.source;
+  if (preview.commit) return `${preview.source} · ${path}`;
+  const windows = /^(?:[a-z]:\\|\\\\)/i.test(preview.source);
+  const separator = windows ? "\\" : "/";
+  const source = preview.source.replace(windows ? /\\+$/ : /\/+$/, "");
+  return `${source}${separator}${path.replaceAll("/", separator)}`;
+}
+
 function hostGrants(manifest: PluginManifest): string[] {
   return [
     ...(manifest.host?.commands ?? []).map(
@@ -438,15 +447,10 @@ export function PluginImport({
                       <p className="m-0 break-all text-caption text-muted">
                         {onlyCandidate.manifest.id}
                       </p>
-                      {onlyCandidate.path !== "." && (
-                        <p className="m-0 break-all text-caption text-muted">
-                          Folder: {onlyCandidate.path}
-                        </p>
-                      )}
                     </>
                   )}
                   <p className="m-0 break-all text-caption text-muted">
-                    Source: {preview.source}
+                    Source: {importLocation(preview, onlyCandidate?.path)}
                   </p>
                   {preview.commit && (
                     <p className="m-0 break-all text-caption text-muted">

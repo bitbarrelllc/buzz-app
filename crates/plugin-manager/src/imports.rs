@@ -46,6 +46,7 @@ pub struct PreparedImport {
     pub preview: Preview,
     folder_root: Option<PathBuf>,
     artifacts: BTreeMap<String, Release>,
+    unbuilt: Vec<(String, Option<String>, String)>,
 }
 impl PreparedImport {
     fn new(source: String, commit: Option<String>, folder_root: Option<PathBuf>) -> Result<Self> {
@@ -61,6 +62,7 @@ impl PreparedImport {
             },
             folder_root,
             artifacts: BTreeMap::new(),
+            unbuilt: vec![],
         })
     }
     fn add(&mut self, path: String, artifact: Result<Release>) -> Result<()> {
@@ -106,6 +108,33 @@ impl PreparedImport {
             }
         }
         Ok(())
+    }
+    // A source manifest without code can be the parent of its built output.
+    // Defer only that case until discovery can match the same plugin ID below it.
+    fn add_unbuilt(&mut self, path: String, manifest: Result<String>, reason: String) {
+        let (id, reason) = match manifest {
+            Ok(text) => (
+                serde_json::from_str::<Manifest>(&text).ok().map(|m| m.id),
+                reason,
+            ),
+            Err(error) => (None, error),
+        };
+        self.unbuilt.push((path, id, reason));
+    }
+    fn finish(mut self) -> Result<Self> {
+        for (path, id, reason) in std::mem::take(&mut self.unbuilt) {
+            let found_build = id.is_some_and(|id| {
+                self.preview.candidates.iter().any(|candidate| {
+                    candidate.manifest.id == id
+                        && candidate.path != path
+                        && (path == "." || Path::new(&candidate.path).starts_with(&path))
+                })
+            });
+            if !found_build {
+                self.add(path, Err(reason))?;
+            }
+        }
+        Ok(self)
     }
     pub fn install(&self, manager: &Manager, token: &str, path: &str) -> Result<Catalog> {
         if token != self.preview.token {
@@ -240,6 +269,7 @@ pub fn prepare_folder(directory: &Path) -> Result<PreparedImport> {
         }
         let mut has_manifest = false;
         let mut has_release = false;
+        let mut has_code = false;
         for entry in directory
             .read_dir(if relative.as_os_str().is_empty() {
                 Path::new(".")
@@ -258,6 +288,9 @@ pub fn prepare_folder(directory: &Path) -> Result<PreparedImport> {
             if name == "manifest.json" {
                 has_manifest = true;
             }
+            if name == "plugin.js" {
+                has_code = true;
+            }
             if name == "plugin.artifact.json" || name == "plugin.signature.json" {
                 has_release = true;
             }
@@ -273,6 +306,14 @@ pub fn prepare_folder(directory: &Path) -> Result<PreparedImport> {
         }
         if has_manifest || has_release {
             let path = candidate_path(&relative)?;
+            if !has_release && !has_code {
+                prepared.add_unbuilt(
+                    path,
+                    read_source_file(&directory, &relative.join("manifest.json")),
+                    format!("Missing file: {}", relative.join("plugin.js").display()),
+                );
+                continue;
+            }
             let artifact = read_package(&directory, &relative).and_then(|release| {
                 if has_release && release.signature.is_none() {
                     Err("Signed plugin release disappeared during folder scan".into())
@@ -287,7 +328,7 @@ pub fn prepare_folder(directory: &Path) -> Result<PreparedImport> {
         .preview
         .candidates
         .sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(prepared)
+    prepared.finish()
 }
 
 pub(crate) fn read_package(directory: &cap_std::fs::Dir, relative: &Path) -> Result<Release> {
@@ -694,10 +735,19 @@ impl Git {
                 continue;
             };
             let Some(code_oid) = blobs.get(&format!("{parent}plugin.js")) else {
-                prepared.add(
-                    display.into(),
-                    Err("No built plugin.js beside manifest.json; build the plugin first".into()),
-                )?;
+                let reason = "No built plugin.js beside manifest.json; build the plugin first";
+                if symlinks.contains(&format!("{parent}plugin.js")) {
+                    prepared.add(display.into(), Err(reason.into()))?;
+                } else {
+                    prepared.add_unbuilt(
+                        display.into(),
+                        self.read_blob(manifest_oid).and_then(|bytes| {
+                            String::from_utf8(bytes)
+                                .map_err(|_| "manifest.json must be UTF-8".into())
+                        }),
+                        reason.into(),
+                    );
+                }
                 continue;
             };
             let artifact = (|| {
@@ -734,7 +784,7 @@ impl Git {
             })();
             prepared.add(display.into(), artifact)?;
         }
-        Ok(prepared)
+        prepared.finish()
     }
 
     fn read_blob(&self, oid: &str) -> Result<Vec<u8>> {
@@ -1041,6 +1091,90 @@ mod tests {
         .unwrap();
         path
     }
+    #[test]
+    fn source_parent_and_matching_build_are_one_discovery_across_import_sources() {
+        let git = Git::new().unwrap();
+        git.run(&["init", "--template=", "repository"], LIMIT)
+            .unwrap();
+        let repo = git.scratch.path().join("repository");
+        plugin(&repo, "", "example.one");
+        fs::remove_file(repo.join("plugin.js")).unwrap();
+        plugin(&repo, "dist", "example.one");
+        let broken = plugin(&repo, "broken", "example.one");
+        fs::remove_file(broken.join("plugin.js")).unwrap();
+        let other = plugin(&repo, "other", "example.other");
+        fs::remove_file(other.join("plugin.js")).unwrap();
+        plugin(&repo, "other/dist", "example.different");
+        fs::create_dir_all(repo.join("malformed")).unwrap();
+        fs::write(repo.join("malformed/manifest.json"), "{}").unwrap();
+        plugin(&repo, "malformed/dist", "example.one");
+        let paths = [
+            "manifest.json",
+            "dist/manifest.json",
+            "dist/plugin.js",
+            "broken/manifest.json",
+            "other/manifest.json",
+            "other/dist/manifest.json",
+            "other/dist/plugin.js",
+            "malformed/manifest.json",
+            "malformed/dist/manifest.json",
+            "malformed/dist/plugin.js",
+        ];
+        let upload = FolderUpload {
+            source: "fixture".into(),
+            files: paths
+                .iter()
+                .map(|path| ImportFile {
+                    path: (*path).into(),
+                    text: Some(fs::read_to_string(repo.join(path)).unwrap()),
+                    base64: None,
+                })
+                .collect(),
+        };
+        git.run(&["-C", "repository", "add", "."], LIMIT).unwrap();
+        git.run(
+            &[
+                "-C",
+                "repository",
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "fixture",
+            ],
+            LIMIT,
+        )
+        .unwrap();
+        for prepared in [
+            prepare_folder(&repo).unwrap(),
+            prepare_upload(upload).unwrap(),
+            git.read_plugins("fixture".into()).unwrap(),
+        ] {
+            assert_eq!(prepared.preview.candidates.len(), 3);
+            assert_eq!(prepared.preview.warnings.len(), 3);
+            for folder in ["broken:", "other:", "malformed:"] {
+                assert!(prepared
+                    .preview
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.starts_with(folder)));
+            }
+        }
+        // With no valid build, a source-only manifest still explains why import failed.
+        fs::remove_file(repo.join("dist/plugin.js")).unwrap();
+        fs::remove_file(repo.join("malformed/dist/plugin.js")).unwrap();
+        let missing = prepare_folder(&repo).unwrap();
+        assert!(missing
+            .preview
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("Selected folder:")));
+    }
+
     #[test]
     fn folder_discovers_nested_dist_and_installs_exact_preview_without_execution() {
         let root = tempfile::tempdir().unwrap();
