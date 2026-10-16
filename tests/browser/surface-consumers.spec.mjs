@@ -142,10 +142,22 @@ for (const mode of ["light", "dark"]) {
       const selected =
         mode === "dark" ? "rgb(51, 51, 51)" : "rgb(232, 232, 232)";
       await expect(session).toHaveAttribute("aria-current", "page");
-      await expect(row).toHaveCSS("background-color", selected);
+      await expect
+        .poll(() =>
+          row.evaluate(
+            (element) => getComputedStyle(element, "::before").backgroundColor,
+          ),
+        )
+        .toBe(selected);
       await expect(session).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       await session.hover();
-      await expect(row).toHaveCSS("background-color", selected);
+      await expect
+        .poll(() =>
+          row.evaluate(
+            (element) => getComputedStyle(element, "::before").backgroundColor,
+          ),
+        )
+        .toBe(selected);
       await expect(session).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       await page.getByRole("button", { name: "New", exact: true }).click();
       await page
@@ -153,10 +165,13 @@ for (const mode of ["light", "dark"]) {
         .click();
       await expect(session).not.toHaveAttribute("aria-current", "page");
       await session.hover();
-      await expect(row).toHaveCSS(
-        "background-color",
-        await resolvedColor(sidebar, "var(--affordance-panel-hover)"),
-      );
+      await expect
+        .poll(() =>
+          row.evaluate(
+            (element) => getComputedStyle(element, "::before").backgroundColor,
+          ),
+        )
+        .toBe(await resolvedColor(sidebar, "var(--affordance-panel-hover)"));
     },
   );
 }

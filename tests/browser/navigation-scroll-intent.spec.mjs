@@ -21,12 +21,15 @@ for (const cachedStartup of [false, true]) {
       page,
       app,
     }) => {
+      // This journey owns channel-only restoration, including genuine cold startup.
+      // Keep Solo hydration out of the inventory geometry across community changes.
+      await page.addInitScript(() => {
+        localStorage.setItem(
+          "buzzodz.plugins.v1",
+          JSON.stringify({ version: 2, enabled: { "buzz.me": false } }),
+        );
+      });
       await open(page, app);
-      // This journey owns channel inventory restoration; Solo hydration has its own layout.
-      await page
-        .getByRole("tablist", { name: "Navigation scope", exact: true })
-        .getByRole("tab", { name: "Team", exact: true })
-        .click();
       const sidebar = page.getByRole("navigation", {
         name: "Subscribed channels",
       });
@@ -74,10 +77,6 @@ for (const cachedStartup of [false, true]) {
       });
       try {
         await page.reload();
-        await page
-          .getByRole("tablist", { name: "Navigation scope", exact: true })
-          .getByRole("tab", { name: "Team", exact: true })
-          .click();
         await selectCommunity(page, "Primary");
         await expect
           .poll(() => sidebar.locator("[data-channel-id]").count())

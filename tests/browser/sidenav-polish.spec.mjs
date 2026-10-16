@@ -190,7 +190,11 @@ test("compact sidenav keeps its geometry across persistent page navigation", asy
   await expect(menu).toHaveCount(0);
   await expect(alpha).toBeFocused();
   const node = await sidebar.elementHandle();
-  await page.getByRole("tab", { name: "Agents", exact: true }).first().click();
+  await page
+    .getByRole("navigation", { name: "Topbar pages", exact: true })
+    .getByRole("tab", { name: "Agents", exact: true })
+    .first()
+    .click();
   await expect(
     page.getByRole("region", { name: "Agents", exact: true }),
   ).toBeVisible();
@@ -270,9 +274,7 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
   expect((await header.boundingBox()).height).toBe(56);
   // The overflow trigger stays mounted but is hidden while header pages fit.
   const controls = header.locator(".buzz-button[data-icon-variant]:visible");
-  const icons = header.locator(
-    '.buzz-button[data-icon-variant]:visible:not([aria-label="New"]):not([aria-label="Search Buzz"]) svg',
-  );
+  const icons = controls.locator("svg");
   await expect(
     header.getByRole("button", { name: "Bestie", exact: true }),
   ).toHaveCount(0);
@@ -326,10 +328,17 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
       const box = await control.boundingBox();
       expect([box.width, box.height]).toEqual([32, 32]);
     }
-    expect(await icons.count()).toBeGreaterThanOrEqual(4);
-    for (const icon of await icons.all()) {
-      const box = await icon.boundingBox();
-      expect([box.width, box.height]).toEqual([16, 16]);
+    expect(await icons.count()).toBeGreaterThanOrEqual(5);
+    for (const control of await controls.all()) {
+      const size = ["New", "Search Buzz"].includes(
+        await control.getAttribute("aria-label"),
+      )
+        ? 18
+        : 16;
+      for (const icon of await control.locator("svg").all()) {
+        const box = await icon.boundingBox();
+        expect([box.width, box.height]).toEqual([size, size]);
+      }
     }
     await page.mouse.move(700, 500);
     for (const control of await ghosts.all())
@@ -353,12 +362,14 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
       header.getByRole("button", { name: "Your profile" }),
     ).toHaveAttribute("data-icon-shape", "round");
     for (const control of await ghosts.all()) {
-      await expect(control).toHaveCSS(
-        "border-radius",
-        (await control.getAttribute("data-icon-shape")) === "round"
-          ? "50%"
-          : "10px",
-      );
+      if ((await control.getAttribute("data-icon-shape")) === "round") {
+        const radius = await control.evaluate((element) =>
+          parseFloat(getComputedStyle(element).borderRadius),
+        );
+        expect(radius).toBeGreaterThanOrEqual(
+          (await control.boundingBox()).width / 2,
+        );
+      } else await expect(control).toHaveCSS("border-radius", "10px");
       if (await control.isDisabled()) continue;
       for (const [mode, fill] of [
         ["light", "rgba(0, 0, 0, 0.06)"],
@@ -691,7 +702,10 @@ test("shell toggle restores the shared sidebar for Channels and Agents", async (
     )
     .toBe(expandedWidth);
 
-  await page.getByRole("tab", { name: "Agents", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Topbar pages", exact: true })
+    .getByRole("tab", { name: "Agents", exact: true })
+    .click();
   await expect(
     page.getByRole("region", { name: "Agents", exact: true }),
   ).toBeVisible();
@@ -732,7 +746,9 @@ test("shell toggle restores the shared sidebar for Channels and Agents", async (
     )
     .toBe(expandedWidth);
   await expect(
-    page.getByRole("tab", { name: "Agents", exact: true }),
+    page
+      .getByRole("navigation", { name: "Topbar pages", exact: true })
+      .getByRole("tab", { name: "Agents", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
 });
 
