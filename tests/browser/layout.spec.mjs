@@ -353,7 +353,7 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
   near(dock.y, main.y);
   near(dock.height, main.height);
   near(dock.x - main.x - main.width, 1);
-  near(dock.x + dock.width, 1264);
+  near(dock.x + dock.width, page.viewportSize().width - gap - 1);
   await expect(composer).toHaveJSProperty("value", "Layout draft");
   await expect(composer).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("joined-one-panel.png") });
@@ -1112,15 +1112,21 @@ companionReadingTest(
       [390, 844],
     ]) {
       await page.setViewportSize({ width, height });
-      const top = await box(page.locator("[data-panel-workspace]"));
-      const bottom = await box(
-        page.getByRole("complementary", {
-          name: "Companion fixture",
-          exact: true,
-        }),
-      );
-      near(top.height, bottom.height);
-      near(bottom.y - top.y - top.height, 1);
+      let top;
+      let bottom;
+      // The resize observer applies panel allocation after viewport resize resolves.
+      // Capture the baseline only once both cards have their matching layout.
+      await expect(async () => {
+        top = await box(page.locator("[data-panel-workspace]"));
+        bottom = await box(
+          page.getByRole("complementary", {
+            name: "Companion fixture",
+            exact: true,
+          }),
+        );
+        near(top.height, bottom.height);
+        near(bottom.y - top.y - top.height, 1);
+      }).toPass({ timeout: 10_000 });
       await expect(
         page.locator(
           '.buzz-tabs-item:not(:has([data-tab-value^="thread:"])) > button:not([role="tab"])',

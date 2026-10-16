@@ -330,11 +330,8 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
     }
     expect(await icons.count()).toBeGreaterThanOrEqual(5);
     for (const control of await controls.all()) {
-      const size = ["New", "Search Buzz"].includes(
-        await control.getAttribute("aria-label"),
-      )
-        ? 18
-        : 16;
+      const size =
+        (await control.getAttribute("aria-label")) === "New" ? 18 : 16;
       for (const icon of await control.locator("svg").all()) {
         const box = await icon.boundingBox();
         expect([box.width, box.height]).toEqual([size, size]);
