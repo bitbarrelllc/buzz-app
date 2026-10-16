@@ -29,6 +29,7 @@ import { fakeNative } from "./service-testing";
 import { memoryStorage } from "./test-fakes";
 import { claudeRun } from "../../bundled/claude-code/run";
 import { ClaudeRuntime } from "../../bundled/claude-code/runtime";
+import { AgentSessions as ClaudeSessions } from "../../bundled/claude-code/sessions";
 import { fakeSpawn as fakeClaude } from "../../bundled/claude-code/claude-testing";
 import { codexRun } from "../../bundled/codex/run";
 import { CodexRuntime } from "../../bundled/codex/runtime";
@@ -284,6 +285,16 @@ async function setup<Config>(
     counted.live().receive([sent], { phase: "live", channelId: channel });
     return sent;
   };
+  /** A reply from the owner in `root`'s thread: the same conversation. */
+  const reply = (root: RelayEvent) => {
+    mentions++;
+    const sent = message(owner, channel, "@agent again", ++at, [
+      ["e", root.id, "", "reply"],
+      ["p", agentKey.pubkey],
+    ]);
+    counted.live().receive([sent], { phase: "live", channelId: channel });
+    return sent;
+  };
   return {
     service,
     session: session.session,
@@ -293,6 +304,7 @@ async function setup<Config>(
     activity,
     attempts,
     mention,
+    reply,
   };
 }
 type Fixture = Awaited<ReturnType<typeof setup>>;
@@ -354,6 +366,38 @@ async function expectCounterSeesSync(f: Fixture) {
   });
 }
 
+/** Wires `runtime` to the service as its plugin does (`index.ts`): it sees
+ * the agent's local config now and after every change, before any delivery
+ * carries the synced one. Returns the sync, for a test to run after an edit. */
+function plugged(
+  f: Fixture,
+  runtime: Pick<ClaudeRuntime | GooseRuntime, "sync">,
+) {
+  const sync = () =>
+    runtime.sync(
+      f.service
+        .snapshot()
+        .running.filter((agent) => agent.pubkey === agentKey.pubkey),
+    );
+  disposals.push(f.service.subscribe(sync));
+  sync();
+  return sync;
+}
+
+/** Another device edits the synced settings: a new confirmed head arrives. */
+function remoteEdit(
+  f: Fixture,
+  agentType: string,
+  settings: Record<string, string>,
+) {
+  const store = (f.service as unknown as { configStore: AgentConfigStore })
+    .configStore;
+  store.applyRead(settingsSubject, store.capture(settingsSubject), {
+    kind: "head",
+    event: revision({ agentType, settings }),
+  });
+}
+
 it("starts Claude sessions from the synced copies, with no relay request online or offline", async () => {
   const claude = fakeClaude();
   const host = { spawn: claude.spawn, request: vi.fn() } as unknown as Host;
@@ -361,10 +405,13 @@ it("starts Claude sessions from the synced copies, with no relay request online 
     model: "synced-model",
     scope: "thread",
   });
+  let runtime!: ClaudeRuntime;
   const f = await setup(
     "claude-code",
-    (_relay, reads, core) =>
-      claudeRun(new ClaudeRuntime(host, reads, core, memoryStorage())),
+    (_relay, reads, core) => {
+      runtime = new ClaudeRuntime(host, reads, core, memoryStorage());
+      return claudeRun(runtime);
+    },
     {
       model: "local-model",
       effort: "",
@@ -375,15 +422,20 @@ it("starts Claude sessions from the synced copies, with no relay request online 
     seeded,
     synced(),
   );
+  plugged(f, runtime);
+  // The local sync warms spare processes on the local row; only the ones a
+  // delivery prompted count.
+  const used = () =>
+    claude.processes.filter((process) => process.prompts.length);
   const prompted = (index: number) =>
     vi.waitFor(() =>
-      expect(JSON.stringify(claude.processes[index]?.received)).toContain(
+      expect(JSON.stringify(used()[index]?.received)).toContain(
         "SYNCED INSTRUCTIONS",
       ),
     );
   f.mention();
   await prompted(0);
-  const [first] = claude.processes;
+  const [first] = used();
   expect(first?.model).toBe("synced-model");
   expect(first?.options.cwd).toBe("/this/device");
   expect(JSON.stringify(first?.received)).not.toContain("LOCAL INSTRUCTIONS");
@@ -394,13 +446,83 @@ it("starts Claude sessions from the synced copies, with no relay request online 
   f.transport.offline = true;
   f.mention();
   await prompted(1);
-  expect(claude.processes[1]?.model).toBe("synced-model");
-  expect(JSON.stringify(claude.processes[1]?.received)).not.toContain(
+  expect(used()[1]?.model).toBe("synced-model");
+  expect(JSON.stringify(used()[1]?.received)).not.toContain(
     "LOCAL INSTRUCTIONS",
   );
   expect(f.deliveries[1]?.revisions).toEqual(revisions);
   expectOnlyAllowed(f);
   await expectCounterSeesSync(f);
+});
+
+it("keeps a running Claude conversation on its config after a synced edit until Restart to apply, and starts new ones on the edit", async () => {
+  const claude = fakeClaude();
+  const host = { spawn: claude.spawn, request: vi.fn() } as unknown as Host;
+  const { seeded } = heads("buzz/claude-code", {
+    model: "synced-model",
+    scope: "thread",
+  });
+  let runtime!: ClaudeRuntime;
+  const f = await setup(
+    "claude-code",
+    (_relay, reads, core) => {
+      runtime = new ClaudeRuntime(host, reads, core, memoryStorage());
+      return claudeRun(runtime);
+    },
+    {
+      model: "local-model",
+      effort: "",
+      instructions: "LOCAL INSTRUCTIONS",
+      workspace: "/this/device",
+      scope: "thread",
+    },
+    seeded,
+    synced(),
+  );
+  const sync = plugged(f, runtime);
+  /** Whether a conversation runs on config other than the current synced
+   * copy, which the last delivery carried. */
+  const outdated = () =>
+    runtime.outdated(agentKey.pubkey, f.deliveries.at(-1)?.config);
+  /** The processes that took a prompt, not the spare one waiting. */
+  const used = () =>
+    claude.processes.filter((process) => process.prompts.length);
+  const prompts = () =>
+    used().map((process) => [process.model, process.prompts.length]);
+
+  const root = f.mention();
+  await vi.waitFor(() => expect(prompts()).toEqual([["synced-model", 1]]));
+
+  remoteEdit(f, "buzz/claude-code", { model: "edited-model", scope: "thread" });
+  sync();
+  const reply = () => f.reply(root);
+  reply();
+  await vi.waitFor(() => expect(prompts()).toEqual([["synced-model", 2]]));
+  expect(used()[0]?.killed).toBe(false);
+  expect(outdated()).toBe(true);
+
+  // A new conversation starts on the edit.
+  f.mention();
+  await vi.waitFor(() =>
+    expect(prompts()).toEqual([
+      ["synced-model", 2],
+      ["edited-model", 1],
+    ]),
+  );
+  expect(outdated()).toBe(true);
+
+  // Restart to apply moves the first conversation onto the edit.
+  runtime.restart(agentKey.pubkey);
+  reply();
+  await vi.waitFor(() =>
+    expect(prompts()).toEqual([
+      ["synced-model", 2],
+      ["edited-model", 1],
+      ["edited-model", 1],
+    ]),
+  );
+  expect(used()[0]?.killed).toBe(true);
+  expect(outdated()).toBe(false);
 });
 
 /** A Codex app server that answers what a thread and a turn need. */
@@ -555,13 +677,18 @@ it("starts Goose sessions from the synced copies, with no relay request online o
     provider: "synced-provider",
     scope: "thread",
   });
+  let runtime!: GooseRuntime;
   const f = await setup(
     "goose",
-    (relay, _reads, core) => gooseRun(new GooseRuntime(host, relay, core)),
+    (relay, _reads, core) => {
+      runtime = new GooseRuntime(host, relay, core);
+      return gooseRun(runtime);
+    },
     { ...GOOSE_LOCAL },
     seeded,
     synced(),
   );
+  plugged(f, runtime);
   f.mention();
   const process = () => goose.geese[0];
   await vi.waitFor(() => expect(process()?.turns).toHaveLength(1));
@@ -584,6 +711,68 @@ it("starts Goose sessions from the synced copies, with no relay request online o
   expect(f.deliveries[1]?.revisions).toEqual(revisions);
   expectOnlyAllowed(f);
   await expectCounterSeesSync(f);
+});
+
+it("keeps a running Goose conversation on its config after a synced edit until Restart to apply, and starts new ones on the edit", async () => {
+  const { goose, host } = gooseHost();
+  const { seeded } = heads("buzz/goose", {
+    model: "synced-model",
+    provider: "synced-provider",
+    scope: "thread",
+  });
+  let runtime!: GooseRuntime;
+  const f = await setup(
+    "goose",
+    (relay, _reads, core) => {
+      runtime = new GooseRuntime(host, relay, core);
+      return gooseRun(runtime);
+    },
+    { ...GOOSE_LOCAL },
+    seeded,
+    synced(),
+  );
+  const sync = plugged(f, runtime);
+  const outdated = () =>
+    runtime.outdated(agentKey.pubkey, f.deliveries.at(-1)?.config);
+  const process = () => goose.geese[0];
+  /** Each turn's session, and the models set on each session. */
+  const turns = () => process()?.turns.map((turn) => turn.sessionId);
+  const models = () =>
+    process()?.configured.filter((line) => line.includes("model="));
+
+  const root = f.mention();
+  await vi.waitFor(() => expect(turns()).toEqual(["session-1"]));
+  expect(models()).toEqual(["session-1 model=synced-model"]);
+
+  remoteEdit(f, "buzz/goose", {
+    model: "edited-model",
+    provider: "synced-provider",
+    scope: "thread",
+  });
+  sync();
+  const reply = () => f.reply(root);
+  reply();
+  await vi.waitFor(() => expect(turns()).toEqual(["session-1", "session-1"]));
+  expect(process()?.closed).toEqual([]);
+  expect(models()).toEqual(["session-1 model=synced-model"]);
+  expect(outdated()).toBe(true);
+
+  // A new conversation opens on the edit.
+  f.mention();
+  await vi.waitFor(() => expect(turns()).toHaveLength(3));
+  expect(models()).toEqual([
+    "session-1 model=synced-model",
+    "session-2 model=edited-model",
+  ]);
+  expect(outdated()).toBe(true);
+
+  // Restart to apply moves the first conversation onto the edit.
+  runtime.restart(agentKey.pubkey);
+  await vi.waitFor(() => expect(process()?.closed).toContain("session-1"));
+  expect(outdated()).toBe(false);
+  reply();
+  await vi.waitFor(() => expect(turns()).toHaveLength(4));
+  expect(models()?.at(-1)).toBe("session-3 model=edited-model");
 });
 
 it("refuses to start from deleted synced settings once: no launch, the reason on the mention, no retry", async () => {
@@ -616,4 +805,106 @@ it("refuses to start from deleted synced settings once: no launch, the reason on
   expect(f.deliveries).toEqual([]);
   expect(goose.geese).toEqual([]);
   expectOnlyAllowed(f);
+});
+
+/** The mention's single outcome, once its work has ended. */
+async function refused(f: Fixture, sent: RelayEvent) {
+  const work = () =>
+    f.activity.reader.work().filter((item) => item.messageId === sent.id);
+  await vi.waitFor(() => expect(work()[0]?.state).toBe("error"));
+  expect(work()).toHaveLength(1);
+  return work()[0]?.error;
+}
+
+it("refuses a Codex start whose synced effort its model lacks, rather than run at the default", async () => {
+  const codex = fakeCodex();
+  const { seeded } = heads("buzz/codex", {
+    model: "synced-model",
+    effort: "xhigh",
+    scope: "thread",
+  });
+  const f = await setup(
+    "codex",
+    (_relay, reads, core) =>
+      codexRun(new CodexRuntime(codex.spawn, reads, core, memoryStorage())),
+    {
+      model: "local-model",
+      effort: "low",
+      instructions: "LOCAL INSTRUCTIONS",
+      workspace: "/this/device",
+      scope: "thread",
+    },
+    seeded,
+    synced(),
+  );
+  const error = await refused(f, f.mention());
+  expect(error).toBe(
+    'The synced effort "xhigh" isn\'t available for synced-model. Choose a supported effort in Settings.',
+  );
+  expect(codex.sent.filter((wire) => wire.method === "turn/start")).toEqual([]);
+});
+
+/** A Claude agent whose local row runs `local` and whose synced settings run
+ * `model` at `effort`, synced into the runtime from the local row first, as
+ * the plugin does before any delivery. */
+async function claudeSynced(local: string, model: string, effort: string) {
+  const claude = fakeClaude();
+  const host = { spawn: claude.spawn, request: vi.fn() } as unknown as Host;
+  const { seeded } = heads("buzz/claude-code", {
+    model,
+    effort,
+    scope: "thread",
+  });
+  let runtime!: ClaudeRuntime;
+  const f = await setup(
+    "claude-code",
+    (_relay, reads, core) => {
+      runtime = new ClaudeRuntime(host, reads, core, memoryStorage());
+      return claudeRun(runtime);
+    },
+    {
+      model: local,
+      effort: "",
+      instructions: "LOCAL INSTRUCTIONS",
+      workspace: "/this/device",
+      scope: "thread",
+    },
+    seeded,
+    synced(),
+  );
+  plugged(f, runtime);
+  // Which instructions a running entry gets is option A's to settle; this
+  // is only whether a turn was handed to Claude at all.
+  const prompted = () =>
+    claude.processes.some((p) =>
+      JSON.stringify(p.received).includes("@agent hello"),
+    );
+  return { f, prompted };
+}
+
+it("starts a Claude turn whose synced effort only the synced model offers", async () => {
+  const { f, prompted } = await claudeSynced("haiku", "opus", "xhigh");
+  f.mention();
+  await vi.waitFor(() => expect(prompted()).toBe(true));
+});
+
+it("refuses a Claude start whose synced effort the synced model lacks, though the local model has it", async () => {
+  const { f, prompted } = await claudeSynced("opus", "haiku", "xhigh");
+  expect(await refused(f, f.mention())).toBe(
+    'The synced effort "xhigh" isn\'t available for Haiku 5.5. Choose a supported effort in Settings.',
+  );
+  expect(prompted()).toBe(false);
+});
+
+it("refuses a synced Claude effort it can't check when Claude lists no models", async () => {
+  vi.spyOn(ClaudeSessions.prototype, "metadata").mockResolvedValue({
+    models: [],
+    model: undefined,
+    effort: undefined,
+  });
+  const { f, prompted } = await claudeSynced("opus", "opus", "high");
+  expect(await refused(f, f.mention())).toBe(
+    "The synced effort \"high\" couldn't be checked: Claude doesn't list the model opus.",
+  );
+  expect(prompted()).toBe(false);
 });

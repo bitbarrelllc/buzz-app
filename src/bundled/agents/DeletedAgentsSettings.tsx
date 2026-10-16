@@ -1,0 +1,85 @@
+import { useState, useSyncExternalStore } from "react";
+import type { Agents } from "../../features/agents/service";
+import { Button } from "../../shared/design-system/ui/Button";
+
+const PENDING = {
+  archiving: "Deleting… it stays stopped and keeps trying while connected.",
+  recovering: "Recovering… it starts once its config channel is active again.",
+} as const;
+
+/** Agents Delete archived (plan §8.1): same key, row and settings, so
+ * Recover brings each back with its config history. */
+export function DeletedAgentsSettings({
+  agents,
+  active,
+}: {
+  agents: Pick<Agents, "snapshot" | "subscribe" | "recover">;
+  active(): boolean;
+}) {
+  const state = useSyncExternalStore(
+    agents.subscribe,
+    agents.snapshot,
+    agents.snapshot,
+  );
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const deleted = state.running.filter((agent) => agent.lifecycle);
+  const recover = async (pubkey: string) => {
+    if (!active() || busy) return;
+    setBusy(pubkey);
+    setError("");
+    try {
+      await agents.recover(pubkey);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <div data-buzz-ui="" className="flex flex-col items-start gap-4">
+      <div>
+        <h2 className="text-heading text-primary">Deleted agents</h2>
+        <p className="mt-2 text-body-sm text-secondary">
+          Deleting an agent archives its config channel and stops it. Its key
+          and config history are kept, so it can be recovered here.
+        </p>
+      </div>
+      {deleted.length === 0 ? (
+        <p role="status" className="text-body-sm text-secondary">
+          No deleted agents.
+        </p>
+      ) : (
+        <ul className="m-0 flex w-full list-none flex-col gap-2 p-0">
+          {deleted.map((agent) => (
+            <li key={agent.pubkey} className="flex items-center gap-3">
+              <span className="flex-1 text-body">
+                {agent.name}
+                {agent.lifecycle !== "archived" && (
+                  <span className="block text-body-sm text-secondary">
+                    {PENDING[agent.lifecycle ?? "archiving"]}
+                  </span>
+                )}
+              </span>
+              {agent.lifecycle === "archived" && (
+                <Button
+                  size="compact"
+                  loading={busy === agent.pubkey}
+                  disabled={!!busy}
+                  onClick={() => void recover(agent.pubkey)}
+                >
+                  Recover
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="m-0 text-body-sm text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}

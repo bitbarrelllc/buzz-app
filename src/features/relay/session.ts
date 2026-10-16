@@ -86,7 +86,12 @@ import {
 } from "./attachments";
 import { PRODUCT_FEEDBACK_KIND } from "./product-feedback";
 import type { ReadTransport } from "./transport";
-import type { LiveSnapshot, LiveSubscription } from "./live";
+import type { VerifiedEvent } from "nostr-tools";
+import {
+  isConfigRoute,
+  type LiveSnapshot,
+  type LiveSubscription,
+} from "./live";
 import {
   hasTag,
   type ReadFilter,
@@ -993,6 +998,11 @@ export function createRelaySession(
   };
   const catchups = new Map<string, Catchup>();
   let liveGeneration = 0;
+  /** Bumps whenever config traffic may have gapped: the connection dropped or
+   * a live config route left `live`. Counted in the synchronous `state`
+   * callback, so merged live-view notifications can't hide a gap. */
+  let configGeneration = 0;
+  const configListeners = new Set<(event: VerifiedEvent) => void>();
   /** Suspended-preview metadata rechecks in flight. */
   let previewChecks = 0;
   type LiveView = LiveSnapshot &
@@ -1795,6 +1805,22 @@ export function createRelaySession(
           )) satisfies SnapshotRead)
       : undefined,
     configArtifactWriter: transport?.configArtifacts,
+    /** Live-only config traffic for these config channels plus discovery of
+     * the viewer's config channels; `null` closes the config routes. */
+    configScope(scope: Readonly<{ channels: readonly string[] }> | null) {
+      if (!closed) traffic?.configScope?.(scope);
+    },
+    /** Verified events from the live config routes. */
+    onConfig(listener: (event: VerifiedEvent) => void) {
+      if (closed) return () => {};
+      configListeners.add(listener);
+      return () => {
+        configListeners.delete(listener);
+      };
+    },
+    /** Changes whenever config traffic may have gapped; a change means the
+     * config barrier must run again. */
+    configGeneration: () => configGeneration,
     workflowAuthority: transport?.archiveAuthority,
     authorizeAgentLog: transport?.authorizeAgentLog,
     authorizeGit: transport?.authorizeGit,
@@ -2532,6 +2558,10 @@ export function createRelaySession(
     }
   }
   traffic = transport?.subscribe?.({
+    config(event) {
+      if (closed) return;
+      for (const listener of configListeners) listener(event);
+    },
     observer: (frame, generation) => activity.receive(frame, generation),
     captureState: (state) => activity.captureState(state),
     receive(events, provenance) {
@@ -2707,6 +2737,20 @@ export function createRelaySession(
         )
       )
         refreshRoster();
+      const configLive = liveSnapshot.routes.filter(
+        (route) => isConfigRoute(route.id) && route.status === "live",
+      );
+      if (
+        (snapshot.status !== "connected" &&
+          liveSnapshot.status === "connected") ||
+        configLive.some(
+          ({ id }) =>
+            !snapshot.routes.some(
+              (route) => route.id === id && route.status === "live",
+            ),
+        )
+      )
+        configGeneration++;
       liveSnapshot = snapshot;
       // Suspend every affected preview before any recheck: one revocation can
       // cancel another read, but must never leave its old public grant readable.
@@ -2869,6 +2913,7 @@ export function createRelaySession(
     dispose() {
       stopMeGroups();
       closed = true;
+      configListeners.clear();
       stopLiveRecovery();
       recovery?.dispose();
       projects.clearHomes();

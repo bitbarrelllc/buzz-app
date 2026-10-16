@@ -60,9 +60,9 @@ const setup = (
     let settings: Launch = {
       workspace: "~/.buzz",
       systemPrompt: "prompt",
+      choice: { provider: "", model: "" },
       ...initial,
     };
-    let choice: Choice = { provider: "", model: "" };
     const sessions = new AgentSessions({
       spawn: fake.spawn,
       tools: agentTools,
@@ -73,9 +73,9 @@ const setup = (
         store: { set: (key: string, saved) => void store.set(key, saved) },
       }),
       launch: async () => settings,
-      choice: () => choice,
       fingerprint: () =>
         JSON.stringify([settings.workspace, settings.systemPrompt]),
+      snapshot: () => JSON.stringify(settings),
     });
     return {
       sessions,
@@ -83,15 +83,19 @@ const setup = (
         settings = { ...settings, ...next };
         if (reconfigure) sessions.reconfigure();
       },
-      /** Picks a provider and model, as saving the agent's settings does. */
+      /** Picks a provider, model and thinking level, as saving the agent's
+       * settings does. */
       choose: (next: Choice) => {
-        choice = next;
+        settings = { ...settings, choice: next };
+        sessions.choose(next);
         sessions.reconfigure();
       },
     };
   };
   return { fake, pool, process, agent, ...agent(initial, tools, onChange) };
 };
+
+const NO_CHOICE = { provider: "", model: "" };
 
 afterEach(() => {
   vi.useRealTimers();
@@ -422,10 +426,14 @@ describe("AgentSessions", () => {
       store: { set: (key, saved) => void store.set(key, saved) },
       launch: async () => {
         await held;
-        return { workspace: "/w", systemPrompt: "" };
+        return {
+          workspace: "/w",
+          systemPrompt: "",
+          choice: { provider: "", model: "" },
+        };
       },
-      choice: () => ({ provider: "", model: "" }),
       fingerprint: () => "",
+      snapshot: () => "",
     });
     const abort = new AbortController();
     const late = sessions.deliver("a", "one", 1, { signal: abort.signal });
@@ -448,9 +456,13 @@ describe("AgentSessions", () => {
       tools,
       process: new SharedProcess(fake.spawn, fake.serve),
       pool: new ServerPool(),
-      launch: async () => ({ workspace: "/w", systemPrompt: "" }),
-      choice: () => ({ provider: "", model: "" }),
+      launch: async () => ({
+        workspace: "/w",
+        systemPrompt: "",
+        choice: NO_CHOICE,
+      }),
       fingerprint: () => "",
+      snapshot: () => "",
     });
     await expect(sessions.deliver("a", "one", 1)).resolves.toMatchObject({
       ok: false,
@@ -466,7 +478,7 @@ describe("AgentSessions", () => {
     });
     const launch = vi.fn(async () => {
       await held;
-      return { workspace: "/w", systemPrompt: "" };
+      return { workspace: "/w", systemPrompt: "", choice: NO_CHOICE };
     });
     const sessions = new AgentSessions({
       spawn: fake.spawn,
@@ -474,8 +486,8 @@ describe("AgentSessions", () => {
       process: new SharedProcess(fake.spawn, fake.serve),
       pool: new ServerPool(),
       launch,
-      choice: () => ({ provider: "", model: "" }),
       fingerprint: () => "",
+      snapshot: () => "",
     });
     const delivering = sessions.deliver("a", "one", 1);
     const once = sessions.runOnce("watch/x", () => "look");
@@ -783,4 +795,29 @@ it("keeps saved conversations per agent in storage, most recent first", () => {
   expect(localSessions(storage, "two").list()).toEqual([["c/root", { at: 2 }]]);
   data.set("buzz.goose.sessions.v1", "not json");
   expect(one.list()).toEqual([]);
+});
+
+it("a remote Goose thinking edit stays pinned until Restart to apply", async () => {
+  const { sessions, change, fake } = setup({
+    choice: { provider: "", model: "", effort: "high" },
+  });
+  try {
+    await sessions.deliver("a", "before", 1);
+    change({ choice: { provider: "", model: "" } }, false);
+    await sessions.deliver("a", "still before", 2);
+    expect(fake.geese[0]?.closed).toEqual([]);
+    expect(fake.geese[0]?.configured).toEqual([
+      "session-1 thinking_effort=high",
+    ]);
+    expect(fake.geese[0]?.turns.map((t) => t.sessionId)).toEqual([
+      "session-1",
+      "session-1",
+    ]);
+    change({ systemPrompt: "Restart applied" });
+    await sessions.deliver("a", "after restart", 3);
+    expect(fake.geese[0]?.closed).toEqual(["session-1"]);
+    expect(fake.geese[0]?.turns.at(-1)?.sessionId).toBe("session-2");
+  } finally {
+    sessions.dispose();
+  }
 });

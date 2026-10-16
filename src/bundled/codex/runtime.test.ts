@@ -940,6 +940,96 @@ it("previews each model at the configured effort when it has it", async () => {
   const { models } = await f.runtime.preview(agent);
   expect(models.map((model) => model.effort)).toEqual(["low", "high"]);
 });
+it("starts each new session from the config its delivery carries, never the local row", async () => {
+  const f = fixture();
+  f.runtime.sync([
+    {
+      pubkey,
+      config: { workspace: "/tmp/codex-test", instructions: "LOCAL" },
+    } as Agent,
+  ]);
+  const carrying = (
+    content: string,
+    threadRoot: string,
+    instructions: string,
+  ) => {
+    const delivery = f.delivery(content, threadRoot);
+    return {
+      ...delivery,
+      config: { ...(delivery.config as object), instructions },
+    };
+  };
+  await f.runtime.run(carrying("@Codex one", "a".repeat(64), "SYNCED A"));
+  await f.runtime.run(carrying("@Codex two", "b".repeat(64), "SYNCED B"));
+  const starts = () => f.starts().map((start) => JSON.stringify(start.params));
+  await vi.waitFor(() => expect(starts()).toHaveLength(2));
+  expect(starts()[0]).toContain("SYNCED A");
+  expect(starts()[1]).toContain("SYNCED B");
+  expect(starts().join()).not.toContain("LOCAL");
+});
+it("keeps a thread on its pinned config until Restart to apply, across a reload", async () => {
+  const f = fixture();
+  const root = "a".repeat(64);
+  const carrying = (content: string, instructions: string, thread = root) => {
+    const delivery = f.delivery(content, thread);
+    return {
+      ...delivery,
+      config: { ...(delivery.config as object), instructions },
+    };
+  };
+  const starts = () => f.starts().map((start) => JSON.stringify(start.params));
+  const config = (instructions: string) => ({
+    workspace: "/tmp/codex-test",
+    model: "test-model",
+    effort: "low",
+    instructions,
+  });
+  await f.runtime.run(carrying("@Codex one", "SYNCED A"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(1));
+  f.complete(0, "ONE");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  expect(f.runtime.outdated(pubkey, config("SYNCED A"))).toBe(false);
+  // An edit from another device reaches the thread's next turn, which
+  // still runs on the version the thread was pinned to.
+  await f.runtime.run(carrying("@Codex two", "SYNCED B"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(2));
+  expect(starts()[1]).toContain("SYNCED A");
+  expect(starts()[1]).not.toContain("SYNCED B");
+  f.complete(1, "TWO");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(2));
+  expect(f.runtime.outdated(pubkey, config("SYNCED B"))).toBe(true);
+  // A new conversation starts on the current copy.
+  await f.runtime.run(carrying("@Codex new", "SYNCED B", "b".repeat(64)));
+  await vi.waitFor(() => expect(starts()).toHaveLength(3));
+  expect(starts()[2]).toContain("SYNCED B");
+  f.complete(2, "NEW");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(3));
+  // The pin survives a reload; Restart to apply re-pins on the next turn.
+  f.runtime.dispose();
+  await f.exits.promise;
+  const restored = fixture();
+  for (const [key, value] of f.storage) restored.storage.set(key, value);
+  const again = (content: string) => {
+    const delivery = restored.delivery(content, root);
+    return {
+      ...delivery,
+      config: { ...(delivery.config as object), instructions: "SYNCED B" },
+    };
+  };
+  const restarts = () =>
+    restored.starts().map((start) => JSON.stringify(start.params));
+  expect(restored.runtime.outdated(pubkey, config("SYNCED B"))).toBe(true);
+  await restored.runtime.run(again("@Codex three"));
+  await vi.waitFor(() => expect(restarts()).toHaveLength(1));
+  expect(restarts()[0]).toContain("SYNCED A");
+  restored.complete(0, "THREE");
+  await vi.waitFor(() => expect(restored.publish).toHaveBeenCalledTimes(1));
+  restored.runtime.restart(pubkey);
+  expect(restored.runtime.outdated(pubkey, config("SYNCED B"))).toBe(false);
+  await restored.runtime.run(again("@Codex four"));
+  await vi.waitFor(() => expect(restarts()).toHaveLength(2));
+  expect(restarts()[1]).toContain("SYNCED B");
+});
 it.each([
   ["", "", "test-model", "medium"],
   ["test-model", "high", "test-model", "high"],
@@ -1599,6 +1689,8 @@ it("restores a persisted binding after reload and starts fresh in a different wo
   await vi.waitFor(() =>
     expect(restored.runtime.sessions(pubkey)[0]?.status).toBe("Idle"),
   );
+  // Each change is saved on this device, which re-pins the thread.
+  restored.runtime.restart(pubkey);
   const useDefaults = restored.delivery("defaults");
   await restored.runtime.run({
     ...useDefaults,
@@ -1611,6 +1703,7 @@ it("restores a persisted binding after reload and starts fresh in a different wo
   });
   restored.complete();
   await vi.waitFor(() => expect(restored.publish).toHaveBeenCalledTimes(2));
+  restored.runtime.restart(pubkey);
   const changed = restored.delivery("new workspace");
   await restored.runtime.run({
     ...changed,
@@ -1731,6 +1824,8 @@ it("uses the default after changing away from a custom workspace on an existing 
   await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
   f.complete(0, "CUSTOM");
   await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  // Saved on this device, which re-pins the thread.
+  f.runtime.restart(pubkey);
   await f.runtime.run({ ...f.delivery("default"), config: {} });
   await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
   const threads = f.sent.filter((wire) => wire.method === "thread/start");

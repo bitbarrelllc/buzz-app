@@ -10,6 +10,7 @@ import type {
   StandaloneTurn,
   TurnResult,
 } from "../../features/agents/service";
+import { localKey } from "../../features/agents/service";
 import type { EventData } from "../../features/relay/events";
 import { appClient } from "../../buzz-mcp/app-client";
 import { MemoryReads } from "../../features/agent-harness/core-memory";
@@ -62,6 +63,8 @@ type Request = {
   /** The model and effort the owner picked for this turn. */
   model?: string;
   effort?: string;
+  /** The agent's effort when it came from its synced settings. */
+  syncedEffort?: string;
   /** Called once a final send answers this request, or one steered after it,
    * a steering rejection is posted in its place, or the turn ends normally. */
   answered: () => void;
@@ -78,6 +81,9 @@ type Saved = {
   workspace: string;
   at?: number;
   tools?: string;
+  /** The config the thread runs on, kept until a local save or Restart to
+   * apply; absent until its first turn after one. */
+  pin?: unknown;
 };
 type Active = {
   /** The server this turn runs on; steering must reach the same process. */
@@ -164,6 +170,8 @@ export class CodexRuntime {
   private views = new Map<string, readonly SessionView[]>();
   private listeners = new Set<() => void>();
   /** Read-only model discovery, kept until effective model settings change. */
+  /** Each agent's local row as last synced; a change is a local save. */
+  private locals = new Map<string, string>();
   private previews = new Map<string, { key: string; ready: Promise<Models> }>();
   private memoryReads = new MemoryReads();
   constructor(
@@ -272,6 +280,14 @@ export class CodexRuntime {
   }
   sync(agents: readonly Agent[]) {
     const present = new Set(agents.map((agent) => agent.pubkey));
+    for (const pubkey of this.locals.keys())
+      if (!present.has(pubkey)) this.locals.delete(pubkey);
+    for (const agent of agents) {
+      const local = localKey(agent, this.resolveConfig({}));
+      const prior = this.locals.get(agent.pubkey);
+      this.locals.set(agent.pubkey, local);
+      if (prior !== undefined && prior !== local) this.restart(agent.pubkey);
+    }
     for (const pubkey of this.previews.keys())
       if (!present.has(pubkey)) {
         this.previews.delete(pubkey);
@@ -285,6 +301,45 @@ export class CodexRuntime {
       }
     if (!present.size) this.close();
     for (const listener of this.listeners) listener();
+  }
+  /** Whether a thread runs on config other than `config`, what the host now
+   * resolves for the agent: it shows Restart to apply. */
+  outdated(pubkey: string, config: unknown) {
+    const current = JSON.stringify(this.resolveConfig(config));
+    return Object.values(this.bindings(pubkey)?.saved ?? {}).some(
+      ({ pin }) =>
+        pin !== undefined &&
+        JSON.stringify(this.resolveConfig(pin)) !== current,
+    );
+  }
+  /** Restart to apply, and a local save: each thread runs its next turn on
+   * the agent's current config, and keeps that until the next. */
+  restart(pubkey: string) {
+    const bindings = this.bindings(pubkey);
+    if (!bindings) return;
+    const saved = Object.fromEntries(
+      Object.entries(bindings.saved).map(([key, { pin: _, ...rest }]) => [
+        key,
+        rest,
+      ]),
+    );
+    const entry = this.entries.get(pubkey);
+    if (entry) entry.saved = saved;
+    try {
+      this.storage.setItem(bindings.storageKey, JSON.stringify(saved));
+    } catch (error) {
+      console.warn("Codex could not save its sessions", error);
+    }
+    for (const listener of this.listeners) listener();
+  }
+  /** The agent's saved bindings in its community, loaded or read. */
+  private bindings(pubkey: string) {
+    const entry = this.entries.get(pubkey);
+    if (entry) return entry;
+    const reads = this.reads(pubkey);
+    if (!reads) return undefined;
+    const storageKey = this.storageKey(reads.scope, pubkey);
+    return { storageKey, saved: this.load(storageKey) };
   }
   /** Other agents share the server, so a stopped agent's turns interrupt
    * themselves. Then the shells its finished turns left are ended, which its
@@ -526,6 +581,9 @@ export class CodexRuntime {
       ...(toolRoot ? { toolRoot } : {}),
       ...(delivery.model ? { model: delivery.model } : {}),
       ...(delivery.effort ? { effort: delivery.effort } : {}),
+      ...(delivery.synced?.effort
+        ? { syncedEffort: delivery.synced.effort }
+        : {}),
       conversation: {
         channelId,
         name: channel?.name ?? channelId,
@@ -686,6 +744,7 @@ export class CodexRuntime {
         settings,
         workspace,
         {},
+        delivery.synced?.effort,
       );
       const text = await prompt();
       if (text === undefined) return { ok: true };
@@ -960,13 +1019,16 @@ export class CodexRuntime {
     }
   }
   /** What a thread for `agent` starts or resumes with in `workspace`, and the
-   * model and effort its turn runs on: `pick`'s when available. */
+   * model and effort its turn runs on: `pick`'s when available. A synced
+   * effort the model lacks refuses the turn rather than run at the default
+   * (NIP-AP "Settings"). */
   private async prepare(
     rpc: AppServer,
     agent: AgentHandle,
     settings: Config,
     workspace: string,
     pick: Readonly<{ model?: string; effort?: string }>,
+    syncedEffort?: string,
   ) {
     const normalized = await rpc.request<{
       config: {
@@ -986,6 +1048,15 @@ export class CodexRuntime {
     const supported = selected.supportedReasoningEfforts.map(
       (level) => level.reasoningEffort,
     );
+    if (
+      syncedEffort &&
+      !picked &&
+      !pick.effort &&
+      !supported.includes(syncedEffort)
+    )
+      throw new Error(
+        `The synced effort "${syncedEffort}" isn't available for ${model}. Choose a supported effort in Settings.`,
+      );
     // A picked model may not support the configured effort.
     const effort =
       [pick.effort, settings.effort].find(
@@ -1029,6 +1100,11 @@ export class CodexRuntime {
     lane: Lane,
     entry: Entry,
   ) {
+    // A thread keeps the config it was pinned to; the delivery's current
+    // copy reaches it only after a local save or Restart to apply.
+    const pin = entry.saved[key]?.pin;
+    const settings =
+      pin === undefined ? request.settings : this.resolveConfig(pin);
     let ready!: () => void;
     let notReady!: (error: unknown) => void;
     const turnAbort = new AbortController();
@@ -1044,14 +1120,14 @@ export class CodexRuntime {
       steering: Promise.resolve(),
       reply: request,
       finished: false,
-      workspace: request.settings.workspace,
+      workspace: settings.workspace,
       signal,
       requests: [request],
       activity: new Map(),
     };
     void active.ready.catch(() => undefined);
     lane.active = active;
-    const { settings, agent } = request;
+    const { agent } = request;
     const followed = follow(server.rpc, signal, active, (method, item) => {
       const step = method === "item/started" ? codexStep(item) : undefined;
       if (step)
@@ -1082,6 +1158,7 @@ export class CodexRuntime {
         settings,
         workspace,
         request,
+        request.syncedEffort,
       );
       active.model = model;
       active.effort = effort;
@@ -1153,6 +1230,7 @@ export class CodexRuntime {
         workspace,
         at: Date.now(),
         ...(tools ? { tools } : {}),
+        pin: settings,
       });
       ready();
       this.status(agent.pubkey, key, "Working");
