@@ -477,6 +477,7 @@ const GROUNDED = [
     [
       "--affordance-row-hover",
       "--affordance-panel-hover",
+      "--affordance-navigation-quiet",
       "--affordance-selected",
     ],
   ),
@@ -502,7 +503,6 @@ const GROUNDED = [
       "--affordance-subtle-pressed",
       "--affordance-floating-control",
       "--affordance-floating-control-hover",
-      "--affordance-navigation-quiet",
     ],
   ),
   ...on(

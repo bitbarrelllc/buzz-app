@@ -1256,7 +1256,7 @@ roles, so nothing stays gray on a background that turned accent.
 | --- | --- |
 | Moments | Own messages, links |
 | Strong | Prominent buttons (including send), checked controls, switches, sliders, badges, tooltips; `text-on-prominent` is their ink, `affordance-prominent-mark` their standalone dots and lines |
-| Rows | `affordance-row-hover`, panel hover, selection, popover row states, and the ink on them (`text-row-subtle`, `text-row-metadata`) |
+| Rows | `affordance-row-hover`, panel hover, the sidebar's quiet row fill, selection, popover row states, and the ink on them (`text-row-subtle`, `text-row-metadata`) |
 | Controls | Resting quiet fills, their hover and pressed states, floating controls, control outlines |
 | Shell | `bg-app` and its dots |
 | Lines | Separators, thread lines, scrollbars |
