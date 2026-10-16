@@ -598,6 +598,7 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
         name: "Retry plugin",
         apiVersion: 1,
         host: {
+          networkOrigins: ["https://api.example.com"],
           commands: [
             {
               id: "status",
@@ -628,6 +629,14 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   ).toHaveAttribute("data-variant", "prominent");
   const access = dialog.getByRole("region", { name: "Computer access" });
   await expect(access.getByText("Run python3 on your computer.")).toBeVisible();
+  const summaryList = access
+    .getByRole("list")
+    .filter({ hasText: "Run python3 on your computer." });
+  await expect(summaryList).toHaveCSS("list-style-type", "disc");
+  await expect(summaryList.getByRole("listitem")).toHaveCount(2);
+  await expect(summaryList).toContainText(
+    "Make web requests to https://api.example.com.",
+  );
   await expect(access.getByText(/^Command status:/)).toHaveCount(0);
   const details = access.getByRole("button", { name: "Technical details" });
   await details.focus();
@@ -635,16 +644,56 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(access.getByText(/^Command status:/)).toContainText(
     "plugin status",
   );
-  await expect(access.locator("code")).toHaveCSS("font-family", /monospace/);
+  await expect(access.locator("code").first()).toHaveCSS(
+    "font-family",
+    /monospace/,
+  );
   await dialog.getByText("Folders skipped (1)", { exact: true }).click();
   await expect(
     dialog.getByText("Selected folder: Missing file: plugin.js", {
       exact: true,
     }),
   ).toBeVisible();
-  await dialog.screenshot({
-    path: info.outputPath("plugin-technical-details.png"),
+  const codeRegion = access.getByRole("region", {
+    name: "Plugin technical details",
   });
+  for (const [width, mode] of [
+    [900, "light"],
+    [480, "dark"],
+  ]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.emulateMedia({ colorScheme: mode });
+    await expect(page.locator("html")).toHaveAttribute("data-color-mode", mode);
+    await expect
+      .poll(() =>
+        codeRegion.evaluate((node) => ({
+          bounded:
+            node.clientHeight <= parseFloat(getComputedStyle(node).maxHeight),
+          scrolls: node.scrollHeight > node.clientHeight,
+          distinctBackground:
+            getComputedStyle(node).backgroundColor !==
+            getComputedStyle(node.closest('[role="dialog"]')).backgroundColor,
+        })),
+      )
+      .toEqual({ bounded: true, scrolls: true, distinctBackground: true });
+    await codeRegion.focus();
+    await codeRegion.press("End");
+    await expect
+      .poll(() => codeRegion.evaluate((node) => node.scrollTop))
+      .toBeGreaterThan(0);
+    const scrolled = await codeRegion.evaluate((node) => node.scrollTop);
+    await codeRegion.press("Home");
+    await expect
+      .poll(() => codeRegion.evaluate((node) => node.scrollTop))
+      .toBeLessThan(scrolled);
+    // Capture the beginning independently of platform-specific Home positioning.
+    await codeRegion.evaluate((node) => {
+      node.scrollTop = 0;
+    });
+    await dialog.screenshot({
+      path: info.outputPath(`plugin-technical-details-${mode}.png`),
+    });
+  }
   await dialog.getByText("Folders skipped (1)", { exact: true }).click();
   await details.press("Enter");
   await expect(details).toHaveAttribute("aria-expanded", "false");

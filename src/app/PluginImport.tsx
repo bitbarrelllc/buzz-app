@@ -510,7 +510,7 @@ export function PluginImport({
                     {declaredGrants.length ? (
                       <>
                         <p className="m-0">This plugin asks Buzz to:</p>
-                        <ul className="m-0 break-words">
+                        <ul className="my-2 list-disc space-y-1 break-words pl-4">
                           {candidate.manifest.host?.commands?.map((command) => (
                             <li key={command.id}>
                               Run {command.program} on your computer.
@@ -564,7 +564,12 @@ export function PluginImport({
                             value: "host-access",
                             title: "Technical details",
                             content: (
-                              <>
+                              <section
+                                aria-label="Plugin technical details"
+                                // biome-ignore lint/a11y/noNoninteractiveTabindex: Scroll owner supports keyboard access to long command details.
+                                tabIndex={0}
+                                className={styles.technicalDetails}
+                              >
                                 {declaredGrants.length > 0 && (
                                   <ul className="m-0 break-all">
                                     {declaredGrants.map((grant) => (
@@ -594,7 +599,7 @@ export function PluginImport({
                                       </code>
                                     </p>
                                   )}
-                              </>
+                              </section>
                             ),
                           },
                         ]}
