@@ -1128,20 +1128,30 @@ export class AgentsService extends Service implements Agents {
           ...(teams ? { teams } : {}),
         });
       },
-      team: (pubkey, admitted) =>
-        teamPrompt(
-          // Local teams stay local; for an id the relay knows, its copy wins.
+      team: (pubkey, admitted) => {
+        // Local teams stay local; for an id the relay knows in this run's
+        // owner and community, archived or unreadable too, its copy wins.
+        const agent = this.agent(pubkey);
+        const relay = new Set(
+          (agent
+            ? this.configJournals.teams.known(
+                agent.owner,
+                originOf(agent.relay) ?? "",
+              )
+            : undefined
+          )?.map((team) => team.id),
+        );
+        return teamPrompt(
           admitted
             ? [
-                ...this.teamList.filter(
-                  (team) => !this.configJournals.teams.synced(team.id),
-                ),
+                ...this.teamList.filter((team) => !relay.has(team.id)),
                 ...admitted,
               ]
             : this.teamList,
           this.identities.filter((identity) => !identity.deleted),
           pubkey,
-        ),
+        );
+      },
       templates: (agent) => {
         // The agents Agents shows for this community, as the create dialog
         // offers a template's.

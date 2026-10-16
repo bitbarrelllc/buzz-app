@@ -46,8 +46,9 @@ export class TeamJournal {
       /* Start fresh after malformed local data. */
     }
   }
-  /** Whether `id` is a synced team: one discovery found, from any device.
-   * A local team's id never is. */
+  /** Whether discovery found a relay team with `id` for any owner or
+   * community. A local row may share the id; which copy a run uses is
+   * decided by `known()` for that run's owner and community. */
   synced = (id: string) =>
     Object.values(this.discovered).some((teams) =>
       teams.some((team) => team.id === id),

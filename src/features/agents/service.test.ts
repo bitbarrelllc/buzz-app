@@ -6372,6 +6372,56 @@ describe("Delete as a recoverable archive", () => {
     }
   });
 
+  it.each([
+    ["another community", viewer, "https://not-joined.example.test"],
+    ["another owner", "e".repeat(64), "https://relay.example.test"],
+  ])(
+    "with config sync on, keeps local team rules when a same-id relay team is known for %s",
+    async (_, owner, community) => {
+      const relay = configRelay();
+      communityFake.value = relay.opens;
+      const id = "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+      const storage = memoryStorage();
+      writeTeams(storage, [
+        {
+          id,
+          name: "Local",
+          instructions: "SCOPED LOCAL RULE",
+          members: [alder],
+        },
+      ]);
+      storage.setItem(
+        TEAMS_MIGRATION_KEY,
+        JSON.stringify({
+          version: 1,
+          known: {
+            [`${community}\n${owner}`]: [
+              {
+                id,
+                channel: crypto.randomUUID(),
+                archived: false,
+                unreadable: false,
+                members: [],
+              },
+            ],
+          },
+        }),
+      );
+      const f = await setup({ identities: [here(alder)], storage });
+      try {
+        await vi.waitFor(() =>
+          expect(f.service.find(alder)?.configBase).toBeDefined(),
+        );
+        await relay.opens.mock.results[0]?.value.refreshTeams();
+        mentionAlder(f, "foreign-discovery");
+        await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+        expect(f.run.mock.calls[0]?.[0].team).toContain("SCOPED LOCAL RULE");
+      } finally {
+        await f.ctx.fiber.dispose();
+      }
+    },
+  );
+
   it("with config sync on, keeps local team rules after empty relay discovery", async () => {
     const relay = configRelay();
     communityFake.value = relay.opens;
