@@ -221,6 +221,37 @@ export type AgentSessions = Readonly<{
   list(pubkey: string): readonly AgentSession[];
   subscribe(listener: () => void): () => void;
 }>;
+/** Token counts as the harness reported them. An absent count is unknown, not
+ * zero. `input` excludes the cache counts; together they are the prompt. */
+export type TokenCounts = Readonly<{
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  /** Of `cacheWrite`, those cached for an hour rather than five minutes. */
+  cacheWrite1h?: number;
+}>;
+/** One model's use within one hour of a session. */
+export type UsageSlice = Readonly<{
+  /** Start of the hour, in milliseconds. */
+  hour: number;
+  model: string;
+  tokens: TokenCounts;
+  /** USD the harness itself recorded; absent when it records none. */
+  costUsd?: number;
+}>;
+/** One harness session an agent ran on this device. `channelId` and `root`
+ * say where in Buzz it started, when the session records it. */
+export type SessionUsage = Readonly<{
+  /** The harness's own session id, opaque to others. */
+  id: string;
+  channelId?: string;
+  root?: string;
+  title?: string;
+  startedAt: number;
+  lastAt: number;
+  usage: readonly UsageSlice[];
+}>;
 /** The agent as `run` holds it. It works for as long as the agent exists. */
 export type AgentHandle = Readonly<{
   pubkey: string;
@@ -478,6 +509,13 @@ export type AgentType<Config = unknown> = {
    * mentioning the agent. Discovery may be async but must not start a turn.
    * The picks reach that run as `Delivery.model` and `Delivery.effort`. */
   models?(agent: Agent<Config>): Models | Promise<Models>;
+  /** Read-only: the sessions the agent ran from Buzz on this device with
+   * activity since `since` (milliseconds), and their token use. Reading never
+   * starts, stops or changes a session; rejects when `signal` aborts. */
+  usage?(
+    agent: Agent<Config>,
+    options: Readonly<{ since: number; signal: AbortSignal }>,
+  ): Promise<readonly SessionUsage[]>;
   /** The settings that sync across devices and how they merge into this
    * device's config. Without it, the type's settings never sync. */
   syncedSettings?: Readonly<{

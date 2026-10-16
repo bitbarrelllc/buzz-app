@@ -766,3 +766,30 @@ on channel/access changes. Saved metrics remain
 subject to the independent 90-day/byte eviction policy above, so loaded history
 is never a completeness guarantee. Restored usage is display-only and cannot
 establish working, typing, or online status.
+
+## AgentsView
+
+AgentsView is a default-off page summarising what the selected community's agents
+on this computer spent: estimated cost against the previous period, tokens, cache
+hit rate (cache reads over uncached input plus cache reads), daily cost by agent
+type, and the costliest sessions, each opening its thread.
+
+It reads nothing itself. An agent type that can report usage implements the
+optional, read-only `AgentType.usage(agent, { since, signal })`, returning the
+sessions the agent ran from Buzz on this device with activity since `since`. Each
+session carries its own id, where in Buzz it started, and token counts by model
+and hour. An absent count is unknown, not zero; `input` excludes cache counts,
+and `cacheWrite1h` is the subset of `cacheWrite` cached for an hour. A type sets
+`costUsd` only when its harness recorded one. Reading never starts, stops or
+changes a session.
+
+Claude implements it from the transcripts Claude Code keeps for the agent's
+workspace: sessions whose first prompt names the agent, plus those this app saved
+for it (prompts from before agents were named), with their subagents' requests.
+Streamed responses repeat their usage on each line, so each request is counted
+once. Codex and Goose do not report usage yet.
+
+AgentsView estimates cost at Anthropic's published first-party API rates, which
+may differ from what a subscription bills; a model without known rates is listed
+as not counted rather than priced at zero. Kind-44200 metrics remain the Channel
+Usage source; AgentsView does not read or publish them.
