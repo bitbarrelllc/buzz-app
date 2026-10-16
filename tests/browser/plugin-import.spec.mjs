@@ -178,13 +178,21 @@ test("Settings controls scale together and keep enlarged labels reachable", asyn
               continue;
             }
             if (label.classList.contains("sr-only")) continue;
-            const text = document.createRange();
-            text.selectNodeContents(label);
-            for (const line of text.getClientRects()) {
-              if (line.left < bounds.left || line.right > bounds.right)
-                failures.push(
-                  `${label.textContent}: setting label overflows section`,
-                );
+            // Measure visible text only; sr-only spans are clipped by design.
+            const walker = document.createTreeWalker(
+              label,
+              NodeFilter.SHOW_TEXT,
+            );
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+              if (node.parentElement.closest(".sr-only")) continue;
+              const text = document.createRange();
+              text.selectNodeContents(node);
+              for (const line of text.getClientRects()) {
+                if (line.left < bounds.left || line.right > bounds.right)
+                  failures.push(
+                    `${label.textContent}: setting label overflows section`,
+                  );
+              }
             }
           }
           for (const button of root.querySelectorAll("button.buzz-button")) {

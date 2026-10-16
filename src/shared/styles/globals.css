@@ -193,7 +193,8 @@
     --interaction-selected: var(--affordance-backdrop-pressed);
     @apply relative flex shrink-0 items-center justify-between;
     min-height: var(--size-topbar);
-    padding-block: var(--space-2);
+    /* Compact headers hold the page capsule in flow; keep it inside the topbar. */
+    padding-block: var(--space-1);
     flex-wrap: wrap;
     padding-inline: var(--space-panel-gap);
     gap: var(--space-2);

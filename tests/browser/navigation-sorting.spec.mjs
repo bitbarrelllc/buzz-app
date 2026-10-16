@@ -390,9 +390,12 @@ test.describe("cold sidebar presentation", () => {
     try {
       await page.goto(app.origin);
       await decoding;
-      await expect(sidebar.getByRole("status")).toHaveText(
-        "Loading your sidebar…",
-      );
+      // Solo history shares this scrollport and reports its own loading.
+      await expect(
+        sidebar
+          .getByRole("status")
+          .filter({ hasText: "Loading your sidebar…" }),
+      ).toBeVisible();
       await expect(sidebar.locator("[data-channel-id]")).toHaveCount(0);
       await expect(
         page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
