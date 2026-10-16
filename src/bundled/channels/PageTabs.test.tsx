@@ -21,12 +21,16 @@ vi.mock("./ConversationTab", () => ({
   ConversationTab: ({
     tab,
     channel,
+    visit,
   }: {
     tab: Tab;
     channel: { name: string };
+    visit: boolean;
   }) => (
     <p>
       {tab.kind} in {channel.name}
+      {tab.kind === "thread" && tab.reveal && ` at ${tab.messageId}`}
+      {!visit && " unvisited"}
     </p>
   ),
 }));
@@ -46,7 +50,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-function fixture() {
+function fixture(visits?: boolean) {
   const channels = [
     { id: "alpha", name: "alpha" },
     { id: "beta", name: "beta" },
@@ -87,6 +91,7 @@ function fixture() {
       label="Switchboard"
       host={host}
       extensions={{} as ConversationExtensions}
+      visits={visits}
     >
       {(next) => {
         open = next;
@@ -163,4 +168,16 @@ it("opens a thread moved to the main pane where it is", () => {
   expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
   expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
+});
+
+it("reveals a message in its thread, without visiting when the page asks", () => {
+  const page = fixture(false);
+  expect(
+    page.open({ channelId: "alpha", threadId: "root", messageId: "reply" }),
+  ).toBe(true);
+  expect(screen.getByText("thread in alpha at reply unvisited")).toBeVisible();
+  // Opening the thread itself follows its latest reply again.
+  expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
+  expect(side()).toEqual(["Root text"]);
+  expect(screen.getByText("thread in alpha unvisited")).toBeVisible();
 });

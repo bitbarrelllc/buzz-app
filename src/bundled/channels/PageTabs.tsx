@@ -21,7 +21,12 @@ import { threadTab, useChannelTabState } from "./useChannelTabState";
 import { useConversationTabs } from "./useConversationTabs";
 import styles from "./Channels.module.css";
 
-export type PageTabTarget = { channelId: string; threadId?: string };
+/** `messageId` is a message in the thread to reveal. */
+export type PageTabTarget = {
+  channelId: string;
+  threadId?: string;
+  messageId?: string;
+};
 /** `keep` opens a tab beside the others instead of in place of the last. */
 export type PageTabOptions = { keep?: boolean };
 export type PageTabsProps = {
@@ -50,9 +55,12 @@ export function PageTabs({
   children,
   host,
   extensions,
+  visits,
 }: PageTabsProps & {
   host: ConversationHostServices;
   extensions: ConversationExtensions;
+  /** Whether showing a tab visits its conversation, as Channels does. */
+  visits?: boolean | undefined;
 }) {
   const tabState = useChannelTabState(session, undefined, `page:${id}`);
   const list = useChannelList(session.channels);
@@ -100,6 +108,7 @@ export function PageTabs({
     anyMainThread: true,
     // The page stays in view; a thread reaches the main pane only when moved.
     threadPane: "side",
+    visits,
     conversationIcon: (item) => {
       const Icon = channelIcon(item);
       return <Icon size="1rem" />;
@@ -111,16 +120,27 @@ export function PageTabs({
     (target: PageTabTarget, options?: PageTabOptions) => boolean
   >(() => false);
   useLayoutEffect(() => {
-    opening.current = ({ channelId, threadId }, { keep } = {}) => {
+    opening.current = ({ channelId, threadId, messageId }, { keep } = {}) => {
       if (!mounted.current || !secondary.canOpenConversation(channelId))
         return false;
       const known = new Set(tabState.tabs.map((tab) => tab.id));
       // An open thread keeps its tab in whichever pane it was moved to.
       const existing =
         threadId && threadTab(tabState.tabs, channelId, threadId)?.id;
-      if (threadId)
-        secondary.openConversationThread(channelId, threadId, threadId);
-      else {
+      if (threadId) {
+        secondary.openConversationThread(
+          channelId,
+          messageId ?? threadId,
+          threadId,
+        );
+        if (messageId)
+          tabState.setTabs((tabs) => {
+            const tab = threadTab(tabs, channelId, threadId);
+            return tabs.map((item) =>
+              item === tab ? { ...tab, reveal: true } : item,
+            );
+          });
+      } else {
         const tab = `conversation:${channelId}`;
         tabState.setTabs((tabs) =>
           tabs.some((item) => item.id === tab)
