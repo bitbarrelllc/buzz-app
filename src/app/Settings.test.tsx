@@ -269,21 +269,28 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   expect(
     within(communication as HTMLElement)
       .getAllByRole("article")
-      .map(
-        (row) =>
-          within(row).getByText(/^(Channels|Voice Notes|Messages)$/)
-            .textContent,
+      .map((row) =>
+        within(row)
+          .getByRole("button", { name: /^View .* details$/ })
+          .getAttribute("aria-label"),
       ),
   ).toEqual(
     essentials
-      ? ["Channels", "Voice Notes", "Messages"]
-      : ["Channels", "Messages", "Voice Notes"],
+      ? [
+          "View Channels details",
+          "View Voice Notes details",
+          "View Messages details",
+        ]
+      : [
+          "View Channels details",
+          "View Messages details",
+          "View Voice Notes details",
+        ],
   );
   expect(within(content).getAllByRole("article")).toHaveLength(5);
   expect(
     within(content).queryAllByRole("img", { name: "Essential" }),
-  ).toHaveLength(0);
-  expect(within(content).queryByText("Essential")).toBeNull();
+  ).toHaveLength(essentials ? 3 : 0);
   expect(
     within(content).queryAllByRole("region", { name: "Essentials" }),
   ).toHaveLength(0);
@@ -302,6 +309,9 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   expect(
     within(content).getByRole("button", { name: "View Voice Notes details" }),
   ).toHaveAttribute("data-enabled", "true");
+  expect(
+    within(content).getByRole("button", { name: "View Voice Notes details" }),
+  ).toHaveAccessibleDescription(essentials ? "Essential" : "");
   expect(
     within(content).getByRole("button", { name: "View Invoices details" }),
   ).toHaveAttribute("data-enabled", "false");

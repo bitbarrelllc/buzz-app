@@ -614,7 +614,14 @@ export function Settings({
                     />
                   )}
                   {isEssentialPlugin(plugin) && (
-                    <SparklesIcon size={14} aria-hidden="true" />
+                    <SparklesIcon
+                      id={`plugin-essential-${id}`}
+                      size={14}
+                      role="img"
+                      aria-label="Essential"
+                      aria-hidden={false}
+                      title="Essential"
+                    />
                   )}
                 </span>
               );
@@ -630,6 +637,11 @@ export function Settings({
                       className={styles.pluginRow}
                       data-enabled={plugin.enabled}
                       aria-label={`View ${plugin.manifest.name} details`}
+                      aria-describedby={
+                        isEssentialPlugin(plugin)
+                          ? `plugin-essential-${id}`
+                          : undefined
+                      }
                       aria-expanded={active}
                       aria-controls={active ? "plugin-details" : undefined}
                       onClick={(event) => {
