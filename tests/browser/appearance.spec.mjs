@@ -119,9 +119,17 @@ test("Appearance changes and restores both modes, shared keyboard controls, dial
       return color;
     }),
   );
+  // Selection follows the chosen accent at the default vibe level.
   await expect(button(page, "Appearance")).toHaveCSS(
     "background-color",
-    "rgb(51, 51, 51)",
+    await page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--affordance-selected)";
+      document.body.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    }),
   );
   expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBe(
     "dark",
@@ -483,9 +491,17 @@ test("compiled host preserves compatibility utility meanings", async ({
       "border-top-color",
       mode === "Light" ? "rgb(232, 232, 232)" : "rgb(35, 35, 35)",
     );
+    // The legacy fill keeps meaning "prominent", whatever the vibe level.
     await expect(page.locator("#old-primary")).toHaveCSS(
       "background-color",
-      mode === "Light" ? "rgb(0, 0, 0)" : "rgb(255, 255, 255)",
+      await page.evaluate(() => {
+        const probe = document.createElement("span");
+        probe.style.backgroundColor = "var(--affordance-prominent)";
+        document.body.append(probe);
+        const color = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return color;
+      }),
     );
     await expect(page.locator("#old-primary")).toHaveCSS(
       "border-radius",

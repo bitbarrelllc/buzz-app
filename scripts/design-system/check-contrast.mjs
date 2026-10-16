@@ -541,7 +541,7 @@ const GROUNDED = [
   ),
 ];
 const grayOnAccent = [];
-for (const family of accentFamilies.filter((name) => name !== "neutral"))
+for (const family of accentFamilies)
   for (const level of [BASELINE_LEVEL, ...LEVELS])
     for (const [mode, map] of Object.entries(
       declarationsByMode(css, family, level),

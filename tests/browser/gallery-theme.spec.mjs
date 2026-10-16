@@ -81,11 +81,18 @@ test("an open image gallery follows host appearance while retaining its dark sta
         "background-color",
         mode === "light" ? "rgb(255, 255, 255)" : "rgb(26, 26, 26)",
       );
-      await expect(
-        comments.getByText("Gallery comment", { exact: true }),
-      ).toHaveCSS(
+      // The viewer's own comment takes its accent-paired message ink.
+      const comment = comments.getByText("Gallery comment", { exact: true });
+      await expect(comment).toHaveCSS(
         "color",
-        mode === "light" ? "rgb(15, 15, 15)" : "rgb(255, 255, 255)",
+        await comment.evaluate((node) => {
+          const probe = document.createElement("span");
+          probe.style.color = "var(--text-message-own)";
+          node.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          return color;
+        }),
       );
       await expect(composer).toHaveCSS(
         "color",
