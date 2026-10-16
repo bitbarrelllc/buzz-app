@@ -298,19 +298,25 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
     )
     .toBe("eligible");
   // The paused clock must not run presentation's deadline ahead of the new
-  // row's commit/positioning. Let its first frame run, then establish viewing
-  // before allowing notification delivery (100ms) or reading dwell (300ms).
-  await page.clock.runFor(16);
-  await expect(history.locator(`[data-message-id="${row.id}"]`)).toBeVisible();
+  // row's commit/positioning. Pump frames until viewing is established, yielding
+  // between steps for native ResizeObserver and React work. Cap clock progress
+  // below presentation's 100ms fallback and reading's 300ms dwell.
+  let positioningTime = 0;
   await expect
-    .poll(() =>
-      page.evaluate(
+    .poll(async () => {
+      if (positioningTime < 96) {
+        await page.clock.runFor(16);
+        positioningTime += 16;
+      }
+      if (!(await history.locator(`[data-message-id="${row.id}"]`).isVisible()))
+        return false;
+      return page.evaluate(
         (id) =>
           window.fixtureRelay.snapshot().session.unread.attention("beta", id)
             .viewing,
         row.id,
-      ),
-    )
+      );
+    })
     .toBe(true);
   await page.clock.runFor(100);
   expect(await systemCount(page)).toBe(0);
