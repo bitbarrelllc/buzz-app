@@ -129,7 +129,7 @@ const host = {
   },
 } as unknown as Parameters<typeof Settings>[0];
 
-it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
+it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   const ready = {
     configuration: {
       status: "ready",
@@ -198,7 +198,7 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
               name: "Invoices",
               apiVersion: 1,
               description: "Reconcile invoices without leaving Buzz.",
-              discovery: { category: "finance" },
+              discovery: { category: "finance", tags: ["Essentials"] },
             },
             source: "external",
             enabled: false,
@@ -258,7 +258,7 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
     .getByRole("heading", {
       name: /^Communication/,
     })
-    .closest("section");
+    .closest('[role="region"]');
   expect(communication).not.toBeNull();
   const categoryGroup = communication?.querySelector(".buzz-settings-group");
   expect(categoryGroup).not.toBeNull();
@@ -282,13 +282,8 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
   expect(within(content).getAllByRole("article")).toHaveLength(5);
   expect(
     within(content).queryAllByRole("img", { name: "Essential" }),
-  ).toHaveLength(essentials ? 3 : 0);
+  ).toHaveLength(0);
   expect(within(content).queryByText("Essential")).toBeNull();
-  if (essentials) {
-    const name = within(content).getByText("Voice Notes");
-    const marker = within(name).getByRole("img", { name: "Essential" });
-    expect(marker.previousElementSibling?.tagName.toLowerCase()).toBe("svg");
-  }
   expect(
     within(content).queryAllByRole("region", { name: "Essentials" }),
   ).toHaveLength(0);
@@ -313,7 +308,7 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
 
   const other = within(content)
     .getByRole("heading", { name: /^Other/ })
-    .closest("section");
+    .closest('[role="region"]');
   expect(other).not.toBeNull();
   expect(within(other as HTMLElement).getByText("Invoices")).toBeVisible();
   expect(
@@ -334,6 +329,49 @@ it.each([false, true])("groups plugins (Essentials=%s)", (essentials) => {
       name: "Essentials only",
     }),
   ).toBeNull();
+
+  fireEvent.click(within(content).getByRole("tab", { name: "Essentials" }));
+  expect(within(content).queryAllByRole("article")).toHaveLength(
+    essentials ? 3 : 0,
+  );
+  await waitFor(() =>
+    expect(within(content).queryByText("Invoices")).toBeNull(),
+  );
+  const search = within(content).getByRole("searchbox", {
+    name: "Search plugins",
+  });
+  fireEvent.change(search, { target: { value: "  BUZZ.CODEX  " } });
+  expect(within(content).queryAllByRole("article")).toHaveLength(
+    essentials ? 1 : 0,
+  );
+  if (essentials) expect(within(content).getByText("Codex")).toBeVisible();
+
+  fireEvent.click(within(content).getByRole("tab", { name: "All plugins" }));
+  expect(within(content).getAllByRole("article")).toHaveLength(1);
+  fireEvent.change(search, { target: { value: "Reconcile" } });
+  expect(within(content).getAllByRole("article")).toHaveLength(1);
+  await waitFor(() =>
+    expect(within(content).getByText("Invoices")).toBeVisible(),
+  );
+  fireEvent.change(search, { target: { value: "no-match" } });
+  expect(within(content).queryAllByRole("article")).toHaveLength(0);
+  expect(within(content).getByText("No plugins found")).toBeVisible();
+  fireEvent.click(
+    within(content).getByRole("button", { name: "Clear filters" }),
+  );
+  expect(search).toHaveValue("");
+  expect(within(content).getAllByRole("article")).toHaveLength(5);
+
+  fireEvent.click(
+    within(content).getByRole("button", { name: "View Voice Notes details" }),
+  );
+  fireEvent.change(search, { target: { value: "Invoices" } });
+  expect(
+    within(content).queryByRole("button", { name: "View Voice Notes details" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close plugin details" }));
+  expect(content).toHaveFocus();
+  expect(search).toHaveValue("Invoices");
 });
 
 it("opens each plugin's existing metadata and controls in a detail aside", () => {
@@ -431,7 +469,7 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
     within(bundled).getByRole("heading", { name: "Channels" }),
   );
   expect(badge.nextElementSibling).toHaveTextContent("Essentials");
-  expect(badge.nextElementSibling).toHaveAttribute("data-essential");
+  expect(badge.nextElementSibling).toHaveAttribute("class", badge.className);
   expect(within(bundled).getByText("messaging")).not.toHaveAttribute(
     "data-essential",
   );
@@ -627,6 +665,147 @@ function reviewPluginFixture() {
   fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
   return { external, snapshot, publish, manager };
 }
+
+it("pins agent management, then sorts Essentials first and names alphabetically", () => {
+  const { snapshot, publish, external } = reviewPluginFixture();
+  const bundled = snapshot.configuration.catalog.plugins[0];
+  if (!bundled) throw new Error("Missing bundled fixture");
+  const essential = {
+    ...bundled,
+    manifest: {
+      ...bundled.manifest,
+      name: "Codex",
+      discovery: { ...bundled.manifest.discovery, tags: ["Essentials"] },
+    },
+  };
+  snapshot.configuration.catalog = {
+    ...snapshot.configuration.catalog,
+    plugins: [
+      essential,
+      external,
+      {
+        ...bundled,
+        manifest: {
+          ...bundled.manifest,
+          id: "block.builderlab",
+          name: "Builderlab",
+        },
+      },
+      {
+        ...essential,
+        manifest: { ...essential.manifest, id: "buzz.agents", name: "Agents" },
+      },
+    ],
+  };
+  act(publish);
+  const group = screen.getByRole("region", { name: "Agents4plugins" });
+  expect(
+    within(group)
+      .getAllByRole("button", { name: /^View .* details$/ })
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual([
+    "View Agents details",
+    "View Codex details",
+    "View Builderlab details",
+    "View Zebra external details",
+  ]);
+});
+
+it("features bundled Core plugins once, preserving filters, colors and controls", async () => {
+  const { snapshot, publish, manager, external } = reviewPluginFixture();
+  const bundled = snapshot.configuration.catalog.plugins[0];
+  if (!bundled) throw new Error("Missing bundled fixture");
+  const core = (
+    [
+      ["buzz.profiles", "Profiles", "people-and-communities"],
+      ["buzz.agents", "Agents", "agents"],
+      ["buzz.channels", "Channels", "communication"],
+    ] as const
+  ).map(([id, name, category]) => ({
+    ...bundled,
+    manifest: {
+      ...bundled.manifest,
+      id,
+      name,
+      discovery: { category, tags: [" Core ", "Essentials"] },
+    },
+  }));
+  snapshot.configuration.catalog = {
+    ...snapshot.configuration.catalog,
+    plugins: [
+      ...core,
+      {
+        ...external,
+        manifest: {
+          ...external.manifest,
+          discovery: { category: "agents", tags: ["Core"] },
+        },
+      },
+    ],
+  };
+  act(publish);
+  const content = screen.getByRole("tabpanel");
+  const featured = screen.getByRole("region", { name: "Core plugins" });
+  await waitFor(() => expect(featured).toBeVisible());
+  expect(content).not.toContainElement(featured);
+  const tabs = screen.getByRole("tablist", { name: "Plugin filters" });
+  expect(
+    featured.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    tabs.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(screen.queryByText("Start with the best of Buzz")).toBeNull();
+  expect(
+    within(featured)
+      .getAllByRole("button", { name: /^View .* details$/ })
+      .map((b) => b.getAttribute("aria-label")),
+  ).toEqual([
+    "View Channels details",
+    "View Agents details",
+    "View Profiles details",
+  ]);
+  expect(
+    screen.getAllByRole("button", { name: "View Agents details" }),
+  ).toHaveLength(1);
+  expect(within(featured).queryByText("Zebra external")).toBeNull();
+  const trigger = within(featured).getByRole("button", {
+    name: "View Agents details",
+  });
+  expect(trigger.querySelector("[data-category]")).toHaveAttribute(
+    "data-category",
+    "agents",
+  );
+  fireEvent.click(trigger);
+  expect(
+    screen.getByRole("complementary", { name: "Agents details" }),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Close plugin details" }));
+  expect(trigger).toHaveFocus();
+  fireEvent.click(
+    within(featured).getByRole("button", { name: "Disable Agents" }),
+  );
+  expect(manager.change).toHaveBeenCalledWith("disable", "buzz.agents");
+  expect(
+    within(featured).getByRole("button", { name: "Required" }),
+  ).toBeDisabled();
+  fireEvent.click(screen.getByRole("tab", { name: "Essentials" }));
+  expect(within(featured).queryAllByRole("article")).toHaveLength(3);
+  expect(within(content).queryAllByRole("article")).toHaveLength(0);
+  const search = screen.getByRole("searchbox", { name: "Search plugins" });
+  fireEvent.change(search, { target: { value: "Profiles" } });
+  expect(within(content).queryAllByRole("article")).toHaveLength(0);
+  expect(within(featured).queryAllByRole("article")).toHaveLength(3);
+  expect(
+    within(featured).getByRole("button", { name: "View Profiles details" }),
+  ).toBeVisible();
+  fireEvent.change(search, { target: { value: "no-match" } });
+  expect(within(content).getByText("No plugins found")).toBeVisible();
+  expect(within(featured).queryAllByRole("article")).toHaveLength(3);
+  fireEvent.click(trigger);
+  fireEvent.click(screen.getByRole("button", { name: "Close plugin details" }));
+  expect(trigger).toHaveFocus();
+});
 
 it("keeps external Essentials tags from granting curated markers or priority", () => {
   reviewPluginFixture();

@@ -1,3 +1,10 @@
+import {
+  AnimatePresence,
+  motion,
+  useIsPresent,
+  useReducedMotion,
+  type HTMLMotionProps,
+} from "motion/react";
 import type { Agents } from "../features/agents/service";
 import { Header, InlineHeader } from "../shared/design-system/ui/Header";
 import { ToastNotice } from "../shared/design-system/ui/Toast";
@@ -5,10 +12,16 @@ import { Panel } from "../shared/design-system/ui/Panel";
 import { NavigationItem } from "../shared/design-system/ui/NavigationItem";
 import { NavigationSection } from "../shared/design-system/ui/NavigationSection";
 import { Button } from "../shared/design-system/ui/Button";
+import { SurfaceButton } from "../shared/design-system/ui/SurfaceButton";
 import { IconButton } from "../shared/design-system/ui/IconButton";
 import { ChoiceRow } from "../shared/design-system/ui/ChoiceRow";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
+import { Tabs } from "../shared/design-system/ui/Tabs";
+import { SearchField } from "../shared/design-system/ui/SearchField";
+import { EmptyState } from "../shared/design-system/ui/EmptyState";
 import {
+  type ReactNode,
+  forwardRef,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -53,6 +66,35 @@ import { developerMode, settingsSections } from "./settings-sections";
 
 import { pluginCategoryDefinitions } from "./plugin-categories";
 
+// Exit animations retain DOM briefly; retired results must stop accepting focus.
+const PluginListEntry = forwardRef<HTMLDivElement, HTMLMotionProps<"div">>(
+  function PluginListEntry(props, ref) {
+    const present = useIsPresent();
+    return (
+      <motion.div
+        {...props}
+        ref={ref}
+        inert={!present}
+        aria-hidden={!present || undefined}
+      />
+    );
+  },
+);
+
+function CorePluginGroup({ children }: { children: ReactNode }) {
+  return <div className={styles.pluginCoreGrid}>{children}</div>;
+}
+
+function isCorePlugin(plugin: PluginInfo) {
+  return (
+    plugin.source === "bundled" &&
+    (plugin.manifest.discovery?.tags?.some(
+      (tag) => tag.trim().toLowerCase() === "core",
+    ) ??
+      false)
+  );
+}
+
 function isRequiredPlugin(plugin: PluginInfo) {
   return plugin.manifest.id === "buzz.channels";
 }
@@ -70,7 +112,10 @@ function isEssentialPlugin(plugin: PluginInfo) {
 function comparePlugins(a: PluginInfo, b: PluginInfo) {
   return (
     Number(isRequiredPlugin(b)) - Number(isRequiredPlugin(a)) ||
-    Number(isEssentialPlugin(b)) - Number(isEssentialPlugin(a))
+    Number(b.source === "bundled" && b.manifest.id === "buzz.agents") -
+      Number(a.source === "bundled" && a.manifest.id === "buzz.agents") ||
+    Number(isEssentialPlugin(b)) - Number(isEssentialPlugin(a)) ||
+    a.manifest.name.localeCompare(b.manifest.name)
   );
 }
 
@@ -79,13 +124,27 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
     pluginCategoryDefinitions.map(({ id }) => [id, []]),
   );
   const other: PluginInfo[] = [];
+  const core: PluginInfo[] = [];
   for (const plugin of plugins) {
+    if (isCorePlugin(plugin)) {
+      core.push(plugin);
+      continue;
+    }
     const group = known.get(plugin.manifest.discovery?.category ?? "");
     (group ?? other).push(plugin);
   }
   for (const entries of known.values()) entries.sort(comparePlugins);
   other.sort(comparePlugins);
   return [
+    ...(core.length
+      ? [
+          {
+            id: "core",
+            label: "Start with the best of Buzz",
+            plugins: core.sort(comparePlugins),
+          },
+        ]
+      : []),
     ...pluginCategoryDefinitions.flatMap(({ id, label }) => {
       const entries = known.get(id) ?? [];
       return entries.length ? [{ id, label, plugins: entries }] : [];
@@ -107,7 +166,12 @@ function PluginIcon({
       : undefined;
   const [failedUrl, setFailedUrl] = useState<string>();
   return (
-    <span className={styles.pluginIcon} aria-hidden="true">
+    <span
+      className={styles.pluginIcon}
+      data-branded={Boolean(url && url !== failedUrl) || undefined}
+      data-category={plugin.manifest.discovery?.category}
+      aria-hidden="true"
+    >
       {url && url !== failedUrl ? (
         <img src={url} alt="" onError={() => setFailedUrl(url)} />
       ) : (
@@ -167,7 +231,7 @@ function PluginDetails({
     >
       <div className={styles.pluginAsideHeader}>
         <div className={styles.pluginAsideIdentity}>
-          <PluginIcon plugin={plugin} size={48} />
+          <PluginIcon key={plugin.manifest.id} plugin={plugin} size={48} />
           <h2>{plugin.manifest.name}</h2>
           <div className={styles.pluginBadges}>
             {plugin.source === "bundled" ? (
@@ -182,10 +246,7 @@ function PluginDetails({
               />
             )}
             {isEssentialPlugin(plugin) && (
-              <span
-                className={`${styles.pluginInstallBadge} ${styles.pluginTag}`}
-                data-essential
-              >
+              <span className={styles.pluginInstallBadge}>
                 <SparklesIcon size={14} aria-hidden="true" />
                 Essentials
               </span>
@@ -434,10 +495,44 @@ export function Settings({
   const ready = configuration.status === "ready" ? configuration : undefined;
   const catalog = ready?.catalog;
   const externalPluginsPaused = ready?.externalPluginsPaused;
-  const pluginGroups = useMemo(
-    () => groupPlugins(catalog?.plugins ?? []),
+  const [pluginFilter, setPluginFilter] = useState<"all" | "essentials">("all");
+  const [pluginQuery, setPluginQuery] = useState("");
+  const reducedMotion = useReducedMotion();
+  const listMotion = {
+    layout: reducedMotion ? (false as const) : ("position" as const),
+    initial: reducedMotion ? (false as const) : { opacity: 0, y: 8 },
+    animate: { opacity: 1, y: 0 },
+    ...(reducedMotion ? {} : { exit: { opacity: 0 } }),
+    transition: {
+      duration: reducedMotion ? 0 : 0.16,
+      layout: { type: "spring" as const, stiffness: 420, damping: 38 },
+    },
+  };
+  const layoutMotion = {
+    layout: listMotion.layout,
+    transition: listMotion.transition,
+  };
+  const coreGroup = useMemo(
+    () =>
+      groupPlugins(catalog?.plugins ?? []).find((group) => group.id === "core"),
     [catalog?.plugins],
   );
+  const pluginGroups = useMemo(() => {
+    const query = pluginQuery.trim().toLowerCase();
+    return groupPlugins(
+      (catalog?.plugins ?? []).filter(
+        (plugin) =>
+          !isCorePlugin(plugin) &&
+          (pluginFilter === "all" || isEssentialPlugin(plugin)) &&
+          [
+            plugin.manifest.name,
+            plugin.manifest.id,
+            plugin.manifest.description,
+            ...(plugin.manifest.discovery?.tags ?? []),
+          ].some((value) => value?.toLowerCase().includes(query)),
+      ),
+    );
+  }, [catalog?.plugins, pluginFilter, pluginQuery]);
   const [selectedPluginId, setSelectedPluginId] = useState<string>();
   const [pluginImportActions, setPluginImportActions] =
     useState<HTMLSpanElement | null>(null);
@@ -453,7 +548,10 @@ export function Settings({
     }
   }, [catalog, selectedPlugin, selectedPluginId]);
   const closePluginDetails = () => {
-    pluginTrigger.current?.focus();
+    const visible = [coreGroup, ...pluginGroups].some((group) =>
+      group?.plugins.some((plugin) => plugin.manifest.id === selectedPluginId),
+    );
+    (visible ? pluginTrigger.current : pluginSection.current)?.focus();
     setSelectedPluginId(undefined);
   };
   const selectedRunning = selectedPlugin
@@ -465,6 +563,144 @@ export function Settings({
         ? selectedRunning.error
         : null))
     : null;
+  const renderPluginGroup = (
+    group: ReturnType<typeof groupPlugins>[number],
+  ) => {
+    const core = group.id === "core";
+    const Group = core ? CorePluginGroup : SettingsGroup;
+    const Target = core ? SurfaceButton : "button";
+    return (
+      <PluginListEntry
+        {...listMotion}
+        className={core ? styles.pluginCoreSection : undefined}
+        role="region"
+        aria-label={core ? "Core plugins" : undefined}
+        aria-labelledby={core ? undefined : `plugin-category-${group.id}`}
+        key={group.id}
+      >
+        {!core && (
+          <InlineHeader
+            id={`plugin-category-${group.id}`}
+            title={
+              <span className={styles.pluginCategoryTitle}>
+                <span>{group.label}</span>
+                <span className={styles.pluginCount}>
+                  {group.plugins.length}
+                  <span className="sr-only">
+                    {group.plugins.length === 1 ? " plugin" : " plugins"}
+                  </span>
+                </span>
+              </span>
+            }
+          />
+        )}
+        <Group>
+          <AnimatePresence initial={false} mode="popLayout" propagate>
+            {group.plugins.map((plugin) => {
+              const id = plugin.manifest.id;
+              const active = id === selectedPluginId;
+              const running = activation[id];
+              const failure =
+                plugin.error ??
+                (running?.revision === plugin.revision ? running.error : null);
+              const name = (
+                <span className={styles.pluginName}>
+                  {plugin.manifest.name}
+                  {plugin.source === "bundled" && (
+                    <CheckCircleIcon
+                      size={14}
+                      strokeWidth={2.5}
+                      aria-hidden="true"
+                    />
+                  )}
+                  {isEssentialPlugin(plugin) && (
+                    <SparklesIcon size={14} aria-hidden="true" />
+                  )}
+                </span>
+              );
+              return (
+                <PluginListEntry key={id} {...listMotion}>
+                  <article
+                    className={styles.plugin}
+                    data-core={core || undefined}
+                  >
+                    <Target
+                      ref={active ? pluginTrigger : undefined}
+                      type="button"
+                      className={styles.pluginRow}
+                      data-enabled={plugin.enabled}
+                      aria-label={`View ${plugin.manifest.name} details`}
+                      aria-expanded={active}
+                      aria-controls={active ? "plugin-details" : undefined}
+                      onClick={(event) => {
+                        pluginTrigger.current = event.currentTarget;
+                        setSelectedPluginId(active ? undefined : id);
+                      }}
+                    >
+                      {core ? (
+                        <>
+                          <PluginIcon plugin={plugin} />
+                          {name}
+                          <span className={styles.pluginCoreDescription}>
+                            {plugin.manifest.description}
+                          </span>
+                        </>
+                      ) : (
+                        <ChoiceRow
+                          leading={<PluginIcon plugin={plugin} />}
+                          label={name}
+                          description={plugin.manifest.description}
+                        />
+                      )}
+                      {plugin.source === "external" && (
+                        <PluginProvenance
+                          source={plugin.source}
+                          publisher={plugin.publisher}
+                          className={styles.pluginRowAuthor}
+                        />
+                      )}
+                    </Target>
+                    <div className={styles.pluginRowAction}>
+                      {isRequiredPlugin(plugin) ? (
+                        <Button variant="outline" size="sm" disabled>
+                          Required
+                        </Button>
+                      ) : (
+                        <Button
+                          variant={plugin.enabled ? "subtle" : "prominent"}
+                          size="sm"
+                          aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.manifest.name}`}
+                          disabled={busy}
+                          focusableWhenDisabled
+                          onClick={() => {
+                            if (busy) return;
+                            void plugins.change(
+                              plugin.enabled ? "disable" : "enable",
+                              id,
+                            );
+                          }}
+                        >
+                          {plugin.enabled ? "Disable" : "Enable"}
+                        </Button>
+                      )}
+                    </div>
+                  </article>
+                  {failure && (
+                    <p
+                      role="alert"
+                      className={`${styles.pluginRowError} error text-body-sm`}
+                    >
+                      {failure}
+                    </p>
+                  )}
+                </PluginListEntry>
+              );
+            })}
+          </AnimatePresence>
+        </Group>
+      </PluginListEntry>
+    );
+  };
   return (
     <div
       className={`${styles.root} ${navigationPane ? styles.navigationPane : ""}`}
@@ -609,15 +845,58 @@ export function Settings({
                 tabIndex={-1}
                 aria-labelledby="plugin-settings-title"
               >
-                <Header
-                  id="plugin-settings-title"
-                  title="Plugins"
-                  actions={
-                    plugins.imports && catalog ? (
-                      <span ref={setPluginImportActions} />
-                    ) : undefined
-                  }
-                />
+                <motion.div {...layoutMotion} className={styles.pluginHeading}>
+                  <Header
+                    id="plugin-settings-title"
+                    title="Plugins"
+                    actions={
+                      plugins.imports && catalog ? (
+                        <span ref={setPluginImportActions} />
+                      ) : undefined
+                    }
+                  />
+                </motion.div>
+                <AnimatePresence initial={false} mode="popLayout">
+                  {coreGroup && renderPluginGroup(coreGroup)}
+                </AnimatePresence>
+                {catalog && (
+                  <motion.div
+                    {...layoutMotion}
+                    className={styles.pluginToolbar}
+                  >
+                    <motion.div {...layoutMotion}>
+                      <Tabs
+                        variant="panel"
+                        label="Plugin filters"
+                        items={[
+                          {
+                            value: "all",
+                            label: "All plugins",
+                            panelId: "plugin-results-all",
+                          },
+                          {
+                            value: "essentials",
+                            label: "Essentials",
+                            panelId: "plugin-results-essentials",
+                          },
+                        ]}
+                        value={pluginFilter}
+                        onValueChange={setPluginFilter}
+                      />
+                    </motion.div>
+                    <motion.div
+                      {...layoutMotion}
+                      className={styles.pluginSearch}
+                    >
+                      <SearchField
+                        label="Search plugins"
+                        placeholder="Search plugins…"
+                        value={pluginQuery}
+                        onValueChange={setPluginQuery}
+                      />
+                    </motion.div>
+                  </motion.div>
+                )}
                 {catalog ? (
                   <PluginImport
                     actionTarget={pluginImportActions}
@@ -665,141 +944,33 @@ export function Settings({
                       />
                     )}
                   </div>
-                  <div className={styles.pluginCategories}>
-                    {pluginGroups.map((group) => (
-                      <section
-                        aria-labelledby={`plugin-category-${group.id}`}
-                        key={group.id}
-                      >
-                        <InlineHeader
-                          id={`plugin-category-${group.id}`}
-                          title={
-                            <span className={styles.pluginCategoryTitle}>
-                              <span>{group.label}</span>
-                              <span className={styles.pluginCount}>
-                                {group.plugins.length}
-                                <span className="sr-only">
-                                  {group.plugins.length === 1
-                                    ? " plugin"
-                                    : " plugins"}
-                                </span>
-                              </span>
-                            </span>
-                          }
-                        />
-                        <SettingsGroup>
-                          {group.plugins.map((plugin) => {
-                            const id = plugin.manifest.id;
-                            const active = id === selectedPluginId;
-                            const running = activation[id];
-                            const failure =
-                              plugin.error ??
-                              (running?.revision === plugin.revision
-                                ? running.error
-                                : null);
-                            return (
-                              <div key={id}>
-                                <article className={styles.plugin}>
-                                  <button
-                                    ref={active ? pluginTrigger : undefined}
-                                    type="button"
-                                    className={styles.pluginRow}
-                                    data-enabled={plugin.enabled}
-                                    aria-label={`View ${plugin.manifest.name} details`}
-                                    aria-expanded={active}
-                                    aria-controls={
-                                      active ? "plugin-details" : undefined
-                                    }
-                                    onClick={(event) => {
-                                      pluginTrigger.current =
-                                        event.currentTarget;
-                                      setSelectedPluginId(
-                                        active ? undefined : id,
-                                      );
-                                    }}
-                                  >
-                                    <ChoiceRow
-                                      leading={<PluginIcon plugin={plugin} />}
-                                      label={
-                                        <span className={styles.pluginName}>
-                                          {plugin.manifest.name}
-                                          {plugin.source === "bundled" && (
-                                            <CheckCircleIcon
-                                              size={14}
-                                              strokeWidth={2.5}
-                                              aria-hidden="true"
-                                            />
-                                          )}
-                                          {isEssentialPlugin(plugin) && (
-                                            <SparklesIcon
-                                              size={14}
-                                              aria-hidden={false}
-                                              role="img"
-                                              aria-label="Essential"
-                                              data-essential
-                                            />
-                                          )}
-                                        </span>
-                                      }
-                                      description={plugin.manifest.description}
-                                    />
-                                    {plugin.source === "external" && (
-                                      <PluginProvenance
-                                        source={plugin.source}
-                                        publisher={plugin.publisher}
-                                        className={styles.pluginRowAuthor}
-                                      />
-                                    )}
-                                  </button>
-                                  <div className={styles.pluginRowAction}>
-                                    {isRequiredPlugin(plugin) ? (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled
-                                      >
-                                        Required
-                                      </Button>
-                                    ) : (
-                                      <Button
-                                        variant={
-                                          plugin.enabled
-                                            ? "subtle"
-                                            : "prominent"
-                                        }
-                                        size="sm"
-                                        aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.manifest.name}`}
-                                        disabled={busy}
-                                        focusableWhenDisabled
-                                        onClick={() => {
-                                          if (busy) return;
-                                          void plugins.change(
-                                            plugin.enabled
-                                              ? "disable"
-                                              : "enable",
-                                            id,
-                                          );
-                                        }}
-                                      >
-                                        {plugin.enabled ? "Disable" : "Enable"}
-                                      </Button>
-                                    )}
-                                  </div>
-                                </article>
-                                {failure && (
-                                  <p
-                                    role="alert"
-                                    className={`${styles.pluginRowError} error text-body-sm`}
-                                  >
-                                    {failure}
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </SettingsGroup>
-                      </section>
-                    ))}
+                  <div
+                    className={styles.pluginCategories}
+                    role="tabpanel"
+                    id={`plugin-results-${pluginFilter}`}
+                    aria-labelledby={`plugin-results-${pluginFilter}-tab`}
+                  >
+                    {catalog && pluginGroups.length === 0 && (
+                      <EmptyState
+                        icon={<SquaresFourIcon size={24} />}
+                        title="No plugins found"
+                        description="Try another search or show all plugins."
+                        action={
+                          <Button
+                            variant="subtle"
+                            onClick={() => {
+                              setPluginQuery("");
+                              setPluginFilter("all");
+                            }}
+                          >
+                            Clear filters
+                          </Button>
+                        }
+                      />
+                    )}
+                    <AnimatePresence initial={false} mode="popLayout">
+                      {pluginGroups.map(renderPluginGroup)}
+                    </AnimatePresence>
                   </div>
                 </div>
               </section>
