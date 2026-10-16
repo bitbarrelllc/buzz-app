@@ -148,35 +148,19 @@ it("keeps New agent's card to instructions; the model field shows goose's defaul
   await waitFor(() => expect(modelButton()).toHaveTextContent("claude"));
 });
 
-it("marks the model field with goose, and with the provider's mark when Buzz has one", async () => {
+it("shows the model family icon and keeps provider options text-only", async () => {
   created();
-  const user = userEvent.setup();
-  // goose's default provider, Databricks, has a mark.
-  await waitFor(() =>
-    expect(
-      modelButton().querySelector(".tabler-icon-brand-databricks"),
-    ).not.toBeNull(),
-  );
-  expect(modelButton().querySelectorAll("svg")).toHaveLength(3);
-
-  const dialog = await openChoices();
-  await user.click(within(dialog).getByRole("combobox", { name: "Provider" }));
-  const databricks = await screen.findByRole("option", { name: "Databricks" });
+  await waitFor(() => expect(modelButton()).toHaveTextContent("claude"));
   expect(
-    databricks.querySelector(".tabler-icon-brand-databricks"),
-  ).not.toBeNull();
-  const openRouter = screen.getByRole("option", { name: "OpenRouter" });
-  expect(openRouter.querySelector(".tabler-icon-brand-databricks")).toBeNull();
-  await user.click(openRouter);
-  await user.click(within(dialog).getByRole("button", { name: "Save" }));
-
-  // Only goose's own mark stays.
-  await waitFor(() =>
-    expect(
-      modelButton().querySelector(".tabler-icon-brand-databricks"),
-    ).toBeNull(),
-  );
+    modelButton().querySelector(".tabler-icon-brand-databricks"),
+  ).toBeNull();
   expect(modelButton().querySelectorAll("svg")).toHaveLength(2);
+  const dialog = await openChoices();
+  await userEvent
+    .setup()
+    .click(within(dialog).getByRole("combobox", { name: "Provider" }));
+  const databricks = await screen.findByRole("option", { name: "Databricks" });
+  expect(databricks.querySelector(".tabler-icon-brand-databricks")).toBeNull();
 });
 
 it("keeps provider fields visible while saving its key and selecting a model", async () => {
