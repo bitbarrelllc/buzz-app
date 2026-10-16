@@ -153,6 +153,9 @@ it("keeps an OS entity intent through real community selection and Retry in App"
     retryable: true,
   });
   await userEvent.click(
+    screen.getByRole("button", { name: /^Community switcher:/ }),
+  );
+  await userEvent.click(
     screen.getByRole("button", { name: "Switch to Fixture community" }),
   );
   expect(current.navigation.snapshot().ingress).toBe(true);
@@ -183,7 +186,7 @@ it("keeps an OS entity intent through real community selection and Retry in App"
   ).not.toBeInTheDocument();
 });
 
-it("lists only active primary pages in the channel sidebar", async () => {
+it("lists active primary pages in their sidebar and header placements", async () => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -215,8 +218,11 @@ it("lists only active primary pages in the channel sidebar", async () => {
       within(pages)
         .getAllByRole("button")
         .map((row) => row.textContent),
-    ).toEqual(["Inbox", "Bestie", "Projects", "Agents"]),
+    ).toEqual(["Inbox", "Bestie"]),
   );
+
+  expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Agents" })).toBeInTheDocument();
 
   // The fixture page is active and searchable but never a sidebar row.
   expect(current.pages.snapshot().map((page) => page.key)).toContain(
@@ -229,9 +235,10 @@ it("lists only active primary pages in the channel sidebar", async () => {
       within(screen.getByRole("navigation", { name: "Pages" }))
         .getAllByRole("button")
         .map((row) => row.textContent),
-    ).toEqual(["Inbox", "Bestie", "Projects"]),
+    ).toEqual(["Inbox", "Bestie"]),
   );
 
+  expect(screen.queryByRole("tab", { name: "Agents" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Search Buzz" }));
   const search = await screen.findByRole("dialog", { name: "Search Buzz" });
   expect(

@@ -96,8 +96,11 @@ it("offers native owners invites while keeping unsupported read sync disabled", 
       settingsCards={settingsCards}
     />,
   );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Community switcher: Primary" }),
+  );
   fireEvent.contextMenu(
-    screen.getByRole("button", { name: "Switch to Primary" }),
+    await screen.findByRole("button", { name: "Switch to Primary" }),
     {
       clientX: 20,
       clientY: 20,
