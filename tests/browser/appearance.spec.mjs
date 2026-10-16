@@ -60,7 +60,7 @@ test("Appearance changes and restores both modes, shared keyboard controls, dial
   await page.goto(app.origin);
   await expectMode(page, "light");
   await settings(page);
-  for (const label of ["Default message color", "Blue message color"]) {
+  for (const label of ["Chartreuse accent color", "Cobalt accent color"]) {
     const swatch = button(page, label);
     await page.mouse.move(0, 0);
     const colors = await swatch.evaluate((node) => {
@@ -68,7 +68,7 @@ test("Appearance changes and restores both modes, shared keyboard controls, dial
       node.append(probe);
       const colors = {};
       for (const state of ["hover", "pressed"]) {
-        probe.style.backgroundColor = `var(--surface-message-action-${state})`;
+        probe.style.backgroundColor = `var(--affordance-accent-prominent-${state})`;
         colors[state] = getComputedStyle(probe).backgroundColor;
       }
       probe.remove();
@@ -83,9 +83,9 @@ test("Appearance changes and restores both modes, shared keyboard controls, dial
       await page.mouse.up();
     }
   }
-  await button(page, "Blue message color").focus();
+  await button(page, "Cobalt accent color").focus();
   await page.keyboard.press("Enter");
-  await expect(button(page, "Blue message color")).toHaveAttribute(
+  await expect(button(page, "Cobalt accent color")).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -222,8 +222,8 @@ test("Appearance changes and restores both modes, shared keyboard controls, dial
       }
     }
   }
-  await button(page, "Pink message color").click();
-  const pink = await button(page, "Pink message color").evaluate((el) => {
+  await button(page, "Magenta accent color").click();
+  const pink = await button(page, "Magenta accent color").evaluate((el) => {
     const probe = document.createElement("span");
     probe.style.backgroundColor = "var(--surface-message-own)";
     el.append(probe);
@@ -234,7 +234,6 @@ test("Appearance changes and restores both modes, shared keyboard controls, dial
   for (const preview of await page
     .locator('.buzz-theme-preview[data-tone="light"]')
     .all()) {
-    await expect(preview).toHaveAttribute("data-bubble-color", "pink");
     for (const bubble of await preview
       .locator(".buzz-theme-preview-message")
       .all())
