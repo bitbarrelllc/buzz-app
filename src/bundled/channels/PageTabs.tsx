@@ -17,7 +17,7 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { SidebarRightIcon } from "../../shared/design-system/icons";
 import panelStyles from "../../features/panels/Panels.module.css";
 import { useChannelLabels } from "./useChannelLabels";
-import { useChannelTabState } from "./useChannelTabState";
+import { threadTab, useChannelTabState } from "./useChannelTabState";
 import { useConversationTabs } from "./useConversationTabs";
 import styles from "./Channels.module.css";
 
@@ -115,6 +115,9 @@ export function PageTabs({
       if (!mounted.current || !secondary.canOpenConversation(channelId))
         return false;
       const known = new Set(tabState.tabs.map((tab) => tab.id));
+      // An open thread keeps its tab in whichever pane it was moved to.
+      const existing =
+        threadId && threadTab(tabState.tabs, channelId, threadId)?.id;
       if (threadId)
         secondary.openConversationThread(channelId, threadId, threadId);
       else {
@@ -130,7 +133,7 @@ export function PageTabs({
       // already-open tab stays.
       const page = previews.get(session) ?? new Map<string, string>();
       previews.set(session, page);
-      const opened = tabState.getSelected();
+      const opened = existing || tabState.getSelected();
       const preview = page.get(id);
       if (known.has(opened)) {
         if (keep && opened === preview) page.delete(id);

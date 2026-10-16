@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
 import type { ConversationExtensions } from "../../features/conversation/contracts";
@@ -141,4 +148,19 @@ it("replaces the last opened tab unless asked to keep it", () => {
   expect(screen.getByText("conversation in beta")).toBeVisible();
   // Pages can depend on one opener across the renders its tabs cause.
   expect(page.openers.size).toBe(1);
+});
+
+it("opens a thread moved to the main pane where it is", () => {
+  const page = fixture();
+  expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
+  act(() => {
+    fireEvent.keyDown(screen.getByRole("tab", { name: /Root text/ }), {
+      key: "ArrowLeft",
+      altKey: true,
+      shiftKey: true,
+    });
+  });
+  expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
+  expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
+  expect(tabs("Switchboard tabs")).toEqual(["Switchboard", "Root text"]);
 });

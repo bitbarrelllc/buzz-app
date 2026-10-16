@@ -95,6 +95,22 @@ const sideSelection = (state: State) =>
     ...state.entries.map(panelTabId),
   ]);
 
+/** A channel's open tab for a thread: by its verified root, or until then by
+ * the id it was opened with. */
+export const threadTab = (
+  tabs: readonly ConversationTab[],
+  channelId: string,
+  rootId: string,
+) =>
+  tabs.find(
+    (tab) =>
+      tab.kind === "thread" &&
+      tab.channelId === channelId &&
+      (tab.rootId
+        ? tab.rootId === rootId
+        : tab.id === `thread:${channelId}:${rootId}`),
+  );
+
 /** Opening a thread selects its existing tab or adds one in `pane`. */
 function withThread(
   state: State,
@@ -105,14 +121,7 @@ function withThread(
   pane: TabPane,
   attention = false,
 ): State {
-  const existing = state.tabs.find(
-    (tab) =>
-      tab.kind === "thread" &&
-      tab.channelId === channelId &&
-      (tab.rootId
-        ? tab.rootId === rootId
-        : tab.id === `thread:${channelId}:${rootId}`),
-  );
+  const existing = threadTab(state.tabs, channelId, rootId);
   const baseId = `thread:${channelId}:${rootId}`;
   const id =
     existing?.id ??
