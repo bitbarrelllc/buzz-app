@@ -19,7 +19,11 @@ import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Agent, AgentType } from "../../features/agents/service";
-import { fileBacked } from "../../features/agents/state";
+import {
+  fileStore,
+  localStore,
+  type AgentStore,
+} from "../../features/agents/state";
 import type { HostProcessOptions } from "../../features/host/service";
 import { ClaudeLogoIcon } from "../../shared/design-system/icons";
 import { apply, inject } from "./index";
@@ -110,7 +114,7 @@ function applied({
   storage,
 }: {
   /** Agent storage; this page's localStorage without it. */
-  storage?: Storage;
+  storage?: AgentStore;
   loggedIn?: boolean;
   available?: boolean;
   version?: string;
@@ -599,7 +603,7 @@ it("cancels a provider defaults draft without saving", async () => {
   await choose("Default model", "Fable 5.1");
   await userEvent.setup().click(screen.getByRole("button", { name: "Cancel" }));
   expect(onClose).toHaveBeenCalledOnce();
-  expect(new ClaudeDefaults(localStorage).snapshot().model).toBe("");
+  expect(new ClaudeDefaults(localStore()).snapshot().model).toBe("");
 });
 
 it("closes a provider defaults draft without stopping a hidden background update", async () => {
@@ -640,7 +644,7 @@ it("closes a provider defaults draft without stopping a hidden background update
       .setup()
       .click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledOnce();
-    expect(new ClaudeDefaults(localStorage).snapshot().model).toBe("");
+    expect(new ClaudeDefaults(localStore()).snapshot().model).toBe("");
     expect(kill).not.toHaveBeenCalled();
     expect(type.provider.snapshot()).toMatchObject({
       readiness: "ready",
@@ -679,7 +683,7 @@ it("says when Claude's models could not be loaded and tries again", async () => 
 
 it("keeps the provider dialog and its draft open while a default could not be saved", async () => {
   let failing = true;
-  const storage = fileBacked(new Map(), async () => {
+  const storage = fileStore(new Map(), async () => {
     if (failing) throw new Error("disk full");
   });
   const { type } = installed({ storage });
@@ -699,19 +703,19 @@ it("keeps the provider dialog and its draft open while a default could not be sa
   error.mockRestore();
   expect(onClose).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Default model")).toHaveTextContent("Fable 5.1");
-  expect(storage.getItem("buzz.claude-code.provider-defaults.v1")).toBeNull();
+  expect(storage.get("buzz.claude-code.provider-defaults.v1")).toBeNull();
   // The same draft can be saved again.
   failing = false;
   await user.click(screen.getByRole("button", { name: "Save defaults" }));
   await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-  expect(storage.getItem("buzz.claude-code.provider-defaults.v1")).toContain(
+  expect(storage.get("buzz.claude-code.provider-defaults.v1")).toContain(
     "fable",
   );
 });
 
 it("holds the default model while it saves, so the dialog closes on what was saved", async () => {
   let release = () => {};
-  const storage = fileBacked(
+  const storage = fileStore(
     new Map(),
     () => new Promise<void>((resolve) => (release = resolve)),
   );
@@ -732,14 +736,14 @@ it("holds the default model while it saves, so the dialog closes on what was sav
   );
   release();
   await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-  expect(storage.getItem("buzz.claude-code.provider-defaults.v1")).toContain(
+  expect(storage.get("buzz.claude-code.provider-defaults.v1")).toContain(
     "fable",
   );
 });
 
 it("preserves native behavior for invalid defaults and keeps explicit agent models", async () => {
   localStorage.setItem("buzz.claude-code.provider-defaults.v1", "not json");
-  const defaults = new ClaudeDefaults(localStorage);
+  const defaults = new ClaudeDefaults(localStore());
   expect(defaults.resolve(DEFAULT_CONFIG)).toEqual(DEFAULT_CONFIG);
   await defaults.save({ model: "sonnet" });
   const inherited = { ...DEFAULT_CONFIG };

@@ -18,7 +18,11 @@ import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ownerReads } from "../../features/agents/reads";
-import { fileBacked } from "../../features/agents/state";
+import {
+  fileStore,
+  localStore,
+  type AgentStore,
+} from "../../features/agents/state";
 import type { AgentViewProps } from "../../features/agents/service";
 import type { HostProcessOptions } from "../../features/host/service";
 import type { RelayData } from "../../features/relay/service";
@@ -59,10 +63,10 @@ function fixture({
   turns = () => ({ result: { data: [] } }),
   threads = [],
   configured = {},
-  storage = localStorage,
+  storage = localStore(),
 }: {
   /** Agent storage, which keeps the provider defaults. */
-  storage?: Storage;
+  storage?: AgentStore;
   signedIn?: boolean;
   installed?: boolean;
   saved?: Record<string, unknown>;
@@ -180,10 +184,10 @@ function fixture({
       },
     }),
   } as unknown as RelayData;
-  const sessions = {
+  const sessions = localStore({
     getItem: () => JSON.stringify(saved),
     setItem: () => undefined,
-  } as unknown as Storage;
+  } as unknown as Storage);
   const runtime = new CodexRuntime(
     spawn,
     (pubkey) => ownerReads(relay, pubkey),
@@ -500,7 +504,7 @@ it("keeps provider readiness quiet and shows recovery when needed", async () => 
 });
 it("keeps the provider dialog and its draft open while defaults could not be saved", async () => {
   let failing = true;
-  const storage = fileBacked(new Map(), async () => {
+  const storage = fileStore(new Map(), async () => {
     if (failing) throw new Error("disk full");
   });
   const f = fixture({ storage });
@@ -524,14 +528,12 @@ it("keeps the provider dialog and its draft open while defaults could not be sav
   fireEvent.click(screen.getByRole("button", { name: "Save defaults" }));
   await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   expect(f.provider.resolve(defaults).model).toBe("model-b");
-  expect(storage.getItem("buzz.codex.provider-defaults.v1")).toContain(
-    "model-b",
-  );
+  expect(storage.get("buzz.codex.provider-defaults.v1")).toContain("model-b");
 });
 
 it("holds the defaults' choices while they save, so the dialog closes on what was saved", async () => {
   let release = () => {};
-  const storage = fileBacked(
+  const storage = fileStore(
     new Map(),
     () => new Promise<void>((resolve) => (release = resolve)),
   );
@@ -587,7 +589,7 @@ it("applies provider precedence without rewriting records and falls back for inc
   cleanup();
 
   localStorage.setItem("buzz.codex.provider-defaults.v1", "invalid");
-  const invalid = new CodexProvider(f.spawn, localStorage);
+  const invalid = new CodexProvider(f.spawn, localStore());
   expect(invalid.resolve(defaults)).toEqual(defaults);
 });
 it("offers recommendation and explicit models without inheriting local Codex preferences", async () => {
@@ -620,7 +622,7 @@ it("offers recommendation and explicit models without inheriting local Codex pre
       } as Parameters<CodexRuntime["preview"]>[0])
     ).current,
   ).toBe("model-b");
-  const reopened = new CodexProvider(f.spawn, localStorage);
+  const reopened = new CodexProvider(f.spawn, localStore());
   expect(reopened.resolve(defaults).model).toBe("model-b");
   expect(f.provider.resolve({ ...defaults, model: "model-b" }).model).toBe(
     "model-b",
@@ -642,7 +644,7 @@ it("offers recommendation and explicit models without inheriting local Codex pre
       } as Parameters<CodexRuntime["preview"]>[0])
     ).current,
   ).toBe("model-a");
-  expect(new CodexProvider(f.spawn, localStorage).resolve(defaults).model).toBe(
+  expect(new CodexProvider(f.spawn, localStore()).resolve(defaults).model).toBe(
     "",
   );
   configured.model = "model-a";
@@ -1247,7 +1249,7 @@ it("moves the card from Install Codex to Sign in once the install succeeds", asy
 
 it("installs and signs in Buzz's copy of Codex from its provider settings", async () => {
   const f = fixture({ installed: false, signedIn: false });
-  const provider = new CodexProvider(f.spawn, localStorage, f.setup);
+  const provider = new CodexProvider(f.spawn, localStore(), f.setup);
   const { ProviderDialogBody } = createTabs(
     provider,
     f.runtime,
