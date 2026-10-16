@@ -384,6 +384,13 @@ it("separates choosing from access review and restores the chosen folder on Back
     screen.getByRole("button", { name: "Browse plugin folder" }),
   );
   const radios = await screen.findAllByRole("radio");
+  expect(
+    screen.getByRole("dialog", { name: "Choose a plugin" }),
+  ).toHaveAccessibleDescription("Select a plugin to review before installing.");
+  expect(
+    screen.getByRole("radiogroup", { name: "Choose a plugin" }),
+  ).toBeVisible();
+
   expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   expect(screen.queryByRole("region", { name: "Computer access" })).toBeNull();
   await user.click(radios[1] as HTMLElement);
@@ -635,7 +642,7 @@ it("replaces Add with an error view and returns to the retained preview for retr
   );
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   fireEvent.click(screen.getByRole("button", { name: "Browse plugin folder" }));
-  const dialog = screen.getByRole("dialog", { name: "Add a plugin" });
+  const dialog = screen.getByRole("dialog");
   const install = await within(dialog).findByRole("button", {
     name: "Install plugin",
   });

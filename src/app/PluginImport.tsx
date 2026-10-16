@@ -263,11 +263,25 @@ export function PluginImport({
         onOpenChange={(next) => {
           if (!next) void close();
         }}
-        title="Add a plugin"
+        title={
+          error || !preview
+            ? "Add a plugin"
+            : reviewing
+              ? "Review plugin access"
+              : preview.candidates.length
+                ? "Choose a plugin"
+                : "No plugins found"
+        }
         description={
           error
             ? undefined
-            : "Load built plugins containing manifest.json and plugin.js. Buzz doesn’t build source code or run install scripts. Only load code you trust: plugins aren’t sandboxed."
+            : preview
+              ? reviewing
+                ? "Only install code you trust. Plugins aren’t sandboxed."
+                : preview.candidates.length
+                  ? "Select a plugin to review before installing."
+                  : "Try another folder or repository."
+              : "Load built plugins containing manifest.json and plugin.js. Buzz doesn’t build source code or run install scripts. Only load code you trust: plugins aren’t sandboxed."
         }
         size={error ? "default" : "wide"}
         actions={
@@ -490,7 +504,7 @@ export function PluginImport({
                   }
                 />
               )}
-              <SettingsGroup layout="form">
+              <div className="flex flex-col gap-4">
                 {!reviewing && (
                   <div className="min-w-0 text-body-sm">
                     <p className="m-0 break-all text-caption text-muted">
@@ -510,9 +524,10 @@ export function PluginImport({
                     artifacts.
                   </p>
                 ) : !reviewing && preview.candidates.length > 1 ? (
-                  <Field label="Choose a plugin folder">
+                  <Field label="Choose a plugin" labelVisibility="hidden">
                     <RadioGroup
                       name="plugin-folder"
+                      aria-label="Choose a plugin"
                       value={selected}
                       disabled={busy}
                       onValueChange={(value) => {
@@ -686,7 +701,7 @@ export function PluginImport({
                       : "This plugin starts off. Turn it on in the list when you’re ready."}
                   </p>
                 )}
-              </SettingsGroup>
+              </div>
             </section>
           )}
         </div>

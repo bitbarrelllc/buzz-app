@@ -414,6 +414,16 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
       exact: true,
     }),
   ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveAccessibleName(
+    "Choose a plugin",
+  );
+  await expect(page.getByRole("dialog")).toHaveAccessibleDescription(
+    "Select a plugin to review before installing.",
+  );
+  await expect(
+    page.getByRole("radiogroup", { name: "Choose a plugin" }),
+  ).toBeVisible();
+
   await expect(page.getByRole("radio")).toHaveCount(2);
   await expect(button(page, "Install plugin")).toHaveCount(0);
   await expect(button(page, "Continue")).toBeDisabled();
@@ -435,6 +445,12 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
     .getByRole("dialog")
     .screenshot({ path: info.outputPath("plugin-choose-light.png") });
   await button(page, "Continue").click();
+  await expect(page.getByRole("dialog")).toHaveAccessibleName(
+    "Review plugin access",
+  );
+  await expect(page.getByRole("dialog")).toHaveAccessibleDescription(
+    "Only install code you trust. Plugins aren’t sandboxed.",
+  );
   await expect(
     page.getByRole("region", { name: "Skipped folders" }),
   ).toHaveCount(0);
@@ -679,7 +695,10 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await openPlugins(page, app.origin);
   await button(page, "Add").click();
   await button(page, "Browse plugin folder").click();
-  const dialog = page.getByRole("dialog", { name: "Add a plugin" });
+  const dialog = page
+    .getByRole("dialog")
+    .and(page.locator('[aria-modal="true"]'));
+  await expect(dialog).toHaveAccessibleName("Review plugin access");
   await expect(dialog.getByRole("radio")).toHaveCount(0);
   await expect(
     dialog.getByText("Choose a plugin folder", { exact: true }),
@@ -698,12 +717,12 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect
     .poll(() =>
       identityHeading.evaluate((node) => {
-        const container = node
+        const access = node
           .closest("section")
-          .querySelector(".buzz-settings-group");
+          .querySelector('[aria-label="Computer access"]');
         return (
           node.getBoundingClientRect().bottom <
-          container.getBoundingClientRect().top
+          access.getBoundingClientRect().top
         );
       }),
     )
@@ -777,16 +796,21 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
       )
       .toEqual({ bounded: true, scrolls: true, distinctBackground: true });
     await codeRegion.focus();
-    await codeRegion.press("End");
+    // Cross a meaningful scroll boundary before reversing direction. End/Home
+    // can align text lines instead of the padded scrollport edges across engines.
+    const midpoint = await codeRegion.evaluate(
+      (node) =>
+        Math.min(node.clientHeight, node.scrollHeight - node.clientHeight) / 2,
+    );
+    await codeRegion.press("PageDown");
     await expect
       .poll(() => codeRegion.evaluate((node) => node.scrollTop))
-      .toBeGreaterThan(0);
-    const scrolled = await codeRegion.evaluate((node) => node.scrollTop);
-    await codeRegion.press("Home");
+      .toBeGreaterThan(midpoint);
+    await codeRegion.press("PageUp");
     await expect
       .poll(() => codeRegion.evaluate((node) => node.scrollTop))
-      .toBeLessThan(scrolled);
-    // Capture the beginning independently of platform-specific Home positioning.
+      .toBeLessThan(midpoint);
+    // Position the capture independently of keyboard-scroll alignment.
     await codeRegion.evaluate((node) => {
       node.scrollTop = 0;
     });
