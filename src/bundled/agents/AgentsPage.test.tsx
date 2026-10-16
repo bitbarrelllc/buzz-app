@@ -264,6 +264,8 @@ function setup(
     find: (pubkey: string) => snapshot.agents.find((a) => a.pubkey === pubkey),
     relay: () => undefined,
     register: vi.fn(),
+    addTool: vi.fn(),
+    tools: () => [],
     create: vi.fn(async () => {
       // `shown: false`: it was made for a community no longer selected.
       if (!shown) return created;
@@ -334,6 +336,7 @@ function setup(
       for (const listener of listeners) listener();
       return team;
     }),
+    core: vi.fn(async () => undefined),
     removeTeam: vi.fn(async (id: string) => {
       snapshot = {
         ...snapshot,

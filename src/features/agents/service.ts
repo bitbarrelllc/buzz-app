@@ -1,5 +1,7 @@
 import { createLocalAgentActivity } from "./local-activity";
-import { AgentRunners, type Connection } from "./runner";
+import { AgentRunners, type Connection, TIMEOUT_LIMIT_MS } from "./runner";
+import { CoreMemoryCache } from "./core-memory-cache";
+import { ownerReads } from "./reads";
 // Agents: agents that are plugins from the start. A plugin registers an agent
 // type (its summary line, peek view, settings tabs and `run`); each agent made
 // from it has its own native-held key, an `agent-attention/v1` configuration the
@@ -43,6 +45,7 @@ import { publicKeyLabels } from "../../shared/identity/public-key";
 import { newer, type EventData, type RelayEvent } from "../relay/events";
 import { relayPartition } from "../relay/partition";
 import { threadReference } from "../relay/thread-reference";
+import { channelTabs } from "../../bundled/channels/useChannelTabState";
 import type { RelayData } from "../relay/service";
 import type { RelaySession } from "../relay/session";
 import {
@@ -98,6 +101,7 @@ import {
 } from "./store";
 import { meChat } from "./me-chat";
 import { readCheckpoints, writeCheckpoints } from "./catch-up";
+import { type AddedTool, BUZZ_SESSION } from "../../buzz-mcp/session-tools";
 
 /** Where an agent runs: `here`, with its key on this device; `hosted`, by its
  * type's provider; or `elsewhere`, on another of the owner's devices. Only an
@@ -201,6 +205,12 @@ export type AgentHandle = Readonly<{
   publish(event: AgentEventTemplate): Promise<RelayEvent>;
   /** Reads the community as the agent, seeing only what it may see. */
   query(filters: readonly object[]): Promise<RelayEvent[]>;
+  /** Finds profiles by `name` or `display_name`, as the agent, best match
+   * first. `undefined` when its community has no profile name search. */
+  searchProfiles(
+    query: string,
+    limit: number,
+  ): Promise<RelayEvent[] | undefined>;
   /** Uploads base64 `data`, an image or MP4 video, as the agent. */
   upload(data: string, mime: string): Promise<AgentUpload>;
   /** Downloads one of its community's media blobs, by URL or `sha256[.ext]`,
@@ -216,6 +226,9 @@ export type AgentHandle = Readonly<{
     canvas: string;
     agents: readonly string[];
   }>[];
+  /** The owner's thread tabs on this device in the agent's community;
+   * undefined while it is not connected. */
+  tabs(): ReturnType<typeof channelTabs> | undefined;
   /** The agent's own attention, one object at a time. */
   attention: AgentAttention;
 }>;
@@ -558,6 +571,14 @@ export type NewAgent = Readonly<{
 export type Agents = {
   register<Config>(type: AgentType<Config>): void;
   types(): readonly RegisteredAgentType[];
+  /** Adds a tool to every agent session in the app, beside the Buzz tools.
+   * The tool acts as the agent, like the rest of a trusted plugin's code
+   * acts as its owner. A session lists
+   * the tools there are when it starts, and one that cannot take a changed
+   * list is replaced when it is next used. */
+  addTool(tool: AddedTool): void;
+  /** The tools active plugins add now. A name is only ever one plugin's. */
+  tools(): readonly AddedTool[];
   snapshot(): AgentsSnapshot;
   subscribe(listener: () => void): () => void;
   /** The agent of this pubkey in the selected community, if it is an agent. */
@@ -565,6 +586,15 @@ export type Agents = {
   /** The owner's connection to a running agent's community, which need not be
    * the selected one: read the agent's conversations through this. */
   relay(pubkey: string): RelayData | undefined;
+  /** The agent's `core` memory, as this device keeps it current: its text,
+   * `null` when it has none, or undefined when it could not be read. A start
+   * reads it here, which needs no relay request once this device has read it
+   * once; the host refreshes it, so no agent type does. Rejects only when
+   * `signal` aborts. */
+  core(
+    pubkey: string,
+    signal?: AbortSignal,
+  ): Promise<string | null | undefined>;
   /** Makes an agent of `type` in the selected community: here, or with a
    * hosted type at its provider. A hosted one whose setup then fails is kept
    * as `unfinished`. */
@@ -627,9 +657,17 @@ declare module "@deepseek-ai/cordis" {
   }
 }
 
+/** Whether `value` can be sent as JSON, as every session's tool list is. */
+const serializable = (value: unknown) => {
+  try {
+    JSON.stringify(value);
+    return true;
+  } catch {
+    return false;
+  }
+};
 /** Bounds one cleanup attempt, whose relay steps otherwise wait on the outbox. */
 const CLEANUP_TIMEOUT_MS = 60_000;
-const TIMEOUT_LIMIT_MS = 30 * 60_000;
 const TIMER_TICK_MS = 5_000;
 /** How often a failed connection to an unselected community is tried again. */
 const RETRY_MS = 30_000;
@@ -788,6 +826,9 @@ export class AgentsService extends Service implements Agents {
    * shown over the newer one. */
   private keyGeneration = 0;
   private readonly contributions;
+  private readonly addedTools;
+  /** Every added tool's name, its plugin active or still starting. */
+  private readonly toolNames = new Set<string>();
   private readonly listeners = new Set<() => void>();
   /** Every saved identity, deleted ones included: native's list is the agent
    * list, and `records` only adds settings to it. */
@@ -798,6 +839,7 @@ export class AgentsService extends Service implements Agents {
   /** By origin, so each agent listens in its own community, selected or not. */
   private bound = new Map<string, Bound>();
   private readonly runners: AgentRunners;
+  private readonly coreMemory: CoreMemoryCache;
   /** Counts list requests, so only the latest one is applied. */
   private listed = 0;
   /** Each running cleanup of a row deleted under the old order, which erased
@@ -857,6 +899,7 @@ export class AgentsService extends Service implements Agents {
   ) {
     super(ctx, "agents");
     this.contributions = createContributions<AgentType>(ctx);
+    this.addedTools = createContributions<AddedTool & { id: string }>(ctx);
     migrateAgentStorage(storage);
     this.records = readRecords(storage);
     this.unfinished = Object.freeze(readUnfinished(storage));
@@ -870,6 +913,9 @@ export class AgentsService extends Service implements Agents {
       running: [],
       teams: this.teamList,
     });
+    this.coreMemory = new CoreMemoryCache((pubkey) =>
+      ownerReads(this.relay(pubkey), pubkey),
+    );
     this.runners = new AgentRunners({
       ready: (pubkey) => this.ready(pubkey),
       agent: (pubkey) => this.agent(pubkey),
@@ -913,6 +959,10 @@ export class AgentsService extends Service implements Agents {
           agents: templateAgents(template, this.teamList, here),
         }));
       },
+      tabs: (agent) => {
+        const session = this.bindingOf(agent)?.session;
+        return session && channelTabs(session);
+      },
       classifier: () => this.classifier(),
       jev: () => this.jev,
       jevStatus: () => this.jevStatus,
@@ -927,6 +977,9 @@ export class AgentsService extends Service implements Agents {
       activity: localActivity,
       meChat: (agent, channel, signal) =>
         meChat(() => this.relay(agent.pubkey), agent.owner, channel, signal),
+      remembered: (pubkey, slug, body) =>
+        this.coreMemory.wrote(pubkey, slug, body),
+      finished: (pubkey) => void this.coreMemory.refresh(pubkey),
     });
     ctx.effect(() => {
       const stops = [
@@ -1012,6 +1065,29 @@ export class AgentsService extends Service implements Agents {
     this.contributions.register(this.ctx, type as unknown as AgentType);
   }
   types = () => this.contributions.snapshot();
+  addTool(tool: AddedTool) {
+    if (
+      !/^[a-z][a-z0-9_]{0,63}$/.test(tool.name ?? "") ||
+      BUZZ_SESSION.tools.some((core) => core.name === tool.name) ||
+      !tool.description ||
+      tool.inputSchema?.type !== "object" ||
+      !serializable(tool.inputSchema) ||
+      typeof tool.call !== "function"
+    )
+      throw new Error(
+        "Agent tools need a lowercase name no Buzz tool has, a description, a JSON object inputSchema and call",
+      );
+    // Reserved from registration, not activation: plugins starting together
+    // are not active yet, and the second to take a name must fail.
+    if (this.toolNames.has(tool.name))
+      throw new Error(`Another plugin adds agent tool ${tool.name}`);
+    this.addedTools.register(this.ctx, { ...tool, id: tool.name });
+    this.ctx.effect(() => {
+      this.toolNames.add(tool.name);
+      return () => this.toolNames.delete(tool.name);
+    });
+  }
+  tools = () => this.addedTools.snapshot();
   snapshot = () => this.state;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -1025,6 +1101,8 @@ export class AgentsService extends Service implements Agents {
     const origin = originOf(this.agent(pubkey)?.relay ?? "");
     return origin ? this.bound.get(origin)?.relay : undefined;
   };
+  core = (pubkey: string, signal?: AbortSignal) =>
+    this.coreMemory.core(pubkey, signal);
   private localCache:
     | {
         identities: readonly AgentIdentity[];
@@ -2408,7 +2486,10 @@ export class AgentsService extends Service implements Agents {
     // Disconnecting stops its agents even when no binding changed.
     this.update();
     // Its sync reads the community's agent records too.
-    if (changed && entry.binding) this.sync();
+    if (changed && entry.binding) {
+      this.sync();
+      this.refreshCore(origin);
+    }
   }
 
   /** Delivers the session's live events, and retries what failed whenever its
@@ -2437,7 +2518,10 @@ export class AgentsService extends Service implements Agents {
         connection.epoch += now ? 1 : 0;
         connection.since = now ? Math.floor(Date.now() / 1000) : undefined;
       }
-      if (now && !connected) this.sync();
+      if (now && !connected) {
+        this.sync();
+        this.refreshCore(origin);
+      }
       connected = now;
       this.runners.catchUp(false);
     });
@@ -2450,6 +2534,14 @@ export class AgentsService extends Service implements Agents {
       stopStatus();
       stopRosters?.();
     };
+  }
+
+  /** Refreshes the cached `core` memory of each agent running in the
+   * community, which may have changed elsewhere while it was not connected. */
+  private refreshCore(origin: string) {
+    for (const agent of this.state.running)
+      if (originOf(agent.relay) === origin)
+        void this.coreMemory.refresh(agent.pubkey);
   }
 
   // Joins identities, records and the connections into the running and visible

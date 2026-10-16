@@ -164,6 +164,10 @@ const PAIRS = [
     "affordance-danger-hover",
     "affordance-danger-pressed",
   ].map((surface) => ["--text-call-leave", `--${surface}`]),
+  ...["--text-standard", "--text-subtle", "--text-metadata"].map((role) => [
+    role,
+    "--bg-app",
+  ]),
   ["--text-standard", "--affordance-popover-selected"],
   ["--text-subtle", "--affordance-popover-selected"],
   ...["control", "control-hover", "control-pressed", "selected"].map(

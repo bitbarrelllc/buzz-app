@@ -131,8 +131,19 @@ function fakeRelay(origin = "https://relay.example.test") {
   const listed: RelayEvent[] = [];
   /** The kind 9 messages it stores, which catch-up reads. */
   const history: RelayEvent[] = [];
+  /** Each agent's `core` memory as the community holds it. */
+  const memories = new Map<string, string>();
   const session = {
     archives,
+    agentMemories: {
+      read: vi.fn(async (pubkey: string) => {
+        const body = memories.get(pubkey);
+        return {
+          entries: body === undefined ? [] : [{ slug: "core", body }],
+          partial: false,
+        };
+      }),
+    },
     read: vi.fn(async (filters: readonly ReadFilter[]) =>
       filters[0]?.kinds?.includes(9) ? page(history, filters[0]) : [...listed],
     ),
@@ -229,6 +240,7 @@ function fakeRelay(origin = "https://relay.example.test") {
     archives,
     listed,
     history,
+    memories,
     session,
     presence: session.publishAgentPresence as ReturnType<
       typeof vi.fn<RelaySession["publishAgentPresence"]>
@@ -386,6 +398,7 @@ function fakeNative(identities: AgentIdentity[] = []) {
     ),
     publishProfile: vi.fn(async (_: string) => {}),
     query: vi.fn(async () => []),
+    searchProfiles: vi.fn(async () => undefined),
     upload: vi.fn(async () => ({ url: "", sha256: "", size: 0, type: "" })),
     media: vi.fn(async () => ""),
     remember: vi.fn(async (pubkey: string) =>
@@ -508,6 +521,7 @@ async function setup({
     relay: fake.relay,
     reconnecting: fake.reconnecting,
     recover: fake.recover,
+    memories: fake.memories,
     archives: fake.archives,
     session: fake.session,
     history: fake.history,
@@ -1377,7 +1391,7 @@ it("keeps room for mentions however much watch work waits", async () => {
   run.mockImplementationOnce(() => blocked);
   emit({ events: [event("first")] });
   await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
-  // More watch work than its queue holds, then a mention.
+  // More watch work than its Interest holds, then a mention.
   emit({
     events: Array.from({ length: 40 }, (_, i) =>
       event(`w${i}x`, { created_at: 101 + i }),
@@ -1396,11 +1410,121 @@ it("keeps room for mentions however much watch work waits", async () => {
   });
   await settle();
   unblock();
-  // The mention is heard next; the watch queue kept its own 32.
-  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(34));
+  // The mention is heard next; the watch's Interest kept its own 8.
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(10));
   await settle();
-  expect(run).toHaveBeenCalledTimes(34);
+  expect(run).toHaveBeenCalledTimes(10);
   expect(turns(run).slice(0, 3)).toEqual(["watch", "mention", "watch"]);
+});
+
+it("runs one turn at a time for an Interest, Interests and mentions beside each other, and frees a lane to the oldest waiting job", async () => {
+  const { service, run, emit } = await setup({ identities: [echo] });
+  const watch = (interest: string, kind: number) => ({
+    type: "event" as const,
+    interest_id: interest,
+    enabled: true,
+    since: 1,
+    channels: [channel],
+    kinds: [kind],
+  });
+  await service.save(bot, {
+    attentionEnabled: true,
+    attention: {
+      "watch/channel": null,
+      "watch/a": watch("a", 9),
+      "watch/b": watch("b", 11),
+    },
+  });
+  await settle();
+  const pending = new Map<string, () => void>();
+  run.mockImplementation(
+    ({ trigger }) =>
+      new Promise<void>((resolve) => {
+        pending.set(
+          trigger.type === "timer" || trigger.type === "catch-up"
+            ? trigger.slug
+            : trigger.event.content,
+          resolve,
+        );
+      }),
+  );
+  const working = () => [...pending.keys()].sort();
+  const finish = async (content: string) => {
+    pending.get(content)?.();
+    pending.delete(content);
+    await settle();
+  };
+  emit({
+    events: [
+      event("a1", { content: "a1", created_at: 101 }),
+      event("a2", { content: "a2", created_at: 102 }),
+      event("b1", { content: "b1", kind: 11, created_at: 103 }),
+      event("b2", { content: "b2", kind: 11, created_at: 104 }),
+    ],
+  });
+  await vi.waitFor(() => expect(working()).toEqual(["a1", "b1"]));
+  // A mention runs beside the busy Interests.
+  emit({
+    events: [
+      event("named", {
+        content: "named",
+        created_at: 105,
+        tags: [
+          ["h", channel],
+          ["p", bot],
+        ],
+      }),
+    ],
+  });
+  await vi.waitFor(() => expect(working()).toEqual(["a1", "b1", "named"]));
+  await finish("b1");
+  expect(working()).toEqual(["a1", "b2", "named"]);
+  await finish("a1");
+  expect(working()).toEqual(["a2", "b2", "named"]);
+  await finish("a2");
+  await finish("b2");
+  await finish("named");
+  expect(run).toHaveBeenCalledTimes(5);
+});
+
+it("runs at most eight Interests at once, and the oldest waiting one next", async () => {
+  const { service, run, emit } = await setup({ identities: [echo] });
+  const attention: Record<string, object | null> = { "watch/channel": null };
+  for (let i = 0; i < 10; i++)
+    attention[`watch/w${i}`] = {
+      type: "event",
+      interest_id: `i${i}`,
+      enabled: true,
+      since: 1,
+      channels: [channel],
+      kinds: [20 + i],
+    };
+  await service.save(bot, {
+    attentionEnabled: true,
+    attention: attention as never,
+  });
+  await settle();
+  const pending = new Map<string, () => void>();
+  run.mockImplementation(
+    ({ trigger }) =>
+      new Promise<void>((resolve) => {
+        if (trigger.type === "watch")
+          pending.set(trigger.event.content, resolve);
+      }),
+  );
+  emit({
+    events: Array.from({ length: 10 }, (_, i) =>
+      event(`e${i}`, { content: `e${i}`, kind: 20 + i, created_at: 101 + i }),
+    ),
+  });
+  await vi.waitFor(() => expect(pending.size).toBe(8));
+  await settle();
+  expect(run).toHaveBeenCalledTimes(8);
+  pending.get("e3")?.();
+  pending.delete("e3");
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(9));
+  expect(pending.has("e8")).toBe(true);
+  expect(pending.has("e9")).toBe(false);
 });
 
 it("passes the model and effort its owner asked for, and no other", async () => {
@@ -2047,6 +2171,186 @@ it("retries a failed profile when the live connection recovers in the same sessi
   recover();
   expect(native.publishProfile).toHaveBeenCalledTimes(2);
   warn.mockRestore();
+});
+
+it("refreshes an agent's cached core memory when its community connects or its socket recovers in the same session", async () => {
+  const { service, session, memories, recover, connect } = await setup();
+  const read = vi.mocked(session.agentMemories.read);
+  await service.create({ type: "example/echo", name: "Echo" });
+  memories.set(bot, "one");
+  // A device that has never read it waits once.
+  await expect(service.core(bot)).resolves.toBe("one");
+  const reads = read.mock.calls.length;
+  // Changed elsewhere while the socket was down; the session is kept.
+  memories.set(bot, "two");
+  recover();
+  expect(read).toHaveBeenCalledTimes(reads + 1);
+  await settle();
+  await expect(service.core(bot)).resolves.toBe("two");
+  expect(read).toHaveBeenCalledTimes(reads + 1);
+  // A new session refreshes it too.
+  memories.set(bot, "three");
+  connect(false);
+  connect(true);
+  await settle();
+  await expect(service.core(bot)).resolves.toBe("three");
+  expect(read).toHaveBeenCalledTimes(reads + 2);
+});
+
+it("keeps core memory an agent writes through its handle, and refreshes it when the run and its handed-off work end", async () => {
+  const { service, session, memories, run, emit } = await setup();
+  const read = vi.mocked(session.agentMemories.read);
+  await service.create({ type: "example/echo", name: "Echo" });
+  memories.set(bot, "before");
+  await expect(service.core(bot)).resolves.toBe("before");
+  let finish = () => {};
+  run.mockImplementationOnce(async ({ agent, workingUntil }) => {
+    await agent.remember("core", "written", 0);
+    workingUntil(new Promise<void>((resolve) => (finish = resolve)));
+  });
+  emit({
+    events: [
+      event("m1", {
+        tags: [
+          ["h", channel],
+          ["p", bot],
+        ],
+      }),
+    ],
+    channelId: channel,
+  });
+  await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+  await settle();
+  const reads = read.mock.calls.length;
+  // The write is the next start's at once, with no read.
+  await expect(service.core(bot)).resolves.toBe("written");
+  expect(read).toHaveBeenCalledTimes(reads);
+  // Not until the handed-off work ends.
+  memories.set(bot, "after");
+  await settle();
+  expect(read).toHaveBeenCalledTimes(reads);
+  finish();
+  await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(reads + 1));
+  await settle();
+  await expect(service.core(bot)).resolves.toBe("after");
+});
+
+it("refreshes core memory when a standalone turn ends, without holding the next one on that read", async () => {
+  vi.useFakeTimers({ now: 1_000_000 });
+  const memory: (string | null | undefined)[] = [];
+  let service!: AgentsService;
+  const f = await setup({
+    runOnce: async () => {
+      memory.push(await service.core(bot));
+      return { ok: true };
+    },
+  });
+  service = f.service;
+  const read = vi.mocked(f.session.agentMemories.read);
+  await service.create({ type: "example/echo", name: "Echo" });
+  f.memories.set(bot, "one");
+  await expect(service.core(bot)).resolves.toBe("one");
+  await service.save(bot, { attentionEnabled: true });
+  const timer = (armed: number) =>
+    ({
+      type: "timer",
+      interest_id: "default",
+      prompt: "tick",
+      enabled: true,
+      interval_secs: 60,
+      armed_at: armed,
+      max_occurrences: 1,
+      expires_at: null,
+    }) as const;
+  // The first turn's refresh is held: the second starts on the cached text.
+  let release = () => {};
+  read.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({
+            entries: [
+              { slug: "core", body: "two", eventId: "e", createdAt: 0 },
+            ],
+            partial: false,
+          });
+      }),
+  );
+  await service.save(bot, {
+    attention: { "watch/a": timer(1_000), "watch/b": timer(1_000) },
+  });
+  await vi.advanceTimersByTimeAsync(60_000);
+  await vi.waitFor(() => expect(memory).toEqual(["one", "one"]));
+  release();
+  await vi.advanceTimersByTimeAsync(0);
+  await expect(service.core(bot)).resolves.toBe("two");
+});
+
+it("never writes decrypted core memory to storage, so a rebuilt service reads it again", async () => {
+  const storage = memoryStorage();
+  const written: string[] = [];
+  const setItem = storage.setItem.bind(storage);
+  vi.spyOn(storage, "setItem").mockImplementation((key, value) => {
+    written.push(`${key}=${value}`);
+    setItem(key, value);
+  });
+  const leaked = () =>
+    written.filter((entry) => /secret-(read|written|refreshed)/.test(entry));
+  const first = await setup({ storage });
+  const read = vi.mocked(first.session.agentMemories.read);
+  await first.service.create({ type: "example/echo", name: "Echo" });
+  // A read.
+  first.memories.set(bot, "secret-read");
+  await expect(first.service.core(bot)).resolves.toBe("secret-read");
+  // A successful write through the agent's handle.
+  first.run.mockImplementationOnce(async ({ agent }) => {
+    await agent.remember("core", "secret-written", 0);
+  });
+  first.emit({
+    events: [
+      event("m1", {
+        tags: [
+          ["h", channel],
+          ["p", bot],
+        ],
+      }),
+    ],
+    channelId: channel,
+  });
+  await vi.waitFor(() => expect(first.run).toHaveBeenCalledOnce());
+  await settle();
+  // A refresh.
+  first.memories.set(bot, "secret-refreshed");
+  first.recover();
+  await settle();
+  await expect(first.service.core(bot)).resolves.toBe("secret-refreshed");
+  expect(read.mock.calls.length).toBeGreaterThan(0);
+  expect(leaked()).toEqual([]);
+  // A service rebuilt on the same storage starts empty and reads core again.
+  const second = await setup({ storage });
+  const reread = vi.mocked(second.session.agentMemories.read);
+  await second.service.create({ type: "example/echo", name: "Echo" });
+  second.memories.set(bot, "after restart");
+  await expect(second.service.core(bot)).resolves.toBe("after restart");
+  expect(reread).toHaveBeenCalled();
+  expect(leaked()).toEqual([]);
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i) as string;
+    expect(storage.getItem(key)).not.toMatch(/secret-/);
+  }
+});
+
+it("stops refreshing core memory for a community once it is left", async () => {
+  const { service, session, recover, leave, select } = await setup();
+  const read = vi.mocked(session.agentMemories.read);
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.core(bot);
+  select("https://other.example.test");
+  leave("https://relay.example.test");
+  const reads = read.mock.calls.length;
+  recover();
+  await settle();
+  expect(read).toHaveBeenCalledTimes(reads);
 });
 
 it("keeps a Delete that fails partway listed and stopped, deletes nothing, and retries nothing", async () => {
@@ -4078,6 +4382,82 @@ it("gives a missed event to more of one Interest's watches than its lane holds, 
   }
 }, 10_000);
 
+it("keeps an Interest's room for a catch-up being classified, so live events cannot drop it", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const jev = fakeJev();
+    let answer!: (value: Answer) => void;
+    jev.classify.mockImplementationOnce(
+      () => new Promise((resolve) => (answer = resolve)),
+    );
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ran: string[] = [];
+    const { service, history, recover, emit } = await setup({
+      jev,
+      identities: [echo],
+      runOnce: async ({ delivery }) => {
+        const { trigger } = delivery;
+        ran.push(
+          trigger.type === "watch" ? (trigger.event.id[0] ?? "") : trigger.type,
+        );
+        if (ran.length === 1) await blocked;
+        return { ok: true };
+      },
+    });
+    const now = nowSeconds();
+    vi.setSystemTime(now * 1000);
+    await service.save(bot, {
+      attentionEnabled: true,
+      attention: {
+        "watch/channel": null,
+        "watch/chat": {
+          ...chat["watch/chat"],
+          classifier: {
+            questions: {
+              deploy: { question: "Is it about a deploy?", threshold: 0.5 },
+            },
+          },
+        },
+        // Live only, in the same Interest.
+        "watch/likes": {
+          type: "event",
+          interest_id: "default",
+          enabled: true,
+          since: 1,
+          channels: [channel],
+          kinds: [7],
+        },
+      },
+    });
+    await settle();
+    vi.setSystemTime((now + 60) * 1000);
+    history.push(posted("missed", now + 30));
+    recover();
+    // The catch-up turn is being classified, and its checkpoint is past it.
+    await vi.waitFor(() => expect(jev.classify).toHaveBeenCalledOnce());
+    await settle();
+    // One runs; of the eight that then wait, the catch-up keeps one.
+    const likes = Array.from({ length: 9 }, (_, i) =>
+      event(`${i}`, { kind: 7, created_at: now + 61 + i }),
+    );
+    emit({ events: likes.slice(0, 1) });
+    await vi.waitFor(() => expect(ran).toEqual(["0"]));
+    emit({ events: likes.slice(1) });
+    await settle();
+    answer(yes);
+    await settle();
+    release();
+    await vi.waitFor(() => expect(ran).toContain("catch-up"));
+    await settle();
+    expect(ran).toEqual(["0", "1", "2", "3", "4", "5", "6", "7", "catch-up"]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("does not give a missed event again after a restart to watches that had it before the rest", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   try {
@@ -5019,6 +5399,78 @@ it("lists only an HTTPS picture of a hosted agent", async () => {
   expect(remote.profile).not.toHaveBeenCalled();
 });
 
+it("adds plugins' tools to every session, each name once", async () => {
+  const { service, plugin, ctx } = await setup();
+  const tool = {
+    name: "tasks_create",
+    description: "Create a task.",
+    inputSchema: { type: "object" },
+    call: async () => "created",
+  };
+  // Installed plugins add tools as bundled ones do.
+  plugin.agents.addTool({ ...tool, name: "notes_add" });
+  expect(service.tools()).toMatchObject([
+    { name: "notes_add", pluginId: "example" },
+  ]);
+  const bundled = (id: string) =>
+    ctx.extend({ pluginOwner: Object.freeze({ id, revision: "bundled" }) });
+  const tasks = bundled("buzz.tasks");
+  for (const bad of [
+    { ...tool, name: "send" },
+    { ...tool, name: "Tasks-Create" },
+    { ...tool, description: "" },
+    { ...tool, inputSchema: { type: "string" } },
+    { ...tool, inputSchema: { type: "object", default: 1n } },
+  ])
+    expect(() => tasks.agents.addTool(bad)).toThrow(/Agent tools need/);
+  expect(service.tools()).toHaveLength(1);
+  tasks.agents.addTool(tool);
+  expect(() =>
+    bundled("buzz.other").agents.addTool({
+      ...tool,
+      call: async () => "other",
+    }),
+  ).toThrow(/Another plugin/);
+  expect(service.tools()).toMatchObject([
+    { name: "notes_add", pluginId: "example" },
+    { name: "tasks_create", pluginId: "buzz.tasks" },
+  ]);
+});
+
+it("reserves a tool name while its plugin is still starting", async () => {
+  const ctx = new Context();
+  ctx.provide("pluginStatus", {
+    isActive: () => false,
+    subscribe: () => () => {},
+  });
+  const service = new AgentsService(
+    ctx,
+    fakeCommunities(fakeRelay()).communities,
+    fakeNative(),
+    memoryStorage(),
+  );
+  const tool = {
+    name: "tasks_create",
+    description: "Create a task.",
+    inputSchema: { type: "object" },
+    call: async () => "created",
+  };
+  const owner = (id: string) =>
+    ctx.extend({ pluginOwner: Object.freeze({ id, revision: "bundled" }) });
+  const first = owner("buzz.tasks").plugin({
+    inject: ["agents"],
+    apply: (plugin: Context) => plugin.agents.addTool(tool),
+  });
+  await first;
+  // Neither plugin is active yet, and still the name is taken.
+  expect(service.tools()).toEqual([]);
+  expect(() => owner("buzz.other").agents.addTool(tool)).toThrow(
+    /Another plugin/,
+  );
+  await first.dispose();
+  owner("buzz.other").agents.addTool(tool);
+});
+
 it("refuses a hosted type that also runs here", async () => {
   const { plugin } = await setup();
   const { type } = cloud();
@@ -5546,7 +5998,12 @@ it("stops trying presence on a session that cannot send it", async () => {
   await service.create({ type: "example/echo", name: "Echo" });
   await vi.advanceTimersByTimeAsync(180_000);
   expect(presence).toHaveBeenCalledTimes(1);
-  expect(warn).toHaveBeenCalledTimes(1);
+  // Count only presence warnings: an earlier test's service still runs.
+  const warned = () =>
+    warn.mock.calls.filter(([text]) =>
+      String(text).startsWith("Agent presence cannot be sent"),
+    ).length;
+  expect(warned()).toBe(1);
   presence.mockResolvedValue(true);
   connect(true);
   await vi.advanceTimersByTimeAsync(0);
