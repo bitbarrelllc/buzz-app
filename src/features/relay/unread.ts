@@ -1258,7 +1258,7 @@ export function createUnread({
       !entry.rootId &&
       (chosen(entry) === true ||
         ((entry.mentioned || entry.broadcast || conversation(entry)) &&
-          afterFrontier(entry, reads.state(), dm)))
+          isUnread(entry, reads.state(), dm)))
         ? threadRootId
         : undefined;
     const structuralRecovery = structuralRootId !== undefined;
