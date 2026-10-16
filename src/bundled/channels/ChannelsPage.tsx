@@ -11,6 +11,7 @@ import { useReturnHighlight } from "../../features/messages/use-return-highlight
 import { ChannelBody } from "./ChannelBody";
 import { tabPane, useChannelTabState } from "./useChannelTabState";
 import { ChannelMembersDialog } from "./ChannelMembersDialog";
+import { sharedSessionsTarget } from "./shared-sessions-panel";
 import { UsersIcon } from "../../shared/design-system/icons";
 import { newSessionParent } from "../../features/channel-navigation/routes";
 import { ChannelCanvasDialog } from "./ChannelCanvasDialog";
@@ -744,6 +745,18 @@ function ChannelWorkspace({
     focusConversation.current = true;
     return true;
   };
+  const focusKept = useRef<string>(undefined);
+  const closeOtherTabs = (id: string) => {
+    if (!secondary.closeOtherTabs(id)) return false;
+    returnFocus.current = undefined;
+    focusKept.current = id;
+    return true;
+  };
+  const tabMenu = {
+    key: JSON.stringify([scope, currentId]),
+    closeAll: closeAllTabs,
+    closeOthers: closeOtherTabs,
+  };
   // The channel owns this command, including sessions without a main tab strip.
   useLayoutEffect(() => {
     const close = (event: Event) => {
@@ -789,6 +802,18 @@ function ChannelWorkspace({
         target?.focus({ preventScroll: true });
       }
     }
+    // A pane whose selected tab closed refocuses its new selection; the kept
+    // tab, where the menu was, takes focus back.
+    const kept = focusKept.current;
+    if (kept !== undefined) {
+      focusKept.current = undefined;
+      historyContainer.current
+        ?.closest("[data-channel-workspace]")
+        ?.querySelector<HTMLElement>(
+          `[role="tab"][data-tab-value="${CSS.escape(kept)}"]`,
+        )
+        ?.focus({ preventScroll: true });
+    }
     const pending = returnFocus.current;
     if (!pending) return;
     if (pending.channelId !== currentId || !pending.trigger.isConnected) {
@@ -813,6 +838,31 @@ function ChannelWorkspace({
     panelTrigger,
     splitTrigger,
   } = secondary;
+  const sharedSessionsVisit = useRef<string>(undefined);
+  useLayoutEffect(() => {
+    if (
+      !navigation ||
+      navigation.signal.aborted ||
+      navigation.target.kind !== "conversation" ||
+      navigation.target.panel !== "shared-sessions" ||
+      currentId !== navigation.target.channelId ||
+      !drawerContext ||
+      cached ||
+      sharedSessionsVisit.current === navigation.entryId
+    )
+      return;
+    const target = sharedSessionsTarget(currentId);
+    // This route names our contribution, just like a contribution-bound launcher.
+    const panel = panels
+      .snapshot()
+      .find((entry) => entry.id === "shared-sessions" && entry.matches(target));
+    if (!panel) return;
+    sharedSessionsVisit.current = navigation.entryId;
+    open(
+      { panel, target, channelId: currentId, channelContext: drawerContext },
+      true,
+    );
+  }, [navigation, currentId, drawerContext, cached, panels, open]);
   useLayoutEffect(() => {
     // Navigation temporarily withdraws the old presentation while preparing
     // the next destination. That handoff must not dismiss saved thread tabs.
@@ -1452,6 +1502,7 @@ function ChannelWorkspace({
                 >
                   <SessionShare
                     key={`${current.id}:${navigation?.entryId ?? ""}`}
+                    navigator={navigator}
                     session={queries}
                     channel={current}
                     signal={navigation?.signal}
@@ -1471,10 +1522,7 @@ function ChannelWorkspace({
                 <div className={styles.mainWorkspace}>
                   <PanelWorkspace
                     main
-                    tabMenu={{
-                      key: JSON.stringify([scope, currentId]),
-                      closeAll: closeAllTabs,
-                    }}
+                    tabMenu={tabMenu}
                     drag={secondary.drag.main}
                     label="Channel tabs"
                     focusOnMount={false}
@@ -1671,10 +1719,7 @@ function ChannelWorkspace({
                       icon={<SidebarRightIcon size="1rem" aria-hidden="true" />}
                     />
                   }
-                  tabMenu={{
-                    key: JSON.stringify([scope, currentId]),
-                    closeAll: closeAllTabs,
-                  }}
+                  tabMenu={tabMenu}
                   drag={secondary.drag.side}
                   value={selectedTab}
                   focusOnMount={

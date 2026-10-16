@@ -116,6 +116,7 @@ function PersonalHistory({
   return (
     <nav className={styles.sidebarContents} aria-label="Solo conversations">
       <SessionSections
+        navigator={navigator}
         personal
         showCreationShortcuts={showCreationShortcuts}
         visit={navigator.snapshot().attempt.signal}

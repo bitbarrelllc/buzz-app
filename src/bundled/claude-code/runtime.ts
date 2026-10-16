@@ -653,6 +653,10 @@ export class ClaudeRuntime {
         const client =
           handle &&
           appClient(handle, {
+            relayAuthor: this.reads(pubkey)?.relayAuthor?.(),
+            audienceAuthorityCommunity:
+              this.reads(pubkey)?.audienceAuthorityCommunity?.(),
+            signingAuthority: this.reads(pubkey)?.workflowAuthority(),
             spawn: this.spawn,
             cwd,
             memories: (slug) => this.memories(pubkey, slug),
