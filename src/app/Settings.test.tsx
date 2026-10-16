@@ -879,7 +879,7 @@ it("shows persistent failures without announcing them again when filtering", () 
   fireEvent.change(search, { target: { value: "Alphabet" } });
   fireEvent.change(search, { target: { value: "Zebra" } });
   expect(screen.getByText("Could not load plugin")).toBeVisible();
-  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByRole("alert")).toBeEmptyDOMElement();
   act(() => {
     fixture.external.error = null;
     fixture.snapshot.activation[fixture.external.manifest.id] = {
@@ -895,6 +895,76 @@ it("shows persistent failures without announcing them again when filtering", () 
   });
   expect(screen.queryByText("Activation failed")).toBeNull();
 });
+
+it.each(["row", "pane"])(
+  "announces an activation failure once after Enable from the %s, without replaying it on search",
+  async (source) => {
+    const fixture = reviewPluginFixture();
+    act(() => {
+      fixture.external.enabled = false;
+      fixture.publish();
+    });
+    if (source === "pane")
+      fireEvent.click(
+        screen.getByRole("button", { name: "View Zebra external details" }),
+      );
+    const alert = screen.getByRole("alert");
+    expect(alert).toBeEmptyDOMElement();
+    fireEvent.click(
+      source === "row"
+        ? screen.getByRole("button", { name: "Enable Zebra external" })
+        : within(
+            screen.getByRole("complementary", {
+              name: "Zebra external details",
+            }),
+          ).getByRole("button", { name: "Enable" }),
+    );
+    expect(fixture.manager.change).toHaveBeenCalledWith(
+      "enable",
+      "example.external",
+    );
+    act(() => {
+      fixture.external.enabled = true;
+      fixture.snapshot.activation[fixture.external.manifest.id] = {
+        revision: "old",
+        error: "Old activation failure",
+      };
+      fixture.publish();
+    });
+    expect(alert).toBeEmptyDOMElement();
+    act(() => {
+      fixture.snapshot.activation[fixture.external.manifest.id] = {
+        revision: "current",
+        error: "Activation failed",
+      };
+      fixture.publish();
+    });
+    expect(screen.getAllByRole("alert")).toEqual([alert]);
+    expect(alert).toHaveTextContent("Zebra external: Activation failed");
+    const mutations = vi.fn();
+    const observer = new MutationObserver(mutations);
+    observer.observe(alert, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    try {
+      const user = userEvent.setup();
+      const search = screen.getByRole("searchbox", { name: "Search plugins" });
+      await user.type(search, "Alphabet");
+      await user.clear(search);
+      expect(screen.getByRole("alert")).toBe(alert);
+      expect(mutations).not.toHaveBeenCalled();
+    } finally {
+      observer.disconnect();
+    }
+    act(() => {
+      fixture.external.revision = "next";
+      fixture.publish();
+    });
+    expect(alert).toBeEmptyDOMElement();
+  },
+);
 
 it("returns focus to the Plugins section when the selected plugin is deleted", async () => {
   const fixture = reviewPluginFixture();

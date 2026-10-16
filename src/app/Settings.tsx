@@ -204,12 +204,14 @@ function PluginDetails({
   failure,
   busy,
   plugins,
+  onToggle,
   onClose,
 }: {
   plugin: PluginInfo;
   failure: string | null;
   busy: boolean;
   plugins: PluginManager;
+  onToggle(): void;
   onClose(): void;
 }) {
   // READMEs ship with Buzz; never attach one to an external plugin.
@@ -284,13 +286,7 @@ function PluginDetails({
             size="sm"
             disabled={busy}
             focusableWhenDisabled
-            onClick={() => {
-              if (busy) return;
-              void plugins.change(
-                plugin.enabled ? "disable" : "enable",
-                plugin.manifest.id,
-              );
-            }}
+            onClick={onToggle}
           >
             {plugin.enabled ? "Disable" : "Enable"}
           </Button>
@@ -355,11 +351,7 @@ function PluginDetails({
           </tbody>
         </table>
       </section>
-      {failure && (
-        <p role="alert" className="error text-body-sm">
-          {failure}
-        </p>
-      )}
+      {failure && <p className="error text-body-sm">{failure}</p>}
       <div className="actions items-center">
         {plugin.previous && (
           <Button
@@ -496,6 +488,34 @@ export function Settings({
   const ready = configuration.status === "ready" ? configuration : undefined;
   const catalog = ready?.catalog;
   const externalPluginsPaused = ready?.externalPluginsPaused;
+  const [activationAttempt, setActivationAttempt] = useState<{
+    id: string;
+    revision: string;
+  }>();
+  const attemptedPlugin = catalog?.plugins.find(
+    (plugin) =>
+      plugin.manifest.id === activationAttempt?.id &&
+      plugin.revision === activationAttempt?.revision &&
+      plugin.enabled,
+  );
+  const attemptedRunning =
+    attemptedPlugin && activation[attemptedPlugin.manifest.id];
+  const activationFailure =
+    attemptedRunning?.revision === activationAttempt?.revision
+      ? attemptedRunning?.error
+      : null;
+  const togglePlugin = (plugin: PluginInfo) => {
+    if (busy) return;
+    setActivationAttempt(
+      plugin.enabled
+        ? undefined
+        : { id: plugin.manifest.id, revision: plugin.revision },
+    );
+    void plugins.change(
+      plugin.enabled ? "disable" : "enable",
+      plugin.manifest.id,
+    );
+  };
   const [pluginFilter, setPluginFilter] = useState<"all" | "essentials">("all");
   const [pluginQuery, setPluginQuery] = useState("");
   const pluginSearch = useRef<HTMLElement>(null);
@@ -688,13 +708,7 @@ export function Settings({
                           aria-label={`${plugin.enabled ? "Disable" : "Enable"} ${plugin.manifest.name}`}
                           disabled={busy}
                           focusableWhenDisabled
-                          onClick={() => {
-                            if (busy) return;
-                            void plugins.change(
-                              plugin.enabled ? "disable" : "enable",
-                              id,
-                            );
-                          }}
+                          onClick={() => togglePlugin(plugin)}
                         >
                           {plugin.enabled ? "Disable" : "Enable"}
                         </Button>
@@ -959,6 +973,14 @@ export function Settings({
                         closeLabel="Dismiss"
                       />
                     )}
+                    {/* Keep action feedback outside animated/filterable rows. */}
+                    <div role="alert" className="sr-only">
+                      {selected === "plugins" &&
+                      activationFailure &&
+                      attemptedPlugin
+                        ? `${attemptedPlugin.manifest.name}: ${activationFailure}`
+                        : null}
+                    </div>
                   </div>
                   {catalog &&
                     (["all", "essentials"] as const).map((filter) => (
@@ -1026,6 +1048,7 @@ export function Settings({
               failure={selectedFailure}
               busy={busy}
               plugins={plugins}
+              onToggle={() => togglePlugin(selectedPlugin)}
               onClose={closePluginDetails}
             />
           )}
