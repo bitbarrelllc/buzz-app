@@ -115,7 +115,11 @@ import {
   type Unfinished,
 } from "./store";
 import { meChat } from "./me-chat";
-import { readCheckpoints, writeCheckpoints } from "./catch-up";
+import {
+  readCheckpoints,
+  splitLegacyCheckpoints,
+  writeCheckpoints,
+} from "./catch-up";
 import { type AddedTool, BUZZ_SESSION } from "../../buzz-mcp/session-tools";
 import { nameMeChat } from "./me-chat-name";
 
@@ -976,6 +980,7 @@ export class AgentsService extends Service implements Agents {
     migrateWatchFilters(storage);
     this.records = readRecords(storage);
     splitLegacyRecords(storage, this.records);
+    splitLegacyCheckpoints(storage);
     this.unfinished = Object.freeze(readUnfinished(storage));
     this.unarchiving = readArchiveUnchecked(storage);
     this.teamList = Object.freeze(readTeams(storage));
