@@ -2406,18 +2406,43 @@ it("shows a message for agents as one line from its author to whom it addresses"
       name: "Morgarita to Rivet: **run** the suite…",
     });
     expect(line).toHaveAttribute("aria-expanded", "false");
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    const timestamp = line.parentElement?.querySelector("time");
+    const timestampSlot = timestamp?.parentElement;
+    expect(timestamp).toBeVisible();
+    expect(
+      screen.getByText(/(?:1969|1970) at /, {
+        selector: 'time > span[aria-hidden="true"]',
+      }),
+    ).toBeVisible();
     // Reveal focuses the scroll anchor with tabIndex -1; on the button, that
     // would take the only toggle out of the Tab order.
     expect(line).not.toHaveAttribute("data-message-id");
     expect(line.parentElement).toHaveAttribute("data-message-id");
     expect(screen.queryByText(/Then report back/)).toBeNull();
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     fireEvent.pointerEnter(line);
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     fireEvent.click(line);
     expect(line).toHaveAttribute("aria-expanded", "true");
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    // Expanding preserves the timestamp node and its trailing slot, rather
+    // than remounting it above the body and moving it to the opposite edge.
+    expect(
+      line.parentElement?.querySelectorAll("time:not(.sr-only)"),
+    ).toHaveLength(1);
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
+    expect(timestamp?.parentElement).toBe(timestampSlot);
+    expect(line.parentElement?.lastElementChild).toBe(timestampSlot);
+    expect(
+      screen.getByText(/(?:1969|1970) at /, {
+        selector: 'time > span[aria-hidden="true"]',
+      }),
+    ).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "View Morgarita profile" }),
     ).toBeNull();
@@ -2426,9 +2451,13 @@ it("shows a message for agents as one line from its author to whom it addresses"
     expect(expanded?.querySelector('[class*="messageBubble"]')).toBeNull();
     expect(expanded?.querySelector("[data-own]")).toBeNull();
 
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     fireEvent.pointerEnter(expanded ?? line);
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     // Base UI binds the trigger to its panel. One stable message anchor stays
     // outside the animated content, including while that content is retiring.
     const panelId = line.getAttribute("aria-controls");
@@ -2447,7 +2476,9 @@ it("shows a message for agents as one line from its author to whom it addresses"
     // Anywhere in the open box folds it back.
     fireEvent.click(screen.getByText(/Then report back/));
     expect(line).toHaveAttribute("aria-expanded", "false");
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
   } finally {
     cleanup();
   }

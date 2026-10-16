@@ -26,7 +26,6 @@ import type { RelaySession } from "../relay/session";
 import {
   addressedTo,
   CHAT_KINDS,
-  compileFilter,
   tagsAgent,
   watchMatches,
   type AttentionObject,
@@ -200,9 +199,7 @@ const classifications = (trigger: Trigger) =>
       ? trigger.events.length
       : 0;
 const sizeOf = (event: RelayEvent) => JSON.stringify(event).length;
-type CompiledWatch = Omit<WatchTrigger, "type" | "event"> & {
-  filter?: ReturnType<typeof compileFilter>;
-};
+type CompiledWatch = Omit<WatchTrigger, "type" | "event">;
 /** One agent's runtime, for as long as its identity exists. Edits do not
  * replace it: each job reads the agent as it is when the job starts, and the
  * watches are recompiled only when its attention changes. */
@@ -373,6 +370,7 @@ export type RunnerHost = {
         | "publish"
         | "query"
         | "searchProfiles"
+        | "audienceAuthority"
         | "upload"
         | "media"
         | "remember"
@@ -571,7 +569,6 @@ export class AgentRunners {
         slug: object.slug,
         watch,
         ...(interest?.type === "interest" ? { interest } : {}),
-        ...(watch.filter ? { filter: compileFilter(watch.filter) } : {}),
       });
     }
     runner.compiled = { attention: agent.attention, watches };
@@ -1430,14 +1427,14 @@ export class AgentRunners {
         ? [{ type: "mention", event }]
         : [];
     if (!agent.attentionEnabled) return [];
-    const matches = this.watches(runner, agent).filter(({ watch, filter }) =>
-      watchMatches(watch, event, filter),
+    const matches = this.watches(runner, agent).filter(({ watch }) =>
+      watchMatches(watch, event),
     );
     if (!matches.length) return [];
     const member = this.host.member(agent, event);
     if (member === undefined) return "held";
     return member
-      ? matches.map(({ filter: _, ...match }) => ({
+      ? matches.map((match) => ({
           type: "watch",
           event,
           ...match,
@@ -1463,7 +1460,7 @@ export class AgentRunners {
         ({ slug }) => slug === trigger.slug,
       );
       const events = trigger.events.filter(
-        ({ event }) => match && watchMatches(match.watch, event, match.filter),
+        ({ event }) => match && watchMatches(match.watch, event),
       );
       if (!match || !events.length) return undefined;
       return {
@@ -1479,17 +1476,16 @@ export class AgentRunners {
       };
     }
     const match = this.watches(runner, agent).find(
-      ({ slug, watch, filter }) =>
-        slug === trigger.slug && watchMatches(watch, trigger.event, filter),
+      ({ slug, watch }) =>
+        slug === trigger.slug && watchMatches(watch, trigger.event),
     );
     if (!match) return undefined;
-    const { filter: _, ...rest } = match;
     return {
       ...job,
       trigger: {
         type: "watch",
         event: trigger.event,
-        ...rest,
+        ...match,
         ...(trigger.classifier ? { classifier: trigger.classifier } : {}),
       },
     };
@@ -1744,6 +1740,24 @@ export class AgentRunners {
       publish: (event: AgentEventTemplate) => this.publish(runner, event),
       query: (filters: readonly object[]) =>
         this.require().query(agent.pubkey, filters),
+      audienceAuthority: async (
+        destination: string,
+        sources: readonly string[],
+      ) => {
+        signal.throwIfAborted();
+        const native = this.require();
+        if (!native.audienceAuthority)
+          throw new Error(
+            "Current audience authority is unsupported by this host.",
+          );
+        const response = await native.audienceAuthority(
+          agent.pubkey,
+          destination,
+          sources,
+        );
+        signal.throwIfAborted();
+        return response;
+      },
       searchProfiles: (query: string, limit: number) =>
         this.require().searchProfiles(agent.pubkey, query, limit),
       upload: (data: string, mime: string) =>

@@ -7328,6 +7328,10 @@ it("stages session cards above an ordinary caption editor, persists them, and se
     `${link}\n\n@Honey please review`,
     [first.pubkey],
     [],
+    undefined,
+    [],
+    {},
+    ["session-id"],
   );
   expect(
     screen.queryByRole("region", { name: "Session attachments" }),
@@ -7371,7 +7375,16 @@ it("sends a staged session without a caption", async () => {
   writeView("scope", "draft:channel", link);
   const h = mount();
   await h.user.click(screen.getByRole("button", { name: "Send message" }));
-  expect(h.messages.send).toHaveBeenCalledWith("channel", link, [], []);
+  expect(h.messages.send).toHaveBeenCalledWith(
+    "channel",
+    link,
+    [],
+    [],
+    undefined,
+    [],
+    {},
+    ["session-id"],
+  );
 });
 
 it("retains a new card-only followup when a background upload fails", async () => {
@@ -7412,6 +7425,10 @@ it("restores and sends an older session-link draft with its selected mention int
     `${link}\n\n@Honey `,
     [first.pubkey],
     [],
+    undefined,
+    [],
+    {},
+    ["session-id"],
   );
 });
 
@@ -7431,6 +7448,42 @@ it("does not publish an unchanged inline session edit, including reverting a cap
   h.submit();
   expect(h.messages.edit).not.toHaveBeenCalled();
 });
+
+it("marks staged session cards in thread replies", async () => {
+  const link = "[Session: Work](buzz://channel/session-id)";
+  const h = mount();
+  h.retarget({ threadRootId: "root" });
+  act(() => h.input().insertText(link));
+  await h.user.click(screen.getByRole("button", { name: "Send message" }));
+  expect(h.messages.reply).toHaveBeenCalledWith(
+    "channel",
+    "root",
+    link,
+    [],
+    [],
+    undefined,
+    [],
+    {},
+    ["session-id"],
+  );
+});
+
+it.each(["A ||hidden|| caption", "Use `a || b` here"])(
+  "sends staged cards with an unrecognized caption without a marker: %s",
+  async (caption) => {
+    const link = "[Session: Work](buzz://channel/session-id)";
+    writeView("scope", "draft:channel", link);
+    const h = mount();
+    await h.user.type(h.input(), caption);
+    await h.user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(h.messages.send).toHaveBeenCalledWith(
+      "channel",
+      `${link}\n\n${caption}`,
+      [],
+      [],
+    );
+  },
+);
 
 it("does not take focus when a default recipient arrives after mount", () => {
   const h = mount();

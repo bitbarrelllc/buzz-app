@@ -256,3 +256,20 @@ export type ComposerCompletion = Readonly<{
   ): CompletionQuery | null;
   component: ComponentType<ComposerCompletionProps>;
 }>;
+
+/** A conversation a page opens in a tab beside its own. */
+export type PageTabTarget = { channelId: string; threadId?: string };
+/** `keep` opens a tab beside the others instead of in place of the last. */
+export type PageTabOptions = { keep?: boolean };
+export type PageTabsProps = {
+  /** Keys the page's tabs, which last as long as its community session. */
+  id: string;
+  session: RelaySession;
+  scope: string;
+  label: string;
+  icon?: ReactNode;
+  /** The page's own first tab. `open` shows a joined conversation in a host tab. */
+  children(
+    open: (target: PageTabTarget, options?: PageTabOptions) => boolean,
+  ): ReactNode;
+};
