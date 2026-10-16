@@ -1556,7 +1556,7 @@ function ReadySidebar({
           {list.activityStatus === "error" && !activityErrorDismissed && (
             <ToastNotice
               title="Couldn’t refresh recent activity"
-              description="Sections sorted by Recent may be out of date."
+              description="Activity filters and Recent sorting may be out of date."
               tone="warning"
               onDismiss={() => setActivityErrorDismissed(true)}
             >

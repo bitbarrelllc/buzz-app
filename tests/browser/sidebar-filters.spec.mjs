@@ -257,3 +257,93 @@ test("section filters save activity windows and recover hidden channels", async 
   await page.getByRole("menuitem", { name: "Planning", exact: true }).click();
   await expect(work.locator('[data-channel-id="beta"]')).toBeVisible();
 });
+
+test("failed activity reads explain the filter and recover on Retry", async ({
+  page,
+  app,
+}, testInfo) => {
+  app.histories.set("primary/gamma", [
+    app.sign({
+      kind: 9,
+      tags: [["h", "gamma"]],
+      content: "Project update",
+      created_at: Math.floor(Date.now() / 1000),
+    }),
+  ]);
+  await page.addInitScript(() =>
+    localStorage.setItem("buzz-appearance.v1", "dark"),
+  );
+  let release;
+  let started;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const requested = new Promise((resolve) => {
+    started = resolve;
+  });
+  const pattern = "**/channel-activity";
+  await page.route(pattern, async (route) => {
+    started();
+    await gate;
+    app.report.sidebarActivityFailures ??= [];
+    app.report.sidebarActivityFailures.push(route.request().url());
+    await route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Activity unavailable" }),
+    });
+  });
+  await page.goto(app.origin);
+  await openPage(page, "Multiplayer");
+  await page
+    .getByRole("button", { name: "More actions for Channels", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Filter", exact: true }).hover();
+  await page.getByRole("menuitemradio", { name: /Active in the last/ }).click();
+  try {
+    await page.getByRole("button", { name: "Apply", exact: true }).click();
+    await requested;
+    await expect(
+      page.getByRole("dialog", { name: "Active in the last", exact: true }),
+    ).toHaveCount(0);
+  } finally {
+    release();
+  }
+  await expect(
+    page.getByText("Activity filters and Recent sorting may be out of date.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  if (
+    process.env.BUZZ_FILTER_CAPTURE_DIR &&
+    testInfo.project.name === "chromium"
+  ) {
+    await page.evaluate(async () => {
+      await Promise.all(
+        document
+          .getAnimations()
+          .filter(
+            (animation) =>
+              animation.effect?.getComputedTiming().iterations !== Infinity,
+          )
+          .map((animation) => animation.finished.catch(() => {})),
+      );
+    });
+    await page.screenshot({
+      path: join(
+        process.env.BUZZ_FILTER_CAPTURE_DIR,
+        "15-activity-read-error.png",
+      ),
+    });
+  }
+  await page.unroute(pattern);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(
+    page.locator('[data-sidebar-section="channels"] [data-channel-id="gamma"]'),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Activity filters and Recent sorting may be out of date.", {
+      exact: true,
+    }),
+  ).toHaveCount(0);
+});
