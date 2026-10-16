@@ -234,15 +234,22 @@ it("persists filters through the real broker transport, preserves sort, confirms
       ["work"],
       signal,
     ),
-  ).toEqual({ "section:work": "unreads" });
+  ).toEqual({
+    filters: { "section:work": "unreads" },
+    activeWindowSeconds: {},
+  });
   expect(
     await h.transport.writeSidebarFilter(
       "channels",
       "active",
       ["work"],
       signal,
+      7 * 86400,
     ),
-  ).toEqual({ "section:work": "unreads", channels: "active" });
+  ).toEqual({
+    filters: { "section:work": "unreads", channels: "active" },
+    activeWindowSeconds: { channels: 7 * 86400 },
+  });
   expect(h.heads.get("channel-sort")).toEqual(savedSort);
   expect(
     await h.transport.writeSidebarFilter(
@@ -251,7 +258,10 @@ it("persists filters through the real broker transport, preserves sort, confirms
       ["work"],
       signal,
     ),
-  ).toEqual({ channels: "active" });
+  ).toEqual({
+    filters: { channels: "active" },
+    activeWindowSeconds: { channels: 7 * 86400 },
+  });
   for (const call of h.calls.filter(
     ({ body }) =>
       Array.isArray(body) && body[0]?.["#d"]?.[0] === "channel-filter",

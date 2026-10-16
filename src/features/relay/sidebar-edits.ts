@@ -1,5 +1,7 @@
 import {
   projectSidebarPreferences,
+  validActiveWindow,
+  DEFAULT_ACTIVE_WINDOW_SECONDS,
   type SidebarAssignmentIntent,
   type SidebarGroups,
   type SidebarSortMode,
@@ -103,9 +105,14 @@ export function validSidebarFilter(
   group: string,
   mode: SidebarFilterMode,
   sectionIds: readonly string[],
+  activeWindowSeconds?: number | null,
 ): boolean {
   return (
     ["all", "unreads", "active"].includes(mode) &&
+    (activeWindowSeconds === undefined ||
+      (activeWindowSeconds === null
+        ? mode === "all"
+        : mode === "active" && validActiveWindow(activeWindowSeconds))) &&
     validSidebarSort(group, "alpha", sectionIds)
   );
 }
@@ -173,14 +180,27 @@ export function editSidebarFilter(
   group: string,
   mode: SidebarFilterMode,
   now = Date.now(),
+  activeWindowSeconds?: number | null,
 ): Record<string, unknown> {
-  return editSidebarRecord(
+  const windows = {
+    ...(current.activeWindowSeconds as Record<string, number> | undefined),
+  };
+  const previous = windows[group] ?? DEFAULT_ACTIVE_WINDOW_SECONDS;
+  const changed =
+    activeWindowSeconds === null
+      ? Object.hasOwn(windows, group)
+      : activeWindowSeconds !== undefined && previous !== activeWindowSeconds;
+  if (activeWindowSeconds === null) delete windows[group];
+  else if (activeWindowSeconds !== undefined)
+    windows[group] = activeWindowSeconds;
+  const next = editSidebarRecord(
     "channel-filter",
     current,
     createdAt,
     [[["g", group], mode === "all" ? null : mode]],
     now,
   );
+  return changed ? { ...next, activeWindowSeconds: windows } : next;
 }
 
 export function editSidebarToggle(

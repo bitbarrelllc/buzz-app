@@ -795,15 +795,22 @@ it("uses the native filter signer and confirmed writer without changing sort", a
       ["work"],
       signal,
     ),
-  ).toEqual({ "section:work": "unreads" });
+  ).toEqual({
+    filters: { "section:work": "unreads" },
+    activeWindowSeconds: {},
+  });
   expect(
     await transport.writeSidebarFilter?.(
       "channels",
       "active",
       ["work"],
       signal,
+      7 * 86400,
     ),
-  ).toEqual({ "section:work": "unreads", channels: "active" });
+  ).toEqual({
+    filters: { "section:work": "unreads", channels: "active" },
+    activeWindowSeconds: { channels: 7 * 86400 },
+  });
   expect(
     await transport.writeSidebarFilter?.(
       "section:work",
@@ -811,7 +818,10 @@ it("uses the native filter signer and confirmed writer without changing sort", a
       ["work"],
       signal,
     ),
-  ).toEqual({ channels: "active" });
+  ).toEqual({
+    filters: { channels: "active" },
+    activeWindowSeconds: { channels: 7 * 86400 },
+  });
   expect(records.get("channel-sort")).toEqual(sort);
   const record = records.get("channel-filter");
   expect(record).toBeDefined();
@@ -823,4 +833,44 @@ it("uses the native filter signer and confirmed writer without changing sort", a
   await expect(
     transport.writeSidebarFilter?.("section:missing", "active", [], signal),
   ).rejects.toThrow("Invalid sidebar filter intent");
+});
+
+it("rejects a same-mode native readback with a conflicting duration", async () => {
+  const transport = await connectNativeTransport(community);
+  records.set(
+    "channel-filter",
+    signedRecord("channel-filter", {
+      version: 1,
+      groups: { channels: "active" },
+    }),
+  );
+  const original = vi.mocked(invoke).getMockImplementation();
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    const result = await original?.(command, args);
+    if (
+      command === "relay_http" &&
+      (args as { path: string }).path === "/events"
+    )
+      records.set(
+        "channel-filter",
+        signedRecord(
+          "channel-filter",
+          {
+            version: 1,
+            groups: { channels: "active" },
+            activeWindowSeconds: { channels: 90 * 86400 },
+          },
+          2_000_000_000,
+        ),
+      );
+    return result;
+  });
+  await expect(
+    transport.writeSidebarFilter?.("channels", "active", [], signal, 7 * 86400),
+  ).rejects.toThrow("changed on another device");
+  const before = vi.mocked(invoke).mock.calls.length;
+  await expect(
+    transport.writeSidebarFilter?.("channels", "active", [], signal, 86401),
+  ).rejects.toThrow("Invalid sidebar filter intent");
+  expect(vi.mocked(invoke).mock.calls).toHaveLength(before);
 });

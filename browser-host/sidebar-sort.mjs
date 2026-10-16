@@ -36,7 +36,7 @@ function sectionChoice(coordinate, validIntent, edit, field) {
       field === "sort" ? blob : undefined,
       sectionIds,
       field === "filters" ? blob : undefined,
-    )[field] ?? {};
+    );
 
   function assertIntent(intent) {
     if (
@@ -46,9 +46,20 @@ function sectionChoice(coordinate, validIntent, edit, field) {
       typeof intent.group !== "string" ||
       !Array.isArray(intent.sectionIds) ||
       intent.sectionIds.some((id) => typeof id !== "string") ||
-      !validIntent(intent.group, intent.mode, intent.sectionIds) ||
+      !validIntent(
+        intent.group,
+        intent.mode,
+        intent.sectionIds,
+        intent.activeWindowSeconds,
+      ) ||
       Object.keys(intent).some(
-        (key) => !["group", "mode", "sectionIds"].includes(key),
+        (key) =>
+          ![
+            "group",
+            "mode",
+            "sectionIds",
+            ...(field === "filters" ? ["activeWindowSeconds"] : []),
+          ].includes(key),
       )
     )
       throw new Error(`Invalid sidebar ${label} intent`);
@@ -103,11 +114,18 @@ function sectionChoice(coordinate, validIntent, edit, field) {
       intent.group,
       intent.mode,
       now,
+      intent.activeWindowSeconds,
     );
     const projected = project(blob, intent.sectionIds);
     if (Buffer.byteLength(JSON.stringify(blob)) > 128 * 1024)
       throw new Error("Sidebar plaintext budget exceeded");
-    if (blob === current.blob) return { groups: projected };
+    const result = {
+      groups: projected[field] ?? {},
+      ...(field === "filters"
+        ? { activeWindowSeconds: projected.activeWindowSeconds ?? {} }
+        : {}),
+    };
+    if (blob === current.blob) return result;
     const key = nip44.v2.utils.getConversationKey(secret, viewer);
     let content;
     try {
@@ -116,7 +134,7 @@ function sectionChoice(coordinate, validIntent, edit, field) {
       key.fill(0);
     }
     return {
-      groups: projected,
+      ...result,
       event: finalizeEvent(
         {
           kind: 30078,
@@ -134,7 +152,14 @@ function sectionChoice(coordinate, validIntent, edit, field) {
   async function mutate(intent, secret, readHead, publish) {
     assertIntent(intent);
     const draft = prepare(await readHead(), intent, secret);
-    if (!draft.event) return draft.groups;
+    const result = (value) =>
+      field === "filters"
+        ? {
+            filters: value.groups,
+            activeWindowSeconds: value.activeWindowSeconds,
+          }
+        : value.groups;
+    if (!draft.event) return result(draft);
     await publish(draft.event);
     // This checks only the requested group now, not whether the whole-blob write
     // lost another device's intervening change to an unrelated group.
@@ -143,7 +168,7 @@ function sectionChoice(coordinate, validIntent, edit, field) {
       throw new Error(
         `Sidebar ${label} changed on another device; reload and try again`,
       );
-    return confirmation.groups;
+    return result(confirmation);
   }
 
   return { assertIntent, prepare, mutate };

@@ -290,14 +290,26 @@ export function nativeSidebar(transport: ReadTransport) {
       mode: SidebarFilterMode,
       sectionIds: readonly string[],
       signal: AbortSignal,
+      activeWindowSeconds?: number | null,
     ) {
-      if (!validSidebarFilter(group, mode, sectionIds))
+      if (!validSidebarFilter(group, mode, sectionIds, activeWindowSeconds))
         throw new Error("Invalid sidebar filter intent");
       const prepare = (current: Record<string, unknown>, createdAt: number) => {
-        const next = editSidebarFilter(current, createdAt, group, mode);
+        const next = editSidebarFilter(
+          current,
+          createdAt,
+          group,
+          mode,
+          Date.now(),
+          activeWindowSeconds,
+        );
+        const settings = project("channel-filter", next, sectionIds);
         return {
           next,
-          result: project("channel-filter", next, sectionIds).filters ?? {},
+          result: {
+            filters: settings.filters ?? {},
+            activeWindowSeconds: settings.activeWindowSeconds ?? {},
+          },
         };
       };
       return mutate(
@@ -305,7 +317,14 @@ export function nativeSidebar(transport: ReadTransport) {
         signal,
         prepare,
         (value) =>
-          ((value.groups as Record<string, string>)[group] ?? "all") === mode,
+          editSidebarFilter(
+            value,
+            0,
+            group,
+            mode,
+            Date.now(),
+            activeWindowSeconds,
+          ) === value,
         "Sidebar filter changed on another device; reload and try again",
       );
     },

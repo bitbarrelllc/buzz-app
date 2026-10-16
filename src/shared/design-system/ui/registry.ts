@@ -227,9 +227,10 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
   {
     slug: "radio-group",
     name: "RadioGroup",
-    purpose: "Choose one option, including labelled settings cards.",
+    purpose:
+      "Choose one option, including labelled settings cards and text-only tiles.",
     behavior: "Base UI owns form and keyboard semantics.",
-    variants: ["default", "disabled", "invalid"],
+    variants: ["default", "card", "tile", "disabled", "invalid"],
     status: "proposed",
     collection: "components",
     source: "shared/design-system/ui/RadioGroup.tsx",

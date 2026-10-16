@@ -540,7 +540,10 @@ it("confirms the filter reset before section removal and leaves failures retryab
   const calls: string[] = [];
   const filter = vi.fn(async () => {
     calls.push("filter");
-    return { channels: "active" as const };
+    return {
+      filters: { channels: "active" as const },
+      activeWindowSeconds: {},
+    };
   });
   filter.mockRejectedValueOnce(new Error("filter not confirmed"));
   const remove = vi.fn(async () => {
@@ -578,6 +581,7 @@ it("confirms the filter reset before section removal and leaves failures retryab
       "all",
       ["work"],
       expect.any(AbortSignal),
+      null,
     );
     expect(calls).toEqual(["sort", "sort", "filter", "remove"]);
     expect(store.queries.snapshot().data).toMatchObject({

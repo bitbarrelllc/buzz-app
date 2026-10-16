@@ -331,3 +331,84 @@ it("stores independent filters, preserves other registers and tombstones All, an
   ).rejects.toThrow("changed on another device");
   expect(publish).toHaveBeenCalledOnce();
 });
+
+it("atomically confirms custom windows, preserves other sections and clears removed-section durations", async () => {
+  const h = harness();
+  const choice = {
+    group: "channels",
+    mode: "active",
+    sectionIds: ["work"],
+    activeWindowSeconds: 7 * 86400,
+  };
+  const legacy = h.encrypt(
+    {
+      version: 1,
+      groups: { channels: "active", "section:work": "unreads" },
+      activeWindowSeconds: { "section:work": 14 * 86400 },
+    },
+    { tags: [["d", "channel-filter"]] },
+  );
+  const draft = prepareSidebarFilter([legacy], choice, h.secret);
+  expect(h.decode(draft.event)).toMatchObject({
+    groups: { channels: "active", "section:work": "unreads" },
+    activeWindowSeconds: { channels: 7 * 86400, "section:work": 14 * 86400 },
+  });
+  expect(
+    prepareSidebarFilter([draft.event], choice, h.secret).event,
+  ).toBeUndefined();
+  const result = await mutateSidebarFilter(
+    choice,
+    h.secret,
+    vi
+      .fn()
+      .mockResolvedValueOnce([legacy])
+      .mockResolvedValueOnce([draft.event]),
+    vi.fn(),
+  );
+  expect(result.activeWindowSeconds.channels).toBe(7 * 86400);
+  // Same mode with the wrong window must fail readback confirmation.
+  await expect(
+    mutateSidebarFilter(choice, h.secret, async () => [legacy], vi.fn()),
+  ).rejects.toThrow("changed on another device");
+  const reset = prepareSidebarFilter(
+    [draft.event],
+    {
+      ...choice,
+      group: "section:work",
+      mode: "all",
+      activeWindowSeconds: null,
+    },
+    h.secret,
+  );
+  expect(h.decode(reset.event).activeWindowSeconds).toEqual({
+    channels: 7 * 86400,
+  });
+  const restored = prepareSidebarFilter(
+    [draft.event],
+    { ...choice, activeWindowSeconds: 30 * 86400 },
+    h.secret,
+  );
+  expect(h.decode(restored.event).activeWindowSeconds.channels).toBe(
+    30 * 86400,
+  );
+  const read = vi.fn(async () => []);
+  for (const value of [
+    0,
+    -86400,
+    86401,
+    86400.5,
+    366 * 86400,
+    "604800",
+    null,
+  ]) {
+    await expect(
+      mutateSidebarFilter(
+        { ...choice, activeWindowSeconds: value },
+        h.secret,
+        read,
+        vi.fn(),
+      ),
+    ).rejects.toThrow("Invalid sidebar filter intent");
+  }
+  expect(read).not.toHaveBeenCalled();
+});

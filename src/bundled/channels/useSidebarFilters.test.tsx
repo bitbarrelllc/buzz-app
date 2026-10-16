@@ -216,3 +216,36 @@ it("reacts to message, manual and thread unread evidence and cleans up filtered 
   unmount();
   owner.dispose();
 });
+
+it("uses each section's saved window and replaces its expiry deadline when edited", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-16T12:00:00Z"));
+  const owner = createRelaySession(null);
+  const age = 7 * 86400;
+  const sections = sidebarSections([
+    { id: "old", name: "Old", lastActivityAt: Date.now() / 1000 - age + 1 },
+  ]);
+  const { result, rerender, unmount } = renderHook(
+    ({ seconds }) =>
+      useSidebarFilters(
+        sections,
+        { channels: "active" },
+        undefined,
+        owner.session.unread,
+        { channels: seconds },
+      ),
+    { initialProps: { seconds: age } },
+  );
+  expect(result.current[0]?.rows).toHaveLength(1);
+  rerender({ seconds: 14 * 86400 });
+  act(() => vi.advanceTimersByTime(1000));
+  expect(result.current[0]?.rows).toHaveLength(1);
+  rerender({ seconds: age });
+  expect(result.current[0]?.rows).toHaveLength(0);
+  rerender({ seconds: 14 * 86400 });
+  act(() => vi.advanceTimersByTime(age * 1000));
+  expect(result.current[0]?.rows).toHaveLength(0);
+  unmount();
+  expect(vi.getTimerCount()).toBe(0);
+  owner.dispose();
+});

@@ -937,29 +937,49 @@ export async function connectBrokerTransport(
       : {}),
     ...(session.sidebarFilterWrites
       ? {
-          async writeSidebarFilter(group, mode, sectionIds, signal) {
+          async writeSidebarFilter(
+            group,
+            mode,
+            sectionIds,
+            signal,
+            activeWindowSeconds,
+          ) {
             const result = await fetch(`${endpoint}/sidebar-filter`, {
               method: "POST",
               credentials: "same-origin",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ group, mode, sectionIds }),
+              body: JSON.stringify({
+                group,
+                mode,
+                sectionIds,
+                activeWindowSeconds,
+              }),
               signal,
             });
             if (!result.ok) {
               const failure = await readApiFailure(result);
               throw new Error(failure.error);
             }
-            const value = (await result.json()) as { groups?: unknown };
-            return (
-              projectSidebarPreferences(
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                sectionIds,
-                { version: 1, groups: value.groups },
-              ).filters ?? {}
+            const value = (await result.json()) as {
+              groups?: unknown;
+              activeWindowSeconds?: unknown;
+            };
+            const projected = projectSidebarPreferences(
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              sectionIds,
+              {
+                version: 1,
+                groups: value.groups,
+                activeWindowSeconds: value.activeWindowSeconds,
+              },
             );
+            return {
+              filters: projected.filters ?? {},
+              activeWindowSeconds: projected.activeWindowSeconds ?? {},
+            };
           },
         }
       : {}),

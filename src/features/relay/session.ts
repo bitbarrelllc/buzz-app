@@ -1404,7 +1404,7 @@ export function createRelaySession(
     (() => {
       const write = transport?.writeSidebarFilter;
       return write
-        ? (group, mode, sectionIds, signal) =>
+        ? (group, mode, sectionIds, signal, activeWindowSeconds) =>
             write(
               group,
               mode,
@@ -1414,6 +1414,7 @@ export function createRelaySession(
                 AbortSignal.timeout(20_000),
                 signal,
               ]),
+              activeWindowSeconds,
             )
         : undefined;
     })(),
@@ -2799,10 +2800,10 @@ export function createRelaySession(
   let activityRosterKey: string | undefined;
   const refreshChannelActivity = () => {
     if (closed || !transport?.channelActivity) return;
+    const preferences = sidebarPreferences.queries.snapshot().data;
     if (
-      !Object.values(
-        sidebarPreferences.queries.snapshot().data?.sort ?? {},
-      ).includes("recent")
+      !Object.values(preferences?.sort ?? {}).includes("recent") &&
+      !Object.values(preferences?.filters ?? {}).includes("active")
     ) {
       channelActivity.cancel();
       activityRosterKey = undefined;

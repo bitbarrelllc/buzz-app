@@ -5,12 +5,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { DEFAULT_ACTIVE_WINDOW_SECONDS } from "../../features/relay/sidebar-preferences";
 import type { UnreadCapability } from "../../features/relay/unread";
 import type { sidebarSections } from "./sidebar-sections";
 
 export type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
 import type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
-export const SIDEBAR_ACTIVE_WINDOW = 30 * 24 * 60 * 60 * 1000;
+export const SIDEBAR_ACTIVE_WINDOW = DEFAULT_ACTIVE_WINDOW_SECONDS * 1000;
 
 /** Filter only the existing section roster; the current destination always stays. */
 export function useSidebarFilters(
@@ -18,6 +19,7 @@ export function useSidebarFilters(
   filters: Readonly<Record<string, SidebarFilter>>,
   current: string | undefined,
   unread: UnreadCapability,
+  windows: Readonly<Record<string, number>> = {},
 ) {
   const ids = JSON.stringify(
     sections.flatMap((section) =>
@@ -69,9 +71,11 @@ export function useSidebarFilters(
   let nextExpiry = Infinity;
   const visible = sections.map((section) => {
     const mode = filters[section.key] ?? "all";
+    const activeWindow =
+      (windows[section.key] ?? DEFAULT_ACTIVE_WINDOW_SECONDS) * 1000;
     const rows = section.rows.filter((channel) => {
       if (mode === "active" && channel.lastActivityAt !== undefined) {
-        const expiry = channel.lastActivityAt * 1000 + SIDEBAR_ACTIVE_WINDOW;
+        const expiry = channel.lastActivityAt * 1000 + activeWindow;
         if (expiry > now) nextExpiry = Math.min(nextExpiry, expiry);
       }
       return (
@@ -80,7 +84,7 @@ export function useSidebarFilters(
         (mode === "unreads" && unreadSet.has(channel.id)) ||
         (mode === "active" &&
           channel.lastActivityAt !== undefined &&
-          channel.lastActivityAt * 1000 + SIDEBAR_ACTIVE_WINDOW > now)
+          channel.lastActivityAt * 1000 + activeWindow > now)
       );
     });
     const visibleIds = new Set(rows.map(({ id }) => id));

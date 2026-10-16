@@ -221,7 +221,7 @@ it("uses relay section filters across navigation and remount, and offers only hi
     undefined,
     async (group, mode) => {
       filters = mode === "all" ? {} : { [group]: mode };
-      return filters;
+      return { filters, activeWindowSeconds: {} };
     },
   );
   const h = fixture(preferences.queries);
@@ -256,7 +256,13 @@ it("uses relay section filters across navigation and remount, and offers only hi
   expect(screen.getByRole("button", { name: "beta" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
   mounted.rerender(h.view("not-in-this-section"));
-  expect(screen.getByText("No channels match this filter.")).toBeVisible();
+  expect(screen.queryByText("0 matches")).toBeNull();
+  expect(
+    screen
+      .getByLabelText("Channels", { selector: "summary" })
+      .closest("details"),
+  ).toHaveAttribute("open");
+  expect(screen.queryByText("No channels match this filter.")).toBeNull();
   mounted.unmount();
   expect(filters).toEqual({ channels: "unreads" });
   expect(
@@ -264,6 +270,7 @@ it("uses relay section filters across navigation and remount, and offers only hi
   ).not.toHaveProperty("sectionFilters");
   const restored = render(h.view("gamma"));
   expect(await screen.findByRole("button", { name: "gamma" })).toBeVisible();
+  expect(screen.queryByText("0 matches")).toBeNull();
   expect(screen.queryByRole("button", { name: "beta" })).toBeNull();
   restored.rerender(h.view("alpha"));
   expect(screen.getByRole("button", { name: "alpha" })).toBeVisible();

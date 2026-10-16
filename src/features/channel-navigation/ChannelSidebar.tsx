@@ -529,6 +529,14 @@ function ReadySidebar({
     ),
     current?.id,
     queries.unread,
+    Object.fromEntries(
+      Object.entries(preferences.data?.activeWindowSeconds ?? {}).map(
+        ([key, seconds]) => [
+          key.startsWith("section:") ? `group:${key.slice(8)}` : key,
+          seconds,
+        ],
+      ),
+    ),
   );
   const focusChannelPlacement = (channelId: string) => {
     const data = queries.sidebarPreferences.snapshot().data;
@@ -610,14 +618,15 @@ function ReadySidebar({
   const setSectionFilter = (
     key: string,
     mode: "all" | "unreads" | "active",
+    activeWindowSeconds?: number | null,
   ) => {
-    void preferences
-      .setFilter(
-        key.startsWith("group:") ? `section:${key.slice(6)}` : key,
-        mode,
-        preferences.data?.sections.map((section) => section.id) ?? [],
-      )
-      .catch(() => {});
+    return preferences.setFilter(
+      key.startsWith("group:") ? `section:${key.slice(6)}` : key,
+      mode,
+      preferences.data?.sections.map((section) => section.id) ?? [],
+      undefined,
+      activeWindowSeconds,
+    );
   };
   // Compose actual items here; menu availability is their count, not the policy
   // of any one action. Sibling actions keep their own eligibility checks.
@@ -1175,7 +1184,14 @@ function ReadySidebar({
                                 : section.key
                             ] ?? "all",
                           disabled: !preferences.filterWritable,
-                          change: (mode) => setSectionFilter(section.key, mode),
+                          activeWindowSeconds:
+                            preferences.data.activeWindowSeconds?.[
+                              section.key.startsWith("group:")
+                                ? `section:${section.key.slice(6)}`
+                                : section.key
+                            ],
+                          change: (mode, seconds) =>
+                            setSectionFilter(section.key, mode, seconds),
                         }
                       : undefined
                   }
@@ -1251,11 +1267,6 @@ function ReadySidebar({
                       : undefined
                   }
                 >
-                  {!section.rows.length && section.hiddenRows.length > 0 && (
-                    <p className={styles.empty}>
-                      No channels match this filter.
-                    </p>
-                  )}
                   {section.rows.map((channel) => {
                     const selected =
                       current?.id === channel.id ? current.id : undefined;
@@ -1367,33 +1378,41 @@ function ReadySidebar({
               </button>
             </div>
           ))}
-          {preferences.filterErrors?.map(({ group, mode, error }) => (
-            <div key={group} className={styles.preferenceNotice} role="alert">
-              <p>
-                Couldn’t save the filter for{" "}
-                {sections.find(
-                  ({ key }) =>
-                    key ===
-                    (group.startsWith("section:")
-                      ? `group:${group.slice(8)}`
-                      : group),
-                )?.title ?? "this section"}
-                . {error}
-              </p>
-              <button
-                type="button"
-                onClick={() => setSectionFilter(group, mode)}
-              >
-                Retry filter
-              </button>
-              <button
-                type="button"
-                onClick={() => preferences.dismissFilterError(group)}
-              >
-                Dismiss
-              </button>
-            </div>
-          ))}
+          {preferences.filterErrors?.map(
+            ({ group, mode, activeWindowSeconds, error }) => (
+              <div key={group} className={styles.preferenceNotice} role="alert">
+                <p>
+                  Couldn’t save the filter for{" "}
+                  {sections.find(
+                    ({ key }) =>
+                      key ===
+                      (group.startsWith("section:")
+                        ? `group:${group.slice(8)}`
+                        : group),
+                  )?.title ?? "this section"}
+                  . {error}
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void setSectionFilter(
+                      group,
+                      mode,
+                      activeWindowSeconds,
+                    ).catch(() => {})
+                  }
+                >
+                  Retry filter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => preferences.dismissFilterError(group)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ),
+          )}
           {[...mute.intents.values()]
             .filter((intent) => !intent.pending)
             .map((intent) => (

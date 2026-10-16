@@ -523,7 +523,7 @@ async fn closing_refuses_every_key_operation_including_a_sign_started_before_it(
 async fn sidebar_filter_signer_checks_projection_modes_and_coordinate() {
     use serde_json::json;
     let host = super::IdentityHost::fixture();
-    let payload = json!({"version":1,"groups":{"channels":"unreads"},
+    let payload = json!({"version":1,"groups":{"channels":"unreads"}, "activeWindowSeconds":{"channels":604800},
         "meta":{"v":1,"g":{"channels":[100,"1234567890abcdef","unreads"]}}});
     let event = host
         .sign_sidebar("channel-filter".into(), payload.clone(), 100)
@@ -540,6 +540,22 @@ async fn sidebar_filter_signer_checks_projection_modes_and_coordinate() {
         .sign_sidebar("channel-filter".into(), reset, 101)
         .await
         .is_ok());
+    for seconds in [
+        json!(0),
+        json!(-86400),
+        json!(86401),
+        json!(86400.5),
+        json!(31622400),
+        json!("604800"),
+        json!(null),
+    ] {
+        let mut invalid = payload.clone();
+        invalid["activeWindowSeconds"]["channels"] = seconds;
+        assert!(host
+            .sign_sidebar("channel-filter".into(), invalid, 100)
+            .await
+            .is_err());
+    }
     for invalid in [
         json!({"version":1,"groups":{"channels":"recent"}}),
         json!({"version":1,"groups":{},"meta":payload["meta"]}),

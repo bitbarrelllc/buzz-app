@@ -46,9 +46,11 @@ it("chooses a filter with the keyboard and appends hidden channels below its opt
     await screen.findByRole("menuitemradio", { name: "Unreads" }),
   ).toHaveAttribute("aria-checked", "true");
   await user.click(
-    screen.getByRole("menuitemradio", { name: "Active in last 30 days" }),
+    screen.getByRole("menuitemradio", { name: /Active in the last/ }),
   );
-  expect(change).toHaveBeenCalledExactlyOnceWith("active");
+  expect(change).not.toHaveBeenCalled();
+  await user.click(await screen.findByRole("button", { name: "Apply" }));
+  expect(change).toHaveBeenCalledExactlyOnceWith("active", 30 * 86400);
   await waitFor(() => expect(trigger).toHaveFocus());
   await user.click(trigger);
   await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
@@ -58,7 +60,7 @@ it("chooses a filter with the keyboard and appends hidden channels below its opt
   expect(popup?.querySelector('[role="separator"]')).toBeInTheDocument();
   expect(
     screen
-      .getByRole("menuitemradio", { name: "Active in last 30 days" })
+      .getByRole("menuitemradio", { name: /Active in the last/ })
       .compareDocumentPosition(quiet) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   // jsdom has no submenu geometry; browser checks own pointer travel/focus.

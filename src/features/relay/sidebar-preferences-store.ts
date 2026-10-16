@@ -15,6 +15,7 @@ import type {
   SidebarSortMutator,
   SidebarFilterMode,
   SidebarFilterMutator,
+  SidebarFilterSettings,
 } from "./sidebar-preferences";
 
 type MoveDestination =
@@ -34,6 +35,7 @@ type SortFailure = Readonly<{
 type FilterFailure = Readonly<{
   group: string;
   mode: SidebarFilterMode;
+  activeWindowSeconds?: number | null;
   error: string;
 }>;
 type OrderFailure = Readonly<{
@@ -171,7 +173,11 @@ export function createSidebarPreferencesStore(
   const failedFilters = new Map<string, FilterFailure>();
   const pendingFilters = new Map<
     number,
-    { group: string; mode: SidebarFilterMode }
+    {
+      group: string;
+      mode: SidebarFilterMode;
+      activeWindowSeconds?: number | null;
+    }
   >();
   const withFilter = (
     filters: Readonly<Record<string, SidebarFilterMode>>,
@@ -192,6 +198,16 @@ export function createSidebarPreferencesStore(
     return next;
   };
 
+  const withPendingWindows = () => {
+    const windows = { ...confirmed?.activeWindowSeconds };
+    for (const pending of pendingFilters.values()) {
+      if (pending.activeWindowSeconds === null) delete windows[pending.group];
+      else if (pending.activeWindowSeconds !== undefined)
+        windows[pending.group] = pending.activeWindowSeconds;
+    }
+    return windows;
+  };
+
   const retained = (data: SidebarPreferences): SidebarPreferences =>
     Object.freeze({
       sections: Object.freeze(
@@ -202,6 +218,11 @@ export function createSidebarPreferencesStore(
       muted: Object.freeze([...data.muted]),
       ...(data.sort ? { sort: Object.freeze({ ...data.sort }) } : {}),
       ...(data.filters ? { filters: Object.freeze({ ...data.filters }) } : {}),
+      ...(data.activeWindowSeconds
+        ? {
+            activeWindowSeconds: Object.freeze({ ...data.activeWindowSeconds }),
+          }
+        : {}),
     });
   const publish = (next: Snapshot) => {
     const {
@@ -260,7 +281,10 @@ export function createSidebarPreferencesStore(
             ? { sort: withPendingSorts(confirmed.sort ?? {}) }
             : {}),
           ...(pendingFilters.size
-            ? { filters: withPendingFilters(confirmed.filters ?? {}) }
+            ? {
+                filters: withPendingFilters(confirmed.filters ?? {}),
+                activeWindowSeconds: withPendingWindows(),
+              }
             : {}),
         }),
       ),
@@ -464,16 +488,17 @@ export function createSidebarPreferencesStore(
           throw new Error("Sidebar section removal is unavailable");
         confirmed = { ...confirmed, sort };
         if (writeFilter) {
-          const filters = await writeFilter(
+          const settings = await writeFilter(
             group,
             "all",
             confirmed.sections.map(({ id }) => id),
             writeSignal,
+            null,
           );
           if (closed || generation !== writeGeneration || !confirmed)
             throw new Error("Sidebar section removal is unavailable");
           writeSignal.throwIfAborted();
-          confirmed = { ...confirmed, filters };
+          confirmed = { ...confirmed, ...settings };
         }
         mutation++;
         project();
@@ -535,7 +560,13 @@ export function createSidebarPreferencesStore(
         rows(data.muted, "muted"),
         { version: 1, groups: data.sort ?? {} },
         undefined,
-        { version: 1, groups: data.filters ?? {} },
+        data.filters === undefined && data.activeWindowSeconds === undefined
+          ? undefined
+          : {
+              version: 1,
+              groups: data.filters ?? {},
+              activeWindowSeconds: data.activeWindowSeconds,
+            },
       );
       // Display-only: do not initialize the confirmed mutation base from disk.
       publish({
@@ -755,6 +786,7 @@ export function createSidebarPreferencesStore(
         mode: SidebarFilterMode,
         sectionIds: readonly string[],
         signal?: AbortSignal,
+        activeWindowSeconds?: number | null,
       ) {
         if (
           closed ||
@@ -773,18 +805,20 @@ export function createSidebarPreferencesStore(
         ]);
         if (writeSignal.aborted) return Promise.reject(writeSignal.reason);
         const id = ++nextFilterMutation;
-        pendingFilters.set(id, { group, mode });
+        pendingFilters.set(id, {
+          group,
+          mode,
+          ...(activeWindowSeconds === undefined ? {} : { activeWindowSeconds }),
+        });
         latestFilter.set(group, id);
         failedFilters.delete(group);
         mutation++;
         project();
-        const settle = (
-          filters?: Readonly<Record<string, SidebarFilterMode>>,
-        ) => {
+        const settle = (settings?: SidebarFilterSettings) => {
           if (closed || generation !== writeGeneration || !confirmed) return;
           confirmed = {
             ...confirmed,
-            filters: { ...(filters ?? confirmed.filters ?? {}) },
+            ...(settings ?? {}),
           };
           pendingFilters.delete(id);
           project();
@@ -796,18 +830,19 @@ export function createSidebarPreferencesStore(
               throw new Error("Sidebar filtering is unavailable");
             try {
               writeSignal.throwIfAborted();
-              const filters = await writeFilter(
+              const settings = await writeFilter(
                 group,
                 mode,
                 sectionIds,
                 writeSignal,
+                activeWindowSeconds,
               );
               if (closed || generation !== writeGeneration)
                 throw new Error("Sidebar filtering is unavailable");
               writeSignal.throwIfAborted();
               mutation++;
-              settle(filters);
-              return filters;
+              settle(settings);
+              return settings;
             } catch (error) {
               if (!closed && generation === writeGeneration) {
                 mutation++;
@@ -815,6 +850,9 @@ export function createSidebarPreferencesStore(
                   failedFilters.set(group, {
                     group,
                     mode,
+                    ...(activeWindowSeconds === undefined
+                      ? {}
+                      : { activeWindowSeconds }),
                     error:
                       error instanceof Error ? error.message : String(error),
                   });

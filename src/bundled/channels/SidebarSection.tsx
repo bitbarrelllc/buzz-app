@@ -1,3 +1,4 @@
+import { SidebarActiveDialog, activeWindowLabel } from "./SidebarActiveDialog";
 import { FadingLabel } from "./FadingLabel";
 import {
   useId,
@@ -19,6 +20,7 @@ import {
   MenuSubmenuPopup,
   MenuSubmenuTrigger,
   MenuTrigger,
+  MenuTrailing,
 } from "../../shared/design-system/ui/Menu";
 import {
   ArrowDownIcon,
@@ -93,7 +95,8 @@ export function SidebarSection({
     | {
         value: SidebarFilter;
         disabled?: boolean;
-        change: (mode: SidebarFilter) => void;
+        activeWindowSeconds?: number | undefined;
+        change: (mode: SidebarFilter, seconds?: number) => unknown;
       }
     | undefined;
   channels?:
@@ -125,6 +128,7 @@ export function SidebarSection({
   const actionsTrigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [activeOpen, setActiveOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState("");
   const canRemove = !!onRemove && sectionKey.startsWith("group:");
@@ -228,7 +232,10 @@ export function SidebarSection({
                     <MenuRadioGroup
                       value={filter.value}
                       onValueChange={(mode) => {
-                        filter.change(mode as SidebarFilter);
+                        if (mode === "active") return;
+                        void Promise.resolve(
+                          filter.change(mode as SidebarFilter),
+                        ).catch(() => {});
                         setMenuOpen(false);
                       }}
                     >
@@ -256,11 +263,20 @@ export function SidebarSection({
                         disabled={filter.disabled}
                         closeOnClick={false}
                         value="active"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setActiveOpen(true);
+                        }}
                       >
                         <MenuIcon>
                           <TimerIcon size={14} />
                         </MenuIcon>
-                        Active in last 30 days
+                        Active in the last
+                        {filter.value === "active" && (
+                          <MenuTrailing>
+                            {activeWindowLabel(filter.activeWindowSeconds)}
+                          </MenuTrailing>
+                        )}
                       </MenuRadioItem>
                     </MenuRadioGroup>
                     {channels &&
@@ -391,6 +407,14 @@ export function SidebarSection({
               title="New message"
               onClick={newMessage}
               icon={<PlusIcon strokeWidth={2.5} size={15} />}
+            />
+          )}
+          {activeOpen && filter && (
+            <SidebarActiveDialog
+              seconds={filter.activeWindowSeconds}
+              apply={(seconds) => filter.change("active", seconds)}
+              close={() => setActiveOpen(false)}
+              finalFocus={actionsTrigger}
             />
           )}
           {canRemove && (

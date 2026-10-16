@@ -175,11 +175,15 @@ They survive page switches in the same mounted sidebar, are saved when that
 sidebar exits its session, and restore before paint when the roster and groups
 are available; navigation history does not own them. Search lives in the top-bar
 palette; legacy sidebar filters are ignored. Each section's ellipsis menu offers
-**Filter → All, Unreads, Active in last 30 days**. Unreads shows channels with observed or
-manually marked unread messages or unread thread activity; Active in last 30 days uses verified
-activity within the last 30 days. These filters are encrypted account preferences on the current relay, using a
+**Filter → All, Unreads, Active in the last**. Unreads shows channels with observed or
+manually marked unread messages or unread thread activity. Active in the last opens a compact,
+content-sized dialog with visible 1-, 7-, 30-, and 90-day text-only radio tiles in two columns.
+Apply saves the selected rolling window and activates the filter;
+Cancel leaves the saved choice unchanged. The dialog retains its draft after a
+failed save, and the menu shows the selected window. Activity uses verified timestamps. These filters are encrypted account preferences on the current relay, using a
 separate kind-30078 `channel-filter` record. They leave saved sorting and section
 membership unchanged; earlier device-only filter choices are ignored, not automatically published.
+Filtered sections with no visible channels show only their header, retaining their expanded/collapsed state and menu access to hidden channels.
 The currently open channel remains visible in its section regardless of its filter,
 however it was opened. Navigating away removes that exception. When a filter hides
 channels, the **Filter** submenu appends those eligible channels below its three
@@ -236,8 +240,13 @@ The development broker and packaged native host save these choices in the deskto
 kind-30078 `channel-sort` record: `{ version: 1, groups: { ... }, meta: { v: 1, g: { ... } } }`.
 A–Z writes a null register and removes that group's legacy override.
 Filters use the same bounded group-register shape in a separate `channel-filter`
-coordinate: Unreads is `unreads`, Active in last 30 days is `active`, and All
-writes a null reset tombstone. Keeping this record separate leaves older clients'
+coordinate: Unreads is `unreads`, Active in the last is `active`, and All
+writes a null reset tombstone. An optional top-level `activeWindowSeconds` map
+stores each group’s duration in whole-day seconds; absence means 30 days. Presets
+and custom values share this representation. Apply publishes mode and duration
+in one encrypted update, and both hosts confirm both values on readback. Other
+modes preserve the last duration; section removal clears it. Older fixed-window
+clients still read `active` as 30 days until upgraded. Keeping this record separate leaves older clients'
 sort records unchanged. Both hosts validate, encrypt, publish and confirm filter
 writes through the existing preference queue. The UI projects pending choices,
 rolls back a failed save, and offers explicit Retry/Dismiss; a confirmed full read

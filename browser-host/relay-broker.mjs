@@ -1336,7 +1336,14 @@ export function relayBrokerPlugin({
                   readHead,
                   publishEvent,
                 );
-                return sorting ? { groups: result } : result;
+                return coordinate === "channel-filter"
+                  ? {
+                      groups: result.filters,
+                      activeWindowSeconds: result.activeWindowSeconds,
+                    }
+                  : sorting
+                    ? { groups: result }
+                    : result;
               });
             sidebarMutations.set(relay, mutation);
             try {

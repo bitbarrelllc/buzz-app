@@ -802,11 +802,7 @@ it("retains confirmed placement but gates moves after a failed refresh until a s
 
 it("keeps newer filter intent visible, rolls back failures, and retries without losing sort state", async () => {
   const first =
-    deferred<
-      Readonly<
-        Record<string, import("./sidebar-preferences").SidebarFilterMode>
-      >
-    >();
+    deferred<import("./sidebar-preferences").SidebarFilterSettings>();
   const started = deferred<void>();
   const write = vi
     .fn<SidebarFilterMutator>()
@@ -814,7 +810,10 @@ it("keeps newer filter intent visible, rolls back failures, and retries without 
       started.resolve();
       return first.promise;
     })
-    .mockResolvedValueOnce({ channels: "active" });
+    .mockResolvedValueOnce({
+      filters: { channels: "active" },
+      activeWindowSeconds: { channels: 7 * 86400 },
+    });
   const { owner, wire, preferences } = setup(
     vi.fn(async () => ({ ...data, sort: { channels: "recent" as const } })),
     undefined,
@@ -834,9 +833,18 @@ it("keeps newer filter intent visible, rolls back failures, and retries without 
     expect(preferences.snapshot().data?.filters).toEqual({
       channels: "unreads",
     });
-    const newer = preferences.setFilter("channels", "active", ["work"]);
+    const newer = preferences.setFilter(
+      "channels",
+      "active",
+      ["work"],
+      undefined,
+      7 * 86400,
+    );
     expect(preferences.snapshot().data?.filters).toEqual({
       channels: "active",
+    });
+    expect(preferences.snapshot().data?.activeWindowSeconds).toEqual({
+      channels: 7 * 86400,
     });
     first.reject(new Error("older failed"));
     await olderFailure;
@@ -844,32 +852,40 @@ it("keeps newer filter intent visible, rolls back failures, and retries without 
     expect(preferences.snapshot().filterErrors).toBeUndefined();
     write.mockRejectedValueOnce(new Error("not confirmed"));
     await expect(
-      preferences.setFilter("channels", "all", ["work"]),
+      preferences.setFilter(
+        "channels",
+        "active",
+        ["work"],
+        undefined,
+        90 * 86400,
+      ),
     ).rejects.toThrow("not confirmed");
     expect(preferences.snapshot().data).toMatchObject({
       filters: { channels: "active" },
       sort: { channels: "recent" },
+      activeWindowSeconds: { channels: 7 * 86400 },
     });
     expect(preferences.snapshot().filterErrors).toEqual([
-      { group: "channels", mode: "all", error: "not confirmed" },
+      {
+        group: "channels",
+        mode: "active",
+        activeWindowSeconds: 90 * 86400,
+        error: "not confirmed",
+      },
     ]);
-    write.mockResolvedValueOnce({});
+    write.mockResolvedValueOnce({ filters: {}, activeWindowSeconds: {} });
     await preferences.setFilter("channels", "all", ["work"]);
     expect(preferences.snapshot().data?.filters).toEqual({});
     expect(preferences.snapshot().filterErrors).toBeUndefined();
   } finally {
-    first.resolve({});
+    first.resolve({ filters: {}, activeWindowSeconds: {} });
     owner.dispose();
   }
 });
 
 it("fences an in-flight filter write when the session cache is cleared", async () => {
   const gate =
-    deferred<
-      Readonly<
-        Record<string, import("./sidebar-preferences").SidebarFilterMode>
-      >
-    >();
+    deferred<import("./sidebar-preferences").SidebarFilterSettings>();
   const started = deferred<AbortSignal>();
   const write: SidebarFilterMutator = async (_group, _mode, _ids, signal) => {
     started.resolve(signal);
@@ -893,11 +909,11 @@ it("fences an in-flight filter write when the session cache is cleared", async (
     const signal = await started.promise;
     await owner.clearCache();
     expect(signal.aborted).toBe(true);
-    gate.resolve({ channels: "unreads" });
+    gate.resolve({ filters: { channels: "unreads" }, activeWindowSeconds: {} });
     await rejection;
     expect(preferences.snapshot().data).toBeUndefined();
   } finally {
-    gate.resolve({});
+    gate.resolve({ filters: {}, activeWindowSeconds: {} });
     owner.dispose();
   }
 });
