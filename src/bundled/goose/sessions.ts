@@ -131,7 +131,8 @@ export type SessionsOptions = Readonly<{
   choice(): Choice;
   /** Changes when a setting a session was opened with has changed. */
   fingerprint(): string;
-  /** Called when a conversation's session opens or closes. */
+  /** Called when a conversation's session opens, is sent a message, or
+   * closes. */
   onChange?(): void;
 }>;
 
@@ -140,6 +141,8 @@ type Live = {
   process: GooseProcess;
   fingerprint: string;
   slot: Slot;
+  /** When it last took in a message or ended a turn. */
+  at: number;
   timer?: ReturnType<typeof setTimeout>;
 };
 
@@ -168,13 +171,20 @@ export class AgentSessions {
   seen(key: string) {
     return this.shown.get(key) ?? 0;
   }
-  /** Conversations with a session, and whether each is working. */
-  snapshot(): { key: string; busy: boolean; sessionId?: string }[] {
+  /** Conversations with a session, whether each is working, and when each
+   * last took in a message or ended a turn. */
+  snapshot(): {
+    key: string;
+    busy: boolean;
+    sessionId?: string;
+    at?: number;
+  }[] {
     return [
       ...[...this.live].map(([key, live]) => ({
         key,
         busy: live.session.busy,
         sessionId: live.session.id,
+        at: live.at,
       })),
       ...[...this.once.keys()].map((key) => ({ key, busy: true })),
     ];
@@ -394,7 +404,7 @@ export class AgentSessions {
     const released = () => pool.release(slot);
     void (session.server?.closed ?? Promise.resolve()).then(released, released);
     session.conversation = key;
-    const live = { session, process, fingerprint, slot };
+    const live = { session, process, fingerprint, slot, at: Date.now() };
     if (fingerprint !== this.options.fingerprint() && !this.disposed) {
       // Settings saved while it opened: it would work with the old ones.
       void this.close(live);
@@ -426,23 +436,33 @@ export class AgentSessions {
     activity: ActivityReceipt,
     model: string | undefined,
   ) {
-    const settled = await live.session.send(text, activity, model);
+    const sent = live.session.send(text, activity, model);
+    // Sending made it busy; a snapshot read when it opened is not.
+    this.options.onChange?.();
+    const settled = await sent;
     if (this.live.get(key) === live) {
       this.touch(key, live);
       if (!live.session.busy && this.stale(live)) this.drop(key, live);
     }
     return settled;
   }
-  /** Notes what the session has been shown and restarts its idle countdown. */
+  /** Notes that the session took in a message or ended a turn, and what it
+   * has been shown, and restarts its idle countdown. */
   private touch(key: string, live: Live, seen?: number) {
+    live.at = Date.now();
+    this.countdown(key, live);
+    if (seen !== undefined)
+      this.shown.set(key, Math.max(seen, this.shown.get(key) ?? 0));
+  }
+  /** Closes the session after IDLE_MS, or waits again while it is busy: a
+   * long turn is not new use. */
+  private countdown(key: string, live: Live) {
     this.options.pool.touch(live.slot);
     clearTimeout(live.timer);
     live.timer = setTimeout(() => {
-      if (live.session.busy) this.touch(key, live);
+      if (live.session.busy) this.countdown(key, live);
       else if (this.live.get(key) === live) this.drop(key, live);
     }, IDLE_MS);
-    if (seen !== undefined)
-      this.shown.set(key, Math.max(seen, this.shown.get(key) ?? 0));
   }
   private drop(key: string, live: Live) {
     clearTimeout(live.timer);
