@@ -502,6 +502,12 @@
 }
 
 @container (max-width: 36rem) {
+  .layout[data-plugin-detail] > .sidebar,
+  .layout[data-plugin-detail] > .detail {
+    /* Retain list geometry/scroll, but remove covered controls from focus and AT. */
+    visibility: hidden;
+  }
+
   .layout[data-plugin-detail] > .pluginAside,
   .navigationPane .layout[data-plugin-detail] > .pluginAside {
     position: absolute;

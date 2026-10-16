@@ -1078,3 +1078,54 @@ test("discarding community setup leaves the published profile unchanged", async 
   ).toHaveValue("");
   expect(writes).toEqual([]);
 });
+
+// Browser-only: container-query hiding must remove covered controls from native Tab navigation.
+test("narrow plugin details moves focus, skips covered rows, and restores the trigger on Escape", async ({
+  page,
+  app,
+}, info) => {
+  await page.setViewportSize({ width: 480, height: 650 });
+  await page.goto(app.origin);
+  await button(page, "Your profile").click();
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  await button(page, "Show navigation").click();
+  const sidebar = page.getByRole("complementary", {
+    name: "Settings sidebar",
+    includeHidden: true,
+  });
+  await sidebar.getByRole("button", { name: "Plugins", exact: true }).click();
+  for (const mode of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: mode });
+    await expect(page.locator("html")).toHaveAttribute("data-color-mode", mode);
+    const trigger = button(page, "View GitHub details");
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const pane = page.getByRole("complementary", { name: "GitHub details" });
+    await expect(
+      pane.getByRole("button", { name: "Close plugin details" }),
+    ).toBeFocused();
+    await expect(trigger).toBeHidden();
+    await page.keyboard.press("Tab");
+    await expect(
+      pane.getByRole("button", { name: "Disable", exact: true }),
+    ).toBeFocused();
+    await pane.evaluate((element) =>
+      Promise.allSettled(
+        element
+          .getAnimations({ subtree: true })
+          .filter(
+            (animation) =>
+              animation.effect?.getComputedTiming().endTime !== Infinity,
+          )
+          .map((animation) => animation.finished),
+      ),
+    );
+    await pane.screenshot({
+      path: info.outputPath(`plugin-details-${mode}.png`),
+    });
+    await page.keyboard.press("Escape");
+    await expect(pane).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toBeVisible();
+  }
+});

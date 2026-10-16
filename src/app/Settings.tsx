@@ -147,6 +147,10 @@ function PluginDetails({
   plugins: PluginManager;
   onClose(): void;
 }) {
+  const close = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    close.current?.focus();
+  }, []);
   // READMEs ship with Buzz; never attach one to an external plugin.
   const readme =
     plugin.source === "bundled" && bundledReadmes.get(plugin.manifest.id);
@@ -198,6 +202,7 @@ function PluginDetails({
           )}
         </div>
         <IconButton
+          ref={close}
           aria-label="Close plugin details"
           size="sm"
           icon={<XIcon size={16} aria-hidden="true" />}
@@ -442,6 +447,7 @@ export function Settings({
   const [pluginImportActions, setPluginImportActions] =
     useState<HTMLSpanElement | null>(null);
   const pluginTrigger = useRef<HTMLButtonElement>(null);
+  const restorePluginFocus = useRef(false);
   const pluginSection = useRef<HTMLElement>(null);
   const selectedPlugin = catalog?.plugins.find(
     (plugin) => plugin.manifest.id === selectedPluginId,
@@ -453,9 +459,15 @@ export function Settings({
     }
   }, [catalog, selectedPlugin, selectedPluginId]);
   const closePluginDetails = () => {
-    pluginTrigger.current?.focus();
+    restorePluginFocus.current = true;
     setSelectedPluginId(undefined);
   };
+  useLayoutEffect(() => {
+    if (!selectedPlugin && restorePluginFocus.current) {
+      restorePluginFocus.current = false;
+      pluginTrigger.current?.focus();
+    }
+  }, [selectedPlugin]);
   const selectedRunning = selectedPlugin
     ? activation[selectedPlugin.manifest.id]
     : undefined;
@@ -701,7 +713,6 @@ export function Settings({
                               <div key={id}>
                                 <article className={styles.plugin}>
                                   <button
-                                    ref={active ? pluginTrigger : undefined}
                                     type="button"
                                     className={styles.pluginRow}
                                     data-enabled={plugin.enabled}
@@ -807,6 +818,7 @@ export function Settings({
           </div>
           {selected === "plugins" && selectedPlugin && (
             <PluginDetails
+              key={selectedPlugin.manifest.id}
               plugin={selectedPlugin}
               failure={selectedFailure}
               busy={busy}

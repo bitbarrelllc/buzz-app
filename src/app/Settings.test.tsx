@@ -1234,3 +1234,23 @@ it("retains departure confirmation until local cleanup settles", async () => {
     ),
   ).toBeVisible();
 });
+
+it("focuses details on open and restores the row after Escape", () => {
+  reviewPluginFixture();
+  const row = screen.getByRole("button", {
+    name: "View Zebra external details",
+  });
+  row.focus();
+  fireEvent.click(row);
+  expect(
+    screen.getByRole("button", { name: "Close plugin details" }),
+  ).toHaveFocus();
+  fireEvent.keyDown(
+    screen.getByRole("complementary", { name: "Zebra external details" }),
+    { key: "Escape" },
+  );
+  expect(
+    screen.queryByRole("complementary", { name: "Zebra external details" }),
+  ).toBeNull();
+  expect(row).toHaveFocus();
+});
