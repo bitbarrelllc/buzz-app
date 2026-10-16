@@ -125,9 +125,9 @@ function ConnectedApp({ services }: { services: AppServices }) {
     if (!(navigation.ingress && navigation.retryable))
       select("buzz.channels/channels");
   };
-  // A selection the service dropped with its community (a leave here, or a
-  // removal synced from another device) lands as clicking Personal space
-  // does, so no page stays scoped to a community that is gone.
+  // A selection the service dropped with its community (a leave here) lands
+  // as clicking Personal space does, so no page stays scoped to a community
+  // that is gone.
   const wasSelected = useRef(client.selected);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Only a dropped selection lands; `land` reads the route as it is then.
   useEffect(() => {

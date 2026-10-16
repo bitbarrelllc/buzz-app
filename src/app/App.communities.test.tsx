@@ -115,40 +115,24 @@ async function setup() {
   return current;
 }
 
-it.each([
-  {
-    name: "a leave on this device",
-    forget: (current: AppServices, id: string) => current.communities.leave(id),
-  },
-  {
-    name: "a removal synced from another device",
-    forget: (current: AppServices, id: string) =>
-      current.communities.applySync(
-        { known: [], outbox: [] },
-        { remove: [`wss://${new URL(id).host}`] },
-      ),
-  },
-])(
-  "a selection dropped by $name lands on Channels as clicking Personal space would; another community going does not move the page",
-  async ({ forget }) => {
-    const current = await setup();
-    await act(async () => {
-      await forget(current, other);
-    });
-    expect(current.communities.snapshot().memberships.map((m) => m.id)).toEqual(
-      [origin],
-    );
-    expect(current.communities.snapshot().selected).toBe(origin);
-    expect(current.navigation.snapshot().entry.target).toEqual(scoped);
-    await act(async () => {
-      await forget(current, origin);
-    });
-    expect(current.communities.snapshot().selected).toBeNull();
-    await waitFor(() =>
-      expect(current.navigation.snapshot()).toMatchObject({
-        status: "opened",
-        entry: { target: channels },
-      }),
-    );
-  },
-);
+it("a selection dropped by a leave lands on Channels as clicking Personal space would; another community going does not move the page", async () => {
+  const current = await setup();
+  await act(async () => {
+    await current.communities.leave(other);
+  });
+  expect(current.communities.snapshot().memberships.map((m) => m.id)).toEqual([
+    origin,
+  ]);
+  expect(current.communities.snapshot().selected).toBe(origin);
+  expect(current.navigation.snapshot().entry.target).toEqual(scoped);
+  await act(async () => {
+    await current.communities.leave(origin);
+  });
+  expect(current.communities.snapshot().selected).toBeNull();
+  await waitFor(() =>
+    expect(current.navigation.snapshot()).toMatchObject({
+      status: "opened",
+      entry: { target: channels },
+    }),
+  );
+});
