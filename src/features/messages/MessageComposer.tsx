@@ -1,5 +1,7 @@
 import { stageSessionCards } from "./composer-session-cards";
 import { ComposerSessionCards } from "./ComposerSessionCards";
+import { legacyAssistantDraft } from "../sessions/legacy-assistant";
+import { rememberAgentsPreference } from "./mention-preferences";
 import { pendingSessionDraft } from "../sessions/pending-start";
 import { useConversationPresentation } from "../conversation/ConversationPresentation";
 import { messageButtonStyle } from "../../shared/theme/bubble-color";
@@ -32,8 +34,8 @@ import { Button } from "../../shared/design-system/ui/Button";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
 import { useNonmemberMentions } from "./useNonmemberMentions";
-import { sentMentionFollowup } from "./mention-followup";
 import { useKnownAgentPubkeys } from "../agents/use-known";
+import { rememberedMentions } from "./remembered-mentions";
 import { useAgentChoices } from "../agents/use-choices";
 import { sessionRecipients } from "../sessions/recipients";
 import { TypingIndicator } from "./TypingIndicator";
@@ -78,7 +80,6 @@ import { messageViewKey } from "./view-key";
 import { isEmojiOnly, usesLargeEmojiPresentation } from "./emoji-size";
 import {
   mentionDraft,
-  followupDraft,
   type MentionDraft,
   type MentionRecipient,
 } from "./mention-draft";
@@ -209,8 +210,10 @@ export type MessageComposerProps = {
   placeholder?: string | undefined;
   sessionConversation?: boolean | undefined;
   personalConversation?: boolean | undefined;
-  /** Me's explicit default recipient. Authored mentions still take precedence. */
-  selectedAgent?: string | undefined;
+  /** Seeds an empty new-chat draft; follow-ups use remembered mentions. */
+  defaultMention?: MentionRecipient | undefined;
+  /** Sending needs at least one tagged recipient. */
+  requireMention?: boolean | undefined;
   chatPresentation?: boolean | undefined;
   activityClickOpensPanel?: boolean | undefined;
   trailingTool?: ReactNode;
@@ -321,7 +324,8 @@ function Composer({
   submission,
   sessionConversation,
   personalConversation = false,
-  selectedAgent,
+  defaultMention,
+  requireMention = false,
   chatPresentation = false,
   activityClickOpensPanel = false,
   inviteAgents = false,
@@ -878,6 +882,7 @@ function Composer({
     recipient?: MentionRecipient,
     range?: CompletionQuery,
     terminator?: ":",
+    focus = true,
   ) {
     if (
       !permitted.current ||
@@ -915,7 +920,7 @@ function Composer({
       return false;
     }
     completion.invalidate();
-    if (!input.current.insertText(text, recipient, range, terminator)) {
+    if (!input.current.insertText(text, recipient, range, terminator, focus)) {
       setError("Message is too long to insert text");
       return false;
     }
@@ -1052,26 +1057,99 @@ function Composer({
       ?.parentChannelId === parentChannelId &&
     (!personalConversation ||
       !!fullSession(session)?.mePlacement.has(channelId));
-  async function prepareRecipients(
-    explicit: readonly string[],
-    selected: string | undefined,
-  ) {
+  // Only a fresh chat is seeded with the default. Once it has content, respect
+  // edits and removals; accepted sends use the shared remembered-mention draft.
+  const autoTagged = useRef<string | undefined>(undefined);
+  const automaticTag = useRef<string | undefined>(undefined);
+  // One-time upgrade of the retired per-chat picker. The editor owns the live
+  // draft, so delayed evidence cannot overwrite typing or restore a removed tag.
+  useEffect(() => {
+    if (
+      !personalConversation ||
+      submission ||
+      threadRootId ||
+      !active ||
+      editingDisabled ||
+      editing.target ||
+      sendPending
+    )
+      return;
+    const legacyKey = `me:assistant:${channelId}`;
+    const legacy = readView<unknown>(scope, legacyKey, "");
+    if (typeof legacy !== "string" || !/^[0-9a-f]{64}$/.test(legacy)) return;
+    if (
+      dirty.current ||
+      valueRef.current.text.trim() ||
+      valueRef.current.recipients.length ||
+      valueRef.current.sessionCards?.length ||
+      attachments.items.length ||
+      !rememberAgentsPreference()
+    ) {
+      writeView(scope, legacyKey, "");
+      return;
+    }
+    const choices = session.agentChoices.snapshot();
+    if (
+      choices.archives.status === "idle" ||
+      choices.archives.status === "loading"
+    )
+      return;
+    const next = legacyAssistantDraft(session, legacy);
+    if (!next.recipients.length && !choices.complete) return;
+    if (next.recipients.length) {
+      if (persist(next) !== "saved") return;
+      valueRef.current = next;
+      updateDraft(next);
+      input.current?.reset(next);
+      automaticTag.current = JSON.stringify(next);
+    }
+    writeView(scope, legacyKey, "");
+  });
+  useEffect(() => {
+    if (
+      !defaultMention ||
+      !active ||
+      sendPending ||
+      completion.composing.current ||
+      editing.target ||
+      autoTagged.current === draftKey
+    )
+      return;
+    if (value.recipients.length || draft.trim()) {
+      autoTagged.current = draftKey;
+      return;
+    }
+    if (
+      mentionAdmission(
+        session,
+        channelId,
+        agentChoices,
+        mentionRoster,
+      )(defaultMention.pubkey)
+    ) {
+      if (
+        insert(
+          `@${defaultMention.name} `,
+          defaultMention,
+          { start: 0, end: 0, query: "" },
+          undefined,
+          false,
+        )
+      ) {
+        automaticTag.current = JSON.stringify(valueRef.current);
+        input.current?.setSelectionRange(
+          valueRef.current.text.length,
+          valueRef.current.text.length,
+        );
+      }
+    }
+  });
+  const untagged =
+    requireMention && !editing.target && !value.recipients.length;
+  async function prepareRecipients(explicit: readonly string[]) {
     const channel = await session.workSessions.refreshMembership(channelId);
     if (!currentAdmission())
       throw new Error("The session changed. Review its channel and retry.");
-    if (selected) {
-      await session.agentChoices.refresh();
-      if (!currentAdmission())
-        throw new Error("The session changed. Review its channel and retry.");
-      if (
-        !session.agentChoices
-          .snapshot()
-          .selectable.some((agent) => agent.pubkey === selected)
-      )
-        throw new Error(
-          "The selected assistant is no longer available. Choose another assistant and retry.",
-        );
-    }
     const recipients = personalConversation
       ? [...explicit]
       : [
@@ -1154,12 +1232,17 @@ function Composer({
       admission.current ||
       submission?.disabled ||
       (!submission && (input.current?.readOnly || input.current?.disabled)) ||
-      (!draft.trim() && !sessionCards?.length && !attachments.items.length) ||
       attachments.blocked ||
       sendPending ||
       sendAttempt.current ||
       !outbox
     )
+      return;
+    if (requireMention && !valueRef.current.recipients.length) {
+      setError("Tag an agent to send");
+      return;
+    }
+    if (!draft.trim() && !sessionCards?.length && !attachments.items.length)
       return;
     const recovering = !submission && recoveryFor(session).get(recoveryKey);
     if (recovering) {
@@ -1207,17 +1290,11 @@ function Composer({
       }
       requireCompletedSessionStart();
       let references: readonly string[] = [];
-      const selected =
-        personalConversation && !captured.recipients.length
-          ? selectedAgent
-          : undefined;
-      let recipients = selected
-        ? [selected]
-        : captured.recipients.map((item) => item.pubkey);
+      let recipients = captured.recipients.map((item) => item.pubkey);
       if (sessionConversation || personalConversation) {
         admission.current = true;
         setAdmitting(true);
-        recipients = await prepareRecipients(recipients, selected);
+        recipients = await prepareRecipients(recipients);
       } else if (recipients.length) {
         const channel = session.channels
           .list()
@@ -1270,9 +1347,7 @@ function Composer({
         threadRootId && mediaTimeSeconds !== undefined
           ? mediaTimeReply(mediaTimeSeconds, composerMarkdown(captured))
           : composerMarkdown(captured);
-      const next = personalConversation
-        ? followupDraft([])
-        : sentMentionFollowup(session, captured, recipients);
+      const next = rememberedMentions(session, captured, recipients);
       // Only agents still notified by this message are asked for a model or effort.
       const sentPicks: MentionPicks = Object.fromEntries(
         Object.entries(capturedRunPicks).filter(([key]) =>
@@ -1416,6 +1491,10 @@ function Composer({
       if (!changed)
         input.current?.setSelectionRange(next.text.length, next.text.length);
       setError(undefined);
+      autoTagged.current = draftKey;
+      automaticTag.current = next.recipients.length
+        ? JSON.stringify(next)
+        : undefined;
       if (id) onSend?.(id);
       finishDraft(pending);
     } catch (reason) {
@@ -1671,6 +1750,7 @@ function Composer({
               extensions={extensions}
               emoji={emojiCatalog.entries}
               onDraftChange={(next) => {
+                if (!editing.target) automaticTag.current = undefined;
                 saveDraft(next);
                 completion.observe(true);
               }}
@@ -1749,8 +1829,10 @@ function Composer({
                   !editDisabled &&
                   !submission &&
                   !editing.target &&
-                  event.currentTarget.value === "" &&
-                  !valueRef.current.recipients.length &&
+                  ((event.currentTarget.value === "" &&
+                    !valueRef.current.recipients.length) ||
+                    automaticTag.current ===
+                      JSON.stringify(valueRef.current)) &&
                   !valueRef.current.sessionCards?.length &&
                   !attachments.items.length
                 ) {
@@ -1807,6 +1889,8 @@ function Composer({
               <ComposerFormattingTools
                 disabled={editingDisabled}
                 singleRow={chatPresentation || !!trailingTool}
+                // Conversation controls (Berd's project) follow the tools.
+                trailing={!editing.target ? trailingTool : undefined}
                 activeFormats={activeFormats}
                 toggleFormat={(format) => input.current?.toggleFormat(format)}
                 editLink={() => {
@@ -1839,15 +1923,9 @@ function Composer({
             {active &&
               !editing.target &&
               !submission &&
-              (!!value.recipients.length || !!selectedAgent) && (
+              !!value.recipients.length && (
                 <ComposerModels
-                  pubkeys={
-                    value.recipients.length
-                      ? value.recipients.map((item) => item.pubkey)
-                      : selectedAgent
-                        ? [selectedAgent]
-                        : []
-                  }
+                  pubkeys={value.recipients.map((item) => item.pubkey)}
                   value={picks}
                   disabled={editingDisabled}
                   onChange={setPicks}
@@ -1866,9 +1944,17 @@ function Composer({
               type="submit"
               style={messageButtonStyle}
               aria-label={editing.target ? "Save changes" : "Send message"}
-              title={editing.target ? "Save changes" : "Send message"}
+              title={
+                editing.target
+                  ? "Save changes"
+                  : untagged
+                    ? "Tag an agent to send"
+                    : "Send message"
+              }
+              focusableWhenDisabled={untagged || undefined}
               disabled={
                 disabled ||
+                untagged ||
                 (!editing.target && (!!accepted || conflict || sendPending)) ||
                 (!!editing.target && (editing.locked || editDisabled)) ||
                 admitting ||
@@ -1887,11 +1973,6 @@ function Composer({
               icon={<ArrowUpIcon size={16} />}
             />
           </div>
-          {active && !editing.target && trailingTool && (
-            <div className={styles.composerConversationControls}>
-              {trailingTool}
-            </div>
-          )}
         </div>
         {(error || editing.error) && (
           <p role="alert">{error ?? editing.error}</p>

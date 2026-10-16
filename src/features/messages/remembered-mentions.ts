@@ -4,22 +4,22 @@ import { archivedMention } from "./mention-admission";
 import { followupDraft, type MentionDraft } from "./mention-draft";
 import { rememberAgentsPreference } from "./mention-preferences";
 
-/** Both the editor and its detached-window owner preserve only notified agents. */
-export function sentMentionFollowup(
+/** The next scoped draft remembers only exact agents notified by the sent message. */
+export function rememberedMentions(
   session: ComposerSession,
-  captured: MentionDraft,
-  recipients: readonly string[],
-) {
+  draft: MentionDraft,
+  notified: readonly string[],
+): MentionDraft {
   const agents = knownAgentPubkeys(
     session.profiles.snapshot(),
     session.agentChoices.snapshot(),
   );
   return followupDraft(
     rememberAgentsPreference()
-      ? captured.recipients.filter(
+      ? draft.recipients.filter(
           (item) =>
             agents.has(item.pubkey) &&
-            recipients.includes(item.pubkey) &&
+            notified.includes(item.pubkey) &&
             !archivedMention(session, item.pubkey),
         )
       : [],

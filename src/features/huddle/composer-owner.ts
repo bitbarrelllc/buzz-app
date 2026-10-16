@@ -1,6 +1,6 @@
 import { communityFromScope, relayGifRequests } from "../relay/gifs";
 import { MAX_VOICE_SECONDS } from "../relay/voice-media";
-import { sentMentionFollowup } from "../messages/mention-followup";
+import { rememberedMentions } from "../messages/remembered-mentions";
 import { mentionDraft } from "../messages/mention-draft";
 import { readView, writeView } from "../../shared/view-state";
 import type { RelaySession } from "../relay/session";
@@ -204,7 +204,7 @@ export function createHuddleComposerOwner(
           writeView(
             scope,
             key,
-            sentMentionFollowup(
+            rememberedMentions(
               session,
               mentionDraft(readView(scope, key, "")),
               mentions,
