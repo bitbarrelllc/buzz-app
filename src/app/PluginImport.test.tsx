@@ -384,6 +384,13 @@ it("separates choosing from access review and restores the chosen folder on Back
     screen.getByRole("button", { name: "Browse plugin folder" }),
   );
   const radios = await screen.findAllByRole("radio");
+  expect(radios[0]).toHaveAccessibleDescription(
+    "/plugins/example · example.plugin",
+  );
+  expect(radios[1]).toHaveAccessibleDescription(
+    "/plugins/example/dist · example.plugin",
+  );
+  expect(screen.queryByText("Source: /plugins/example")).toBeNull();
   expect(
     screen.getByRole("dialog", { name: "Choose a plugin" }),
   ).toHaveAccessibleDescription("Select a plugin to review before installing.");

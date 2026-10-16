@@ -397,7 +397,19 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   page,
   app,
 }, info) => {
-  await nativeImports(page);
+  await nativeImports(
+    page,
+    ["one", "two"].map((name, index) => ({
+      path: index === 0 ? "." : "dist",
+      manifest: {
+        id: `example.${name}`,
+        name: `Example ${name}`,
+        apiVersion: 1,
+      },
+      revision: name,
+    })),
+    { source: "/plugins/example", commit: null },
+  );
   await openPlugins(page, app.origin);
   await button(page, "Add").click();
   await button(page, "Browse plugin folder").click();
@@ -425,6 +437,12 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   ).toBeVisible();
 
   await expect(page.getByRole("radio")).toHaveCount(2);
+  await expect(
+    page.getByRole("radio", { name: /Example one/ }),
+  ).toHaveAccessibleDescription("/plugins/example · example.one");
+  await expect(
+    page.getByRole("radio", { name: /Example two/ }),
+  ).toHaveAccessibleDescription("/plugins/example/dist · example.two");
   await expect(button(page, "Install plugin")).toHaveCount(0);
   await expect(button(page, "Continue")).toBeDisabled();
   await expect(
@@ -488,7 +506,7 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
         window.importCalls.find((c) => c.command === "plugin_import_install")
           .args,
     ),
-  ).toEqual({ token: "preview-one", path: "plugins/two/dist" });
+  ).toEqual({ token: "preview-one", path: "dist" });
   await button(page, "Close").click();
   const enabled = pluginAction(page, "Example two");
   await expect(enabled).toHaveAccessibleName("Enable Example two");

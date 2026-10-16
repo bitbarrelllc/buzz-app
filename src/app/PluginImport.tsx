@@ -505,18 +505,21 @@ export function PluginImport({
                 />
               )}
               <div className="flex flex-col gap-4">
-                {!reviewing && (
-                  <div className="min-w-0 text-body-sm">
-                    <p className="m-0 break-all text-caption text-muted">
-                      Source: {preview.source}
-                    </p>
-                    {preview.commit && (
-                      <p className="m-0 break-all text-caption text-muted">
-                        Commit: {preview.commit}
-                      </p>
-                    )}
-                  </div>
-                )}
+                {!reviewing &&
+                  (preview.candidates.length === 0 || preview.commit) && (
+                    <div className="min-w-0 text-body-sm">
+                      {preview.candidates.length === 0 && (
+                        <p className="m-0 break-all text-caption text-muted">
+                          Source: {preview.source}
+                        </p>
+                      )}
+                      {preview.commit && (
+                        <p className="m-0 break-all text-caption text-muted">
+                          Commit: {preview.commit}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 {preview.candidates.length === 0 ? (
                   <p className="m-0">
                     No built plugins found. Build the plugin first, then choose
@@ -543,7 +546,8 @@ export function PluginImport({
                           label={item.manifest.name}
                           description={
                             <span className="break-all">
-                              {item.path} · {item.manifest.id}
+                              {importLocation(preview, item.path)} ·{" "}
+                              {item.manifest.id}
                             </span>
                           }
                         />
