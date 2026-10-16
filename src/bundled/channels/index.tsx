@@ -4,8 +4,7 @@ import { isChannelRoute } from "../../features/channel-navigation/routes";
 import type { PluginModule } from "../../plugins/api";
 import { ChannelsPage } from "./ChannelsPage";
 import { ChannelTemplateSettings } from "./ChannelTemplateSettings";
-import { MessageSettings } from "./MessageSettings";
-import { ChatCircleIcon, CopyIcon } from "../../shared/design-system/icons";
+import { CopyIcon } from "../../shared/design-system/icons";
 export const inject = [
   "pages",
   "relay",
@@ -28,12 +27,6 @@ export const apply: PluginModule["apply"] = (ctx) => {
   const pages = ctx.pages;
   const navigator = ctx.navigation;
   const agents = ctx.agents;
-  ctx.settingsCards.register({
-    id: "messages",
-    title: "Messages",
-    icon: ChatCircleIcon,
-    component: MessageSettings,
-  });
   ctx.settingsCards.register({
     id: "templates",
     title: "Channel templates",
