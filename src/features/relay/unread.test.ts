@@ -2728,6 +2728,7 @@ it("inbox describes a session row by its newest top-level message, not only its 
     message(h.alice, "session", "Side reply", 23, [
       ["e", ping.id, "", "reply"],
     ]),
+    message(h.alice, "session", "Agent note", 24, [["audience", "agents"]]),
   ]);
   const item = h.session.unread
     .inbox()
