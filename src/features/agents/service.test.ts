@@ -6372,6 +6372,81 @@ describe("Delete as a recoverable archive", () => {
     }
   });
 
+  it("with config sync on, keeps local team rules after empty relay discovery", async () => {
+    const relay = configRelay();
+    communityFake.value = relay.opens;
+    const f = await setup({ identities: [here(alder)] });
+    try {
+      await vi.waitFor(() =>
+        expect(f.service.find(alder)?.configBase).toBeDefined(),
+      );
+      await f.service.saveTeam({
+        name: "Local",
+        instructions: "LOCAL RULE MUST REMAIN",
+        members: [alder],
+      });
+      await relay.opens.mock.results[0]?.value.refreshTeams();
+      mentionAlder(f, "local-after-discovery");
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(f.run.mock.calls[0]?.[0].team).toContain("LOCAL RULE MUST REMAIN");
+    } finally {
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it("with config sync on, runs with both local and relay team rules", async () => {
+    const relay = configRelay();
+    communityFake.value = relay.opens;
+    const f = await setup({ identities: [here(alder)] });
+    try {
+      await vi.waitFor(() =>
+        expect(f.service.find(alder)?.configBase).toBeDefined(),
+      );
+      await f.service.saveTeam({
+        name: "Local",
+        instructions: "LOCAL RULE MUST REMAIN",
+        members: [alder],
+      });
+      mentionAlder(f, "before-discovery");
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(f.run.mock.calls[0]?.[0].team).toContain("LOCAL RULE MUST REMAIN");
+      await relay.remoteTeam("7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", [alder]);
+      const config = relay.opens.mock.results[0]?.value;
+      if (!config) throw new Error("No community config");
+      await config.refreshTeams();
+      mentionAlder(f, "after-discovery");
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(2));
+      expect(f.run.mock.calls[1]?.[0].team).toContain("TEAM RULE");
+      expect(f.run.mock.calls[1]?.[0].team).toContain("LOCAL RULE MUST REMAIN");
+    } finally {
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it("with config sync on, uses the relay team over a local team with the same id", async () => {
+    const relay = configRelay();
+    communityFake.value = relay.opens;
+    const f = await setup({ identities: [here(alder)] });
+    try {
+      await vi.waitFor(() =>
+        expect(f.service.find(alder)?.configBase).toBeDefined(),
+      );
+      const local = await f.service.saveTeam({
+        name: "Local",
+        instructions: "LOCAL COPY MUST GO",
+        members: [alder],
+      });
+      await relay.remoteTeam(local.id, [alder]);
+      await relay.opens.mock.results[0]?.value.refreshTeams();
+      mentionAlder(f, "same-id");
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(f.run.mock.calls[0]?.[0].team).toContain("TEAM RULE");
+      expect(f.run.mock.calls[0]?.[0].team).not.toContain("LOCAL COPY MUST GO");
+    } finally {
+      await f.ctx.fiber.dispose();
+    }
+  });
+
   it("with config sync on, leaves hosted agents out of config sync", async () => {
     const relay = configRelay();
     communityFake.value = relay.opens;
@@ -6471,28 +6546,4 @@ describe("Delete as a recoverable archive", () => {
     );
     await f.ctx.fiber.dispose();
   });
-});
-
-it("builds the team prompt from the teams the start resolver admitted, never the local list", async () => {
-  const f = await setup({ binding: () => ({ teams: [] }) });
-  await f.service.create({ type: "example/echo", name: "Echo" });
-  await f.service.saveTeam({
-    name: "Local only",
-    instructions: "Never sent once teams sync.",
-    members: [bot],
-  });
-  f.emit({
-    events: [
-      event("1", {
-        tags: [
-          ["h", channel],
-          ["p", bot],
-        ],
-      }),
-    ],
-    channelId: channel,
-  });
-  await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
-  expect(f.run.mock.calls[0]?.[0].team).toBeUndefined();
-  await f.ctx.fiber.dispose();
 });

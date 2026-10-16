@@ -136,8 +136,9 @@ const teamArtifact = (
 });
 
 /** Every team config channel of this owner's, bound for sync. A channel
- * whose head can't prove its team keeps the id `known` or the journal has
- * for it, as unreadable; one never known is skipped, never guessed. */
+ * whose head can't prove its team keeps the id an earlier discovery found
+ * for it (`known`), as unreadable; one never found is skipped, never
+ * guessed. */
 export async function discoverTeams(
   deps: TeamDeps,
   known: readonly SyncedTeam[] = [],

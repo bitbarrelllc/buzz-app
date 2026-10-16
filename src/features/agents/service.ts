@@ -1130,7 +1130,15 @@ export class AgentsService extends Service implements Agents {
       },
       team: (pubkey, admitted) =>
         teamPrompt(
-          admitted ?? this.teamList,
+          // Local teams stay local; for an id the relay knows, its copy wins.
+          admitted
+            ? [
+                ...this.teamList.filter(
+                  (team) => !this.configJournals.teams.synced(team.id),
+                ),
+                ...admitted,
+              ]
+            : this.teamList,
           this.identities.filter((identity) => !identity.deleted),
           pubkey,
         ),
