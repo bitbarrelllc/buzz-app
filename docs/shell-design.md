@@ -79,8 +79,8 @@ semantic tokens, UI authoring rules and the local component reference.
   main content; this includes conversation and Settings-section selections.
   Me, Messages, Agents, desktop Settings, and any selected primary page share an
   animated header toggle; hiding the sidebar preserves its mounted state and saved
-  width. Pages without a Channel or Me-specific label use generic "Hide sidebar" /
-  "Show sidebar" labels. Reduced motion disables the transition. Non-primary
+  width. The toggle uses "Hide sidebar" / "Show sidebar" on every page, and the
+  combined Solo and Team sidebar is labelled "Sidebar". Reduced motion disables the transition. Non-primary
   desktop destinations retain the visible sidebar.
   The same header keeps history and account/search actions, plus a segmented
   navigation strip and full-page toolbar icons. Real control widths, native insets

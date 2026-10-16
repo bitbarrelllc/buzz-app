@@ -177,7 +177,7 @@ test.describe("public search destination", () => {
       ).toHaveCount(0);
       await expect(
         page
-          .getByRole("complementary", { name: "Channel sidebar" })
+          .getByRole("complementary", { name: "Sidebar", exact: true })
           .getByRole("button", { name: "open", exact: true }),
       ).toHaveCount(0);
     }
@@ -285,7 +285,8 @@ test.describe("public search destination", () => {
       .toBe(true);
     await expect(composer).toHaveCount(0);
     const sidebar = page.getByRole("complementary", {
-      name: "Channel sidebar",
+      name: "Sidebar",
+      exact: true,
     });
     await expect(
       sidebar.getByRole("button", { name: "open", exact: true }),

@@ -134,7 +134,7 @@ export function ChannelSidebar(props: Props) {
       ) : (
         <div className="shell-sidebar-default">
           <SidebarFrame
-            label="Channel sidebar"
+            label="Sidebar"
             header={header}
             panelId={props.panelId}
             launchPending={
@@ -186,7 +186,7 @@ class SidebarBoundary extends Component<
     return this.state.failed ? (
       <div className="shell-sidebar-default">
         <SidebarFrame
-          label="Channel sidebar"
+          label="Sidebar"
           header={this.props.header}
           panelId={this.props.panelId}
         >
@@ -1030,7 +1030,7 @@ function ReadySidebar({
       )}
       <ResizableSidebar scope={scope} className="shell-sidebar">
         <SidebarFrame
-          label="Channel sidebar"
+          label="Sidebar"
           header={header}
           panelId={panelId}
           launchPending={

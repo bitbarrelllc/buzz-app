@@ -1149,17 +1149,17 @@ test("Me and Messages share one resizable sidebar width", async ({
   });
   await page.goto(app.origin);
   await openPage(page, "Me");
-  await expect.poll(() => width("Channel sidebar")).toBe(260);
+  await expect.poll(() => width("Sidebar")).toBe(260);
   await handle.press("End");
-  await expect.poll(() => width("Channel sidebar")).toBe(520);
+  await expect.poll(() => width("Sidebar")).toBe(520);
   await openPage(page, "Messages");
-  await expect.poll(() => width("Channel sidebar")).toBe(520);
+  await expect.poll(() => width("Sidebar")).toBe(520);
   await handle.press("Home");
-  await expect.poll(() => width("Channel sidebar")).toBe(220);
+  await expect.poll(() => width("Sidebar")).toBe(220);
   await openPage(page, "Me");
-  await expect.poll(() => width("Channel sidebar")).toBe(220);
+  await expect.poll(() => width("Sidebar")).toBe(220);
   await page.reload();
-  await expect.poll(() => width("Channel sidebar")).toBe(220);
+  await expect.poll(() => width("Sidebar")).toBe(220);
 });
 
 test("unified session naming and lifetime retain host focus and save only explicit changes", async ({

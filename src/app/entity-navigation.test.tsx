@@ -258,7 +258,7 @@ it("lists active primary pages in their sidebar and header placements", async ()
     ).not.toBeInTheDocument(),
   );
   expect(
-    screen.getByRole("complementary", { name: "Channel sidebar" }),
+    screen.getByRole("complementary", { name: "Sidebar" }),
   ).toBeInTheDocument();
 });
 

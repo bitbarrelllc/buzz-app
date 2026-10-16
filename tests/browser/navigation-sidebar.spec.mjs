@@ -21,7 +21,8 @@ test("channel sidebar resizes from the full gutter and persists", async ({
 }) => {
   await open(page, app);
   const sidebarPanel = page.getByRole("complementary", {
-    name: "Channel sidebar",
+    name: "Sidebar",
+    exact: true,
   });
   const sidebar = page.locator(".shell-sidebar").filter({ has: sidebarPanel });
   const handle = page.getByRole("separator", {
@@ -40,7 +41,7 @@ test("channel sidebar resizes from the full gutter and persists", async ({
     const content = panel.firstElementChild;
     const row = panel.querySelector('[data-channel-id="alpha"]');
     if (!(content instanceof HTMLElement) || !(row instanceof HTMLElement))
-      throw new Error("Channel sidebar geometry is unavailable");
+      throw new Error("Sidebar geometry is unavailable");
     const handle = document.querySelector('[aria-label="Resize sidebar"]');
     if (!(handle instanceof HTMLElement))
       throw new Error("Missing sidebar gutter");

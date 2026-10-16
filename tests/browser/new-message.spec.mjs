@@ -622,7 +622,7 @@ test("empty compose, keyboard selection, pagination, removal effects, retry, the
     page.getByRole("region", { name: "New message", exact: true }),
   ).toBeVisible();
   const sidebarDm = page
-    .getByRole("complementary", { name: "Channel sidebar" })
+    .getByRole("complementary", { name: "Sidebar", exact: true })
     .getByRole("button", { name: "Avery Chen", exact: true });
   await expect(sidebarDm).toHaveCount(0);
   const firstSend = app.publications.find((event) => event.kind === 9);
@@ -711,7 +711,10 @@ test("profile Message opens a fresh DM and restores a hidden one", async ({
   app.seedChannel("22222222-2222-4222-8222-222222222222", "Hello from Avery");
   await page.goto(app.origin);
   await openPage(page, "Messages");
-  const sidebar = page.getByRole("complementary", { name: "Channel sidebar" });
+  const sidebar = page.getByRole("complementary", {
+    name: "Sidebar",
+    exact: true,
+  });
   const general = sidebar.locator(
     '[data-channel-id="22222222-2222-4222-8222-222222222222"]',
   );

@@ -99,7 +99,7 @@ test("joined header seams, drag feedback, and pointer-only overlay motion", asyn
   const scrollBounds = await navigation.boundingBox();
   const resizeBounds = await resize.boundingBox();
   const sidebarBounds = await page
-    .getByRole("complementary", { name: "Channel sidebar", exact: true })
+    .getByRole("complementary", { name: "Sidebar", exact: true })
     .boundingBox();
   const mainBounds = await page.locator("#main-content > .panel").boundingBox();
   expect(mainBounds.x - (sidebarBounds.x + sidebarBounds.width)).toBeCloseTo(

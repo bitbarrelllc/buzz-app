@@ -26,7 +26,7 @@ test("shared navigation preserves drafts and history across Solo and header page
     "Workflows",
   ]);
   const sidebar = page.getByRole("complementary", {
-    name: "Channel sidebar",
+    name: "Sidebar",
     exact: true,
   });
   const sidebarNode = await sidebar.elementHandle();
@@ -41,16 +41,12 @@ test("shared navigation preserves drafts and history across Solo and header page
   await expect(composer).toHaveCount(0);
   const messages = topbar.getByRole("tab", { name: "Messages", exact: true });
   await expect(messages).toHaveAttribute("aria-selected", "true");
-  await page
-    .getByRole("button", { name: "Hide Solo sidebar", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
   await expect(page.locator("#shell-navigation")).toHaveAttribute(
     "aria-hidden",
     "true",
   );
-  await page
-    .getByRole("button", { name: "Show Solo sidebar", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("menuitem", { name: "New chat", exact: true }).click();
   await expect(
@@ -179,7 +175,7 @@ test("shared navigation preserves drafts and history across Solo and header page
     }
   }
   await expect(
-    page.getByRole("complementary", { name: "Channel sidebar" }),
+    page.getByRole("complementary", { name: "Sidebar", exact: true }),
   ).toBeVisible();
   // The real sidebar changes the route, not the containing Messages area.
   const inbox = page

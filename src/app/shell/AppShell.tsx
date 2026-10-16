@@ -102,11 +102,6 @@ export function AppShell({
     meNavigation ||
     selected === "settings" ||
     pages.some((page) => page.key === selected && page.primary);
-  const sidebarLabel = meNavigation
-    ? "Solo sidebar"
-    : channelsNavigation
-      ? "Channel sidebar"
-      : "sidebar";
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationToggle = useRef<HTMLButtonElement>(null);
@@ -115,7 +110,7 @@ export function AppShell({
     ? navigationOpen
       ? "Hide navigation"
       : "Show navigation"
-    : `${sidebarOpen ? "Hide" : "Show"} ${sidebarLabel}`;
+    : `${sidebarOpen ? "Hide" : "Show"} sidebar`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Only a navigation attempt closes the drawer.
   useEffect(() => {
     if (navigationOpen && navigationToggle.current?.getClientRects().length) {

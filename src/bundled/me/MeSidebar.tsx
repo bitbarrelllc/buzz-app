@@ -39,7 +39,7 @@ export function MeSidebar({
   const connection = useRelayConnection(relay);
   const scope = connection.scope ?? "disconnected";
   return (
-    <section aria-label="Solo sidebar">
+    <section aria-label="Solo">
       {connection.status === "ready" ? (
         <PersonalHistory
           key={`${scope}:${connection.generation}`}

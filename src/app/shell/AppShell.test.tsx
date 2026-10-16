@@ -53,7 +53,7 @@ it("hides and shows the channel sidebar without re-rendering its content", async
   function Sidebar({ children }: { children: ReactNode }) {
     renders();
     return (
-      <aside aria-label="Channel sidebar" className="shell-sidebar">
+      <aside aria-label="Sidebar" className="shell-sidebar">
         {children}
       </aside>
     );
@@ -100,7 +100,7 @@ it("hides and shows the channel sidebar without re-rendering its content", async
   );
   const { rerender } = render(shell("buzz.channels/channels"));
   const content = screen.getByRole("complementary", {
-    name: "Channel sidebar",
+    name: "Sidebar",
   });
   const navigation = document.getElementById("shell-navigation");
   const rendered = renders.mock.calls.length;
@@ -108,10 +108,10 @@ it("hides and shows the channel sidebar without re-rendering its content", async
   expect(row()).not.toHaveAttribute("aria-current");
 
   for (const [label, hidden] of [
-    ["Hide Channel sidebar", "true"],
-    ["Show Channel sidebar", "false"],
-    ["Hide Channel sidebar", "true"],
-    ["Show Channel sidebar", "false"],
+    ["Hide sidebar", "true"],
+    ["Show sidebar", "false"],
+    ["Hide sidebar", "true"],
+    ["Show sidebar", "false"],
   ] as const) {
     await userEvent.click(screen.getByRole("button", { name: label }));
     expect(navigation).toHaveAttribute("aria-hidden", hidden);
@@ -250,14 +250,16 @@ it("keeps built-in sidebar controls available before page contributions load", (
     </ToastProvider>
   );
   const { rerender } = render(shell("buzz.channels/channels"));
-  expect(
-    screen.getByRole("button", { name: "Hide Channel sidebar" }),
-  ).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("button", { name: "Hide sidebar" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
 
   rerender(shell("buzz.me/me"));
-  expect(
-    screen.getByRole("button", { name: "Hide Solo sidebar" }),
-  ).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByRole("button", { name: "Hide sidebar" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
 });
 
 it("shows a primary plugin page's declared icon beside its nav label", () => {
@@ -688,12 +690,17 @@ it.each([false, true])(
     const top = within(nav).getByRole(compact ? "button" : "tab", {
       name: "Top",
     });
+    if (compact) expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
     await userEvent.click(top);
     expect(onSelect).toHaveBeenCalledWith(
       "example/top",
       ...(compact ? [] : [{ focus: "preserve" }]),
     );
-    if (compact) return;
+    if (compact) {
+      expect(document.getElementById("main-content")).toHaveFocus();
+      return;
+    }
+    expect(top).toHaveFocus();
     expect(
       within(nav).queryByRole("tab", { name: "Bestie" }),
     ).not.toBeInTheDocument();
@@ -718,35 +725,46 @@ it.each([false, true])(
       "Child content",
     );
     rerender(shell("example/tool"));
+    expect(
+      within(nav).queryByRole("tab", { selected: true }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Tool" })).toHaveAttribute(
       "aria-current",
       "page",
     );
     rerender(shell("buzz.me/me"));
     expect(messages).toHaveAttribute("aria-selected", "true");
-    expect(
-      screen.getByRole("button", { name: "Hide Solo sidebar" }),
-    ).toBeVisible();
-    expect(
-      screen.getByRole("tabpanel", { name: "Messages" }),
-    ).toHaveTextContent("Child content");
+    expect(screen.getByRole("button", { name: "Hide sidebar" })).toBeVisible();
+    const panel = screen.getByRole("tabpanel", { name: "Messages" });
+    expect(panel).toHaveAttribute("id", messages.getAttribute("aria-controls"));
+    expect(panel).toHaveAttribute("aria-labelledby", messages.id);
+    expect(panel).toHaveTextContent("Child content");
     await userEvent.click(messages);
     expect(onSelect).toHaveBeenLastCalledWith("buzz.channels/channels", {
       focus: "preserve",
     });
-    await userEvent.click(
-      screen.getByRole("button", { name: "Hide Solo sidebar" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
     rerender(shell("buzz.projects/projects"));
     expect(document.getElementById("shell-navigation")).toHaveAttribute(
       "aria-hidden",
       "true",
     );
     rerender(shell("buzz.me/me"));
-    expect(
-      screen.getByRole("button", { name: "Show Solo sidebar" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Show sidebar" })).toBeVisible();
     rerender(shell("settings"));
+    expect(
+      within(nav).queryByRole("tab", { selected: true }),
+    ).not.toBeInTheDocument();
+    onSelect.mockClear();
+    rerender(shell("buzz.channels/channels"));
+    await userEvent.click(messages);
+    expect(onSelect).not.toHaveBeenCalled();
+    rerender(
+      shell(
+        "buzz.inbox/inbox",
+        entries.filter((entry) => entry.key !== "buzz.inbox/inbox"),
+      ),
+    );
     expect(
       within(nav).queryByRole("tab", { selected: true }),
     ).not.toBeInTheDocument();

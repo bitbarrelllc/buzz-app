@@ -199,7 +199,7 @@ function fixture(combined = false, canCreate = false, agents?: Agents) {
               relay={relay}
               navigator={navigator}
               agents={agents}
-              meEnabled
+              meEnabled={meEnabled}
             />
             {sidebarVisible && (
               <PrimarySidebar
@@ -408,7 +408,7 @@ it.each(["disconnected", "connecting", "error"] as const)(
         target={meTarget(scope)}
       />,
     );
-    const sidebar = screen.getByRole("region", { name: "Solo sidebar" });
+    const sidebar = screen.getByRole("region", { name: "Solo" });
     expect(
       within(sidebar).queryByRole("img", { name: "Berd" }),
     ).not.toBeInTheDocument();
@@ -581,13 +581,18 @@ it("retains scope across Settings remounts and reveals navigation outside the fi
   );
 });
 
-it("omits the scope switcher when Solo is disabled", () => {
+it("omits the scope switcher and Solo creation when Solo is disabled", async () => {
+  const user = userEvent.setup();
   const f = fixture(true);
   f.meEnabled(false);
   expect(
     screen.queryByRole("tablist", { name: "Navigation scope" }),
   ).not.toBeInTheDocument();
   expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "New" }));
+  expect(
+    (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
+  ).toEqual(["New DM", "New channel"]);
 });
 
 it.each([
