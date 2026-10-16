@@ -193,8 +193,10 @@ export class AcpSession {
               { type: "text", text: lead ? `${lead}\n\n${text}` : text },
             ],
           })) as { stopReason?: string };
-          if (stopReason === "refusal")
+          if (stopReason === "refusal") {
             this.lastError = `${this.acp.hooks.label} refused the request`;
+            this.lastCode = undefined;
+          }
         } catch (error) {
           this.lastError = errorMessage(error);
           this.lastCode = codeOf(error);
