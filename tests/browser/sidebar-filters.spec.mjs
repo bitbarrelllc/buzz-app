@@ -253,6 +253,25 @@ test("section filters save activity windows and recover hidden channels", async 
   await expect(
     page.getByRole("menuitem", { name: "Planning", exact: true }),
   ).toBeEnabled();
+  const disabledActive = page.getByRole("menuitemradio", {
+    name: /Active in the last/,
+  });
+  // Real CSS must mute the duration and selected check with the disabled label.
+  for (const theme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: theme });
+    const color = await disabledActive.evaluate(
+      (element) => getComputedStyle(element).color,
+    );
+    await expect(disabledActive.locator(".buzz-menu-trailing")).toHaveCSS(
+      "color",
+      color,
+    );
+    await expect(disabledActive.locator(".buzz-menu-item-indicator")).toHaveCSS(
+      "color",
+      color,
+    );
+  }
+  await page.emulateMedia({ colorScheme: "light" });
   await shot("14-read-only-hidden-channels");
   await page.getByRole("menuitem", { name: "Planning", exact: true }).click();
   await expect(work.locator('[data-channel-id="beta"]')).toBeVisible();

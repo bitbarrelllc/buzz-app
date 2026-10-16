@@ -805,6 +805,7 @@ export const COMPONENTS: readonly ComponentDefinition[] = [
       "group label: default | quiet",
       "nested submenus",
       "danger: matching label/icon color and danger hover/pressed fill",
+      "disabled: matching label, trailing text, and indicator color",
     ],
     status: "proposed",
     collection: "components",
