@@ -365,6 +365,7 @@ it.each([
 );
 
 it("signs in only to repositories the community authorizes", async () => {
+  const user = userEvent.setup();
   const preview: ImportPreview = {
     token: "preview",
     source: "repo",
@@ -396,16 +397,28 @@ it("signs in only to repositories the community authorizes", async () => {
       authorizeGit={authorizeGit}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  await user.click(screen.getByRole("button", { name: "Add" }));
   const field = screen.getByLabelText("Git or GitHub repository");
   const find = screen.getByRole("button", { name: "Find plugins" });
   fireEvent.change(field, { target: { value: ` ${buzz} ` } });
-  fireEvent.click(find);
+  find.focus();
+  await user.click(find);
+  await screen.findByRole("region", { name: "Plugin import preview" });
+  expect(screen.queryByRole("form", { name: "Add from Git" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Browse plugin folder" }),
+  ).toBeNull();
+  const back = screen.getByRole("button", { name: "Back" });
+  await waitFor(() => expect(back).toHaveFocus());
+  await user.click(back);
+  await waitFor(() => expect(find).toHaveFocus());
+  expect(field).toHaveValue(` ${buzz} `);
+  expect(manager.imports?.discard).toHaveBeenCalledWith("preview");
   await waitFor(() => expect(git).toHaveBeenCalledTimes(1));
   expect(git).toHaveBeenLastCalledWith(buzz, "", "dG9rZW4=");
   fireEvent.change(field, { target: { value: "block/plugins" } });
   await waitFor(() => expect(find).toBeEnabled());
-  fireEvent.click(find);
+  await user.click(find);
   await waitFor(() => expect(git).toHaveBeenCalledTimes(2));
   expect(git).toHaveBeenLastCalledWith("block/plugins", "");
 });
@@ -472,17 +485,18 @@ it("replaces Add with an error view and returns to the retained preview for retr
   const back = within(dialog).getByRole("button", { name: "Back" });
   expect(back).toHaveFocus();
   fireEvent.click(back);
-  expect(install).toHaveFocus();
+  const retry = within(dialog).getByRole("button", { name: "Install plugin" });
+  expect(retry).toHaveFocus();
   expect(
     within(dialog).getByRole("region", { name: "Plugin import preview" }),
   ).toBeVisible();
   error = null;
-  fireEvent.click(install);
+  fireEvent.click(retry);
   expect(await within(dialog).findByRole("status")).toHaveTextContent(
     "Retry plugin installed",
   );
   expect(within(dialog).queryByRole("alert")).toBeNull();
-  fireEvent.click(install);
+  fireEvent.click(retry);
   expect(within(dialog).queryByRole("status")).toBeNull();
   error = "Persistence failed";
   finish(false);

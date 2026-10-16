@@ -73,17 +73,37 @@ export function PluginImport({
   const [error, setError] = useState<string | null>(null);
   const browse = useRef<HTMLButtonElement>(null);
   const errorBack = useRef<HTMLButtonElement>(null);
+  const previewBack = useRef<HTMLButtonElement>(null);
+  const sourceTrigger = useRef<HTMLElement | null>(null);
+  const installButton = useRef<HTMLButtonElement>(null);
+  const errorReturnsToBack = useRef(false);
+  useLayoutEffect(() => {
+    if (!open || loading || discarding) return;
+    if (preview) previewBack.current?.focus();
+    else if (sourceTrigger.current) {
+      if (sourceTrigger.current === document.body) browse.current?.focus();
+      else sourceTrigger.current.focus();
+      sourceTrigger.current = null;
+    }
+  }, [open, preview, loading, discarding]);
   const errorTrigger = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
+    if (busy || loading || discarding) return;
     if (error) errorBack.current?.focus();
     else if (errorTrigger.current) {
       if (errorTrigger.current === document.body) browse.current?.focus();
-      else errorTrigger.current.focus();
+      else if (errorTrigger.current.isConnected) errorTrigger.current.focus();
+      else if (errorReturnsToBack.current) previewBack.current?.focus();
+      else (installButton.current ?? previewBack.current)?.focus();
       errorTrigger.current = null;
     }
-  }, [error]);
+  }, [error, busy, loading, discarding]);
   function showError(reason: unknown) {
-    errorTrigger.current = document.activeElement as HTMLElement | null;
+    if (!error) {
+      errorTrigger.current = document.activeElement as HTMLElement | null;
+      errorReturnsToBack.current =
+        document.activeElement === previewBack.current;
+    }
     setError(String(reason));
   }
   const [notice, setNotice] = useState<string | null>(null);
@@ -103,6 +123,7 @@ export function PluginImport({
 
   async function load(operation: () => Promise<ImportPreview | null>) {
     if (pending.current || blocked) return;
+    sourceTrigger.current = document.activeElement as HTMLElement | null;
     pending.current = true;
     const current = lifetime.current;
     setLoading(true);
@@ -135,6 +156,7 @@ export function PluginImport({
       await imports?.discard(preview.token);
       lifetime.current.token = "";
       setPreview(null);
+      setNotice(null);
     } catch (reason) {
       showError(reason);
     } finally {
@@ -235,6 +257,45 @@ export function PluginImport({
             >
               Back
             </Button>
+          ) : preview ? (
+            <>
+              <Button
+                ref={previewBack}
+                type="button"
+                disabled={blocked}
+                onClick={() => void dismiss()}
+              >
+                Back
+              </Button>
+              {candidate && (
+                <Button
+                  ref={installButton}
+                  type="button"
+                  disabled={blocked}
+                  onClick={async () => {
+                    const current = lifetime.current;
+                    setError(null);
+                    setNotice(null);
+                    const success = await plugins.installImport(
+                      preview.token,
+                      candidate.path,
+                    );
+                    if (!current.active) return;
+                    if (success)
+                      setNotice(
+                        `${candidate.manifest.name} installed. Use Back to choose another folder, or close this dialog.`,
+                      );
+                    else
+                      showError(
+                        plugins.snapshot().error ??
+                          "Plugin installation wasn’t confirmed. Check the preview and try again.",
+                      );
+                  }}
+                >
+                  {existing ? "Update plugin" : "Install plugin"}
+                </Button>
+              )}
+            </>
           ) : undefined
         }
         dismissOnOutsideClick
@@ -247,104 +308,113 @@ export function PluginImport({
           </p>
         )}
         <div hidden={!!error}>
-          <div className={styles.columns}>
-            <section
-              aria-label="Add from folder"
-              className={styles.folder}
-              data-dragging={dragging || undefined}
-              onDragOver={(event) => {
-                if (!event.dataTransfer.types.includes("Files")) return;
-                event.preventDefault();
-                event.stopPropagation();
-                event.dataTransfer.dropEffect = blocked ? "none" : "copy";
-                setDragging(!blocked);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setDragging(false);
-                const items = Array.from(event.dataTransfer.items);
-                const entry =
-                  items.length === 1 ? items[0]?.webkitGetAsEntry?.() : null;
-                const current = lifetime.current;
-                void load(async () => {
-                  if (!entry?.isDirectory)
-                    throw new Error("Drop one folder, or choose Browse.");
-                  const upload = await readPluginFolder(entry);
-                  if (!current.active) return null;
-                  const next = await imports.files(upload.source, upload.files);
-                  return next
-                    ? {
-                        ...next,
-                        warnings: [...upload.warnings, ...next.warnings],
-                      }
-                    : null;
-                });
-              }}
-            >
-              <FolderOpenIcon size={32} aria-hidden="true" />
-              <p className="m-0 text-body-sm">Drop a plugin folder here</p>
-              <Button
-                size="sm"
-                ref={browse}
-                aria-label="Browse plugin folder"
-                disabled={blocked}
-                onClick={() => void load(imports.folder)}
-              >
-                Browse
-              </Button>
-            </section>
-            <form
-              aria-label="Add from Git"
-              className={styles.git}
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (repository.trim())
+          <div hidden={!!preview}>
+            <div className={styles.columns}>
+              <section
+                aria-label="Add from folder"
+                className={styles.folder}
+                data-dragging={dragging || undefined}
+                onDragOver={(event) => {
+                  if (!event.dataTransfer.types.includes("Files")) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.dataTransfer.dropEffect = blocked ? "none" : "copy";
+                  setDragging(!blocked);
+                }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDragging(false);
+                  const items = Array.from(event.dataTransfer.items);
+                  const entry =
+                    items.length === 1 ? items[0]?.webkitGetAsEntry?.() : null;
+                  const current = lifetime.current;
                   void load(async () => {
-                    const signed = await authorizeGit?.(repository);
-                    return signed
-                      ? imports.git(signed.repository, reference, signed.token)
-                      : imports.git(repository, reference);
+                    if (!entry?.isDirectory)
+                      throw new Error("Drop one folder, or choose Browse.");
+                    const upload = await readPluginFolder(entry);
+                    if (!current.active) return null;
+                    const next = await imports.files(
+                      upload.source,
+                      upload.files,
+                    );
+                    return next
+                      ? {
+                          ...next,
+                          warnings: [...upload.warnings, ...next.warnings],
+                        }
+                      : null;
                   });
-              }}
-            >
-              <SettingsGroup layout="form">
-                <Field label="Git or GitHub repository">
-                  <Input
-                    required
-                    value={repository}
-                    disabled={blocked}
-                    placeholder="https://github.com/owner/repository"
-                    onChange={(event) => setRepository(event.target.value)}
-                  />
-                </Field>
-                <Field label="Branch or tag (optional)">
-                  <Input
-                    value={reference}
-                    disabled={blocked}
-                    placeholder="Repository default"
-                    onChange={(event) => setReference(event.target.value)}
-                  />
-                </Field>
-                <p className="m-0 text-caption text-muted">
-                  HTTPS or SSH; GitHub owner/repository also works. SSH uses
-                  your agent and known hosts. Password prompts and credential
-                  helpers are not used. Buzz git repositories in this community
-                  sign in with your account.
-                </p>
-                <div className="justify-self-start">
-                  <Button
-                    type="submit"
-                    size="sm"
-                    aria-label="Find plugins"
-                    disabled={blocked || !repository.trim()}
-                  >
-                    Find
-                  </Button>
-                </div>
-              </SettingsGroup>
-            </form>
+                }}
+              >
+                <FolderOpenIcon size={32} aria-hidden="true" />
+                <p className="m-0 text-body-sm">Drop a plugin folder here</p>
+                <Button
+                  size="sm"
+                  ref={browse}
+                  aria-label="Browse plugin folder"
+                  disabled={blocked}
+                  onClick={() => void load(imports.folder)}
+                >
+                  Browse
+                </Button>
+              </section>
+              <form
+                aria-label="Add from Git"
+                className={styles.git}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (repository.trim())
+                    void load(async () => {
+                      const signed = await authorizeGit?.(repository);
+                      return signed
+                        ? imports.git(
+                            signed.repository,
+                            reference,
+                            signed.token,
+                          )
+                        : imports.git(repository, reference);
+                    });
+                }}
+              >
+                <SettingsGroup layout="form">
+                  <Field label="Git or GitHub repository">
+                    <Input
+                      required
+                      value={repository}
+                      disabled={blocked}
+                      placeholder="https://github.com/owner/repository"
+                      onChange={(event) => setRepository(event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Branch or tag (optional)">
+                    <Input
+                      value={reference}
+                      disabled={blocked}
+                      placeholder="Repository default"
+                      onChange={(event) => setReference(event.target.value)}
+                    />
+                  </Field>
+                  <p className="m-0 text-caption text-muted">
+                    HTTPS or SSH; GitHub owner/repository also works. SSH uses
+                    your agent and known hosts. Password prompts and credential
+                    helpers are not used. Buzz git repositories in this
+                    community sign in with your account.
+                  </p>
+                  <div className="justify-self-start">
+                    <Button
+                      type="submit"
+                      size="sm"
+                      aria-label="Find plugins"
+                      disabled={blocked || !repository.trim()}
+                    >
+                      Find
+                    </Button>
+                  </div>
+                </SettingsGroup>
+              </form>
+            </div>
           </div>
           {loading && (
             <p role="status">
@@ -353,7 +423,7 @@ export function PluginImport({
           )}
           {notice && <p role="status">{notice}</p>}
           {preview && (
-            <section aria-label="Plugin import preview" className="mt-4">
+            <section aria-label="Plugin import preview">
               <SettingsGroup layout="form">
                 <div className="min-w-0 text-body-sm">
                   <p className="m-0 break-all font-medium">{preview.source}</p>
@@ -467,42 +537,6 @@ export function PluginImport({
                       : "This plugin starts off. Turn it on in the list when you’re ready."}
                   </p>
                 )}
-                <div className="flex flex-wrap gap-2">
-                  {candidate && (
-                    <Button
-                      type="button"
-                      disabled={blocked}
-                      onClick={async () => {
-                        const current = lifetime.current;
-                        setError(null);
-                        setNotice(null);
-                        const success = await plugins.installImport(
-                          preview.token,
-                          candidate.path,
-                        );
-                        if (!current.active) return;
-                        if (success)
-                          setNotice(
-                            `${candidate.manifest.name} installed. You can choose another folder or close this preview.`,
-                          );
-                        else
-                          showError(
-                            plugins.snapshot().error ??
-                              "Plugin installation wasn’t confirmed. Check the preview and try again.",
-                          );
-                      }}
-                    >
-                      {existing ? "Update plugin" : "Install plugin"}
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    disabled={blocked}
-                    onClick={() => void dismiss()}
-                  >
-                    Close preview
-                  </Button>
-                </div>
               </SettingsGroup>
             </section>
           )}

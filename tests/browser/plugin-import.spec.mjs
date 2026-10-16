@@ -440,7 +440,7 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
     page.getByText(/It stays on and may run immediately/),
   ).toBeVisible();
   await expect(button(page, "Update plugin")).toBeVisible();
-  await button(page, "Close preview").click();
+  await button(page, "Back").click();
   await page.getByLabel("Git or GitHub repository").fill("example/plugins");
   await page.getByLabel("Branch or tag (optional)").fill("feature/plugins");
   await button(page, "Find plugins").click();
@@ -451,7 +451,14 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
         window.importCalls.find((c) => c.command === "plugin_import_git").args,
     ),
   ).toEqual({ repository: "example/plugins", reference: "feature/plugins" });
-  await button(page, "Close preview").click();
+  await button(page, "Back").click();
+  await expect(button(page, "Find plugins")).toBeFocused();
+  await expect(page.getByLabel("Git or GitHub repository")).toHaveValue(
+    "example/plugins",
+  );
+  await expect(page.getByLabel("Branch or tag (optional)")).toHaveValue(
+    "feature/plugins",
+  );
   await page.getByLabel("Git or GitHub repository").fill("bad");
   await button(page, "Find plugins").click();
   await expect(
@@ -593,6 +600,27 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await button(page, "Add").click();
   await button(page, "Browse plugin folder").click();
   const dialog = page.getByRole("dialog", { name: "Add a plugin" });
+  await expect(
+    dialog.getByRole("region", { name: "Plugin import preview" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("region", { name: "Add from folder" }),
+  ).toBeHidden();
+  await expect(dialog.getByRole("form", { name: "Add from Git" })).toBeHidden();
+  await expect(
+    dialog.getByRole("button", { name: "Back", exact: true }),
+  ).toBeFocused();
+  for (const [width, mode] of [
+    [900, "light"],
+    [480, "dark"],
+  ]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.emulateMedia({ colorScheme: mode });
+    await expect(page.locator("html")).toHaveAttribute("data-color-mode", mode);
+    await dialog.screenshot({
+      path: info.outputPath(`plugin-preview-${mode}.png`),
+    });
+  }
   await page.evaluate(() => {
     window.importInstallError =
       "Publisher mismatch. Choose a package from the installed publisher.";
