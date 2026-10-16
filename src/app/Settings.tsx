@@ -960,49 +960,62 @@ export function Settings({
                       />
                     )}
                   </div>
-                  <div
-                    className={styles.pluginCategories}
-                    role="tabpanel"
-                    id={`plugin-results-${pluginFilter}`}
-                    aria-labelledby={`plugin-results-${pluginFilter}-tab`}
-                  >
-                    {catalog && pluginGroups.length === 0 && (
-                      <EmptyState
-                        icon={<SquaresFourIcon size={24} />}
-                        title={
-                          pluginFiltersActive
-                            ? coreGroup
-                              ? "No other plugins match"
-                              : "No plugins match"
-                            : coreGroup
-                              ? "No other plugins"
-                              : "No plugins yet"
+                  {catalog &&
+                    (["all", "essentials"] as const).map((filter) => (
+                      <div
+                        key={filter}
+                        hidden={filter !== pluginFilter}
+                        className={
+                          filter === pluginFilter
+                            ? styles.pluginCategories
+                            : undefined
                         }
-                        description={
-                          pluginFiltersActive
-                            ? "Try another search or show all plugins."
-                            : "Additional plugins will appear here."
-                        }
-                        action={
-                          pluginFiltersActive ? (
-                            <Button
-                              variant="subtle"
-                              onClick={() => {
-                                setPluginQuery("");
-                                setPluginFilter("all");
-                                pluginSearch.current?.focus();
-                              }}
-                            >
-                              Clear filters
-                            </Button>
-                          ) : undefined
-                        }
-                      />
-                    )}
-                    <AnimatePresence initial={false} mode="popLayout">
-                      {pluginGroups.map(renderPluginGroup)}
-                    </AnimatePresence>
-                  </div>
+                        role="tabpanel"
+                        id={`plugin-results-${filter}`}
+                        aria-labelledby={`plugin-results-${filter}-tab`}
+                      >
+                        {filter === pluginFilter && (
+                          <>
+                            {pluginGroups.length === 0 && (
+                              <EmptyState
+                                icon={<SquaresFourIcon size={24} />}
+                                title={
+                                  pluginFiltersActive
+                                    ? coreGroup
+                                      ? "No other plugins match"
+                                      : "No plugins match"
+                                    : coreGroup
+                                      ? "No other plugins"
+                                      : "No plugins yet"
+                                }
+                                description={
+                                  pluginFiltersActive
+                                    ? "Try another search or show all plugins."
+                                    : "Additional plugins will appear here."
+                                }
+                                action={
+                                  pluginFiltersActive ? (
+                                    <Button
+                                      variant="subtle"
+                                      onClick={() => {
+                                        setPluginQuery("");
+                                        setPluginFilter("all");
+                                        pluginSearch.current?.focus();
+                                      }}
+                                    >
+                                      Clear filters
+                                    </Button>
+                                  ) : undefined
+                                }
+                              />
+                            )}
+                            <AnimatePresence initial={false} mode="popLayout">
+                              {pluginGroups.map(renderPluginGroup)}
+                            </AnimatePresence>
+                          </>
+                        )}
+                      </div>
+                    ))}
                 </div>
               </section>
             </div>

@@ -249,6 +249,13 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
 
   fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
   const content = screen.getByRole("region", { name: "Plugins" });
+  for (const tab of within(content).getAllByRole("tab")) {
+    const panel = document.getElementById(
+      tab.getAttribute("aria-controls") ?? "",
+    );
+    expect(panel).toHaveAttribute("role", "tabpanel");
+    expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+  }
   expect(
     within(content)
       .getAllByRole("heading", { level: 3 })
@@ -757,7 +764,7 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
     ],
   };
   act(publish);
-  const content = screen.getByRole("tabpanel");
+  let content = screen.getByRole("tabpanel");
   const featured = screen.getByRole("region", { name: "Core plugins" });
   await waitFor(() => expect(featured).toBeVisible());
   expect(content).not.toContainElement(featured);
@@ -803,6 +810,7 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
     within(featured).getByRole("button", { name: "Required" }),
   ).toBeDisabled();
   fireEvent.click(screen.getByRole("tab", { name: "Essentials" }));
+  content = screen.getByRole("tabpanel");
   expect(within(featured).queryAllByRole("article")).toHaveLength(3);
   expect(within(content).queryAllByRole("article")).toHaveLength(0);
   const search = screen.getByRole("searchbox", { name: "Search plugins" });
@@ -819,6 +827,7 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
   fireEvent.click(screen.getByRole("button", { name: "Close plugin details" }));
   expect(trigger).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  content = screen.getByRole("tabpanel");
   snapshot.configuration.catalog = {
     ...snapshot.configuration.catalog,
     plugins: core,
@@ -826,6 +835,14 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
   act(publish);
   expect(within(content).getByText("No other plugins")).toBeVisible();
   expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+});
+
+it("omits filter tab semantics when the catalog is unavailable", () => {
+  const { cards } = registry([]);
+  render(<Settings {...host} cards={cards} />);
+  fireEvent.click(screen.getByRole("button", { name: "Plugins" }));
+  expect(screen.queryByRole("tablist", { name: "Plugin filters" })).toBeNull();
+  expect(screen.queryByRole("tabpanel", { hidden: true })).toBeNull();
 });
 
 it("keeps external Essentials tags from granting curated markers or priority", () => {
