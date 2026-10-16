@@ -138,7 +138,7 @@ preferences relocated it during the transaction. Read actions require
 The packaged host decodes verified self-encrypted sidebar records and signs
 only validated sidebar coordinates; it uses its signed HTTP writer and confirms
 via readback. Sidebar records and channel recipes share kind 30078, so that
-writer selects the admission contract by the event's `d` coordinate: the four
+writer selects the admission contract by the event's `d` coordinate: the five
 sidebar coordinates must match what the sidebar signer produces, and every
 other coordinate must satisfy the recipe contract.
 
@@ -177,8 +177,9 @@ are available; navigation history does not own them. Search lives in the top-bar
 palette; legacy sidebar filters are ignored. Each section's ellipsis menu offers
 **Filter → All, Unreads, Active in last 30 days**. Unreads shows channels with observed or
 manually marked unread messages or unread thread activity; Active in last 30 days uses verified
-activity within the last 30 days. These filters are local view intent, scoped to
-the community and viewer, and leave saved sorting and section membership unchanged.
+activity within the last 30 days. These filters are encrypted account preferences on the current relay, using a
+separate kind-30078 `channel-filter` record. They leave saved sorting and section
+membership unchanged; earlier device-only filter choices are ignored, not automatically published.
 The currently open channel remains visible in its section regardless of its filter,
 however it was opened. Navigating away removes that exception. **View All**
 appears first in the section menu only when Unreads or Active in last 30 days is selected. It
@@ -232,7 +233,19 @@ conversation content and unmount when leaving Messages.
 Each sidebar section can independently select **A–Z** (the default) or **Recent**.
 The development broker and packaged native host save these choices in the desktop-compatible encrypted
 kind-30078 `channel-sort` record: `{ version: 1, groups: { ... }, meta: { v: 1, g: { ... } } }`.
-A–Z writes a null register and removes that group's legacy override. Sections use
+A–Z writes a null register and removes that group's legacy override.
+Filters use the same bounded group-register shape in a separate `channel-filter`
+coordinate: Unreads is `unreads`, Active in last 30 days is `active`, and All
+writes a null reset tombstone. Keeping this record separate leaves older clients'
+sort records unchanged. Both hosts validate, encrypt, publish and confirm filter
+writes through the existing preference queue. The UI projects pending choices,
+rolls back a failed save, and offers explicit Retry/Dismiss; a confirmed full read
+is required before writes. Removing a saved section resets its filter before
+removing the section. A saved startup copy is display-only until relay reads recover.
+Like sorting, this is whole-record last-write-wins; another client sees changes
+when it loads or refreshes preferences, without a new automatic reconciliation loop.
+
+Sections use
 `meta: { v: 1, s: { ... }, a: { ... } }`: per-section name/icon/order/live registers
 and per-channel assignments. Upgraded readers project metadata as authoritative;
 writers regenerate the legacy fields and preserve unrelated registers, including
@@ -253,7 +266,7 @@ Actual rewrites still reject
 out-of-policy retained values rather than dropping or truncating them.
 Unsupported/malformed metadata fails closed, including unknown fields;
 this is not general forward-schema salvage. Live projection caps remain 100
-sections, 1,000 assignments and 104 sort overrides; retained tombstones are bounded
+sections, 1,000 assignments and 104 overrides per section-choice record; retained tombstones are bounded
 by the existing 128 KiB plaintext budget, not live counts. Native signing/admission
 additionally requires legacy fields to equal the validated register projection.
 

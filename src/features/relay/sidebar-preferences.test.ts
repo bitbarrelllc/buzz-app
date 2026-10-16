@@ -134,6 +134,12 @@ it("reads legacy preferences through the production session, transport, and boun
         "#d": ["channel-sort"],
         limit: 1,
       },
+      {
+        kinds: [30078],
+        authors: [viewer.pubkey],
+        "#d": ["channel-filter"],
+        limit: 1,
+      },
     ]);
     return Response.json(result);
   });
@@ -239,7 +245,7 @@ it("reads legacy preferences through the production session, transport, and boun
     ])
       expect((await post(invalid)).status).toBe(400);
     expect((await post(records, "https://evil.test")).status).toBe(403);
-    expect((await post("x".repeat(768 * 1024))).status).toBe(413);
+    expect((await post("x".repeat(960 * 1024))).status).toBe(413);
     expect(
       (await post(records, base, "unregistered/sidebar-preferences")).status,
     ).toBe(400);
@@ -279,7 +285,7 @@ it("reads legacy preferences through the production session, transport, and boun
       await aborted;
       // Oversize and successful completion both return their slot.
       expect(
-        await (await upload(JSON.stringify("x".repeat(768 * 1024)))).response,
+        await (await upload(JSON.stringify("x".repeat(960 * 1024)))).response,
       ).toBe(413);
       expect(await (await upload("[]")).response).toBe(200);
       const expired = held
@@ -425,6 +431,7 @@ it.each([false, true])(
     const decode = vi.fn(async () => expected);
     const owner = createRelaySession({
       ...wire.transport,
+
       decodeSidebarPreferences: decode,
     });
     try {
@@ -561,6 +568,7 @@ it.each(["access", "caller", "dispose", "cache", "deadline"] as const)(
     const decode = vi.fn(async () => expected);
     const owner = createRelaySession({
       ...wire.transport,
+
       decodeSidebarPreferences: decode,
       subscribe(callbacks) {
         live = callbacks;
@@ -621,6 +629,7 @@ it.each([
     const decode = vi.fn(async () => expected);
     const owner = createRelaySession({
       ...wire.transport,
+
       decodeSidebarPreferences: decode,
       subscribe(callbacks) {
         live = callbacks;
@@ -660,3 +669,36 @@ it.each([
     }
   },
 );
+
+it("admits only the complete bounded sidebar batch beyond the normal reader limit", async () => {
+  const { SIDEBAR_COORDINATES, isSidebarPreferencesBatch } = await import(
+    "./sidebar-preferences"
+  );
+  const filters = SIDEBAR_COORDINATES.map((coordinate) => ({
+    kinds: [30078],
+    authors: ["viewer"],
+    "#d": [coordinate],
+    limit: 1,
+  }));
+  expect(isSidebarPreferencesBatch(filters)).toBe(true);
+  expect(isSidebarPreferencesBatch(filters.slice(1))).toBe(false);
+  expect(
+    isSidebarPreferencesBatch([
+      ...filters.slice(0, 4),
+      filters[0] as (typeof filters)[number],
+    ]),
+  ).toBe(false);
+  for (const changed of [
+    { limit: 2 },
+    { kinds: [9] },
+    { authors: ["other"] },
+    { "#d": ["unknown"] },
+    { since: 1 },
+  ])
+    expect(
+      isSidebarPreferencesBatch([
+        { ...(filters[0] as (typeof filters)[number]), ...changed },
+        ...filters.slice(1),
+      ]),
+    ).toBe(false);
+});

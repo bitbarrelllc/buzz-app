@@ -1,11 +1,9 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { readView, writeView } from "../../shared/view-state";
-import type { SidebarFilter } from "./useSidebarFilters";
 
 type SidebarView = {
   collapsed: string[];
   scrollTop: number;
-  sectionFilters: Record<string, SidebarFilter>;
   /** The destination whose sidebar entry the saved position shows. */
   location?: string | undefined;
 };
@@ -15,11 +13,6 @@ function restore(scope: string): SidebarView {
   const saved =
     raw && typeof raw === "object" ? (raw as Partial<SidebarView>) : {};
   return {
-    sectionFilters: Object.fromEntries(
-      Object.entries(saved.sectionFilters ?? {}).filter(
-        ([, mode]) => mode === "unreads" || mode === "active",
-      ),
-    ),
     collapsed: Array.isArray(saved.collapsed)
       ? saved.collapsed.filter((key): key is string => typeof key === "string")
       : [],
@@ -201,13 +194,6 @@ export function useSidebarView(
   return {
     list,
     collapsed: view.collapsed,
-    filters: view.sectionFilters,
-    filter: (key: string, mode: SidebarFilter) => {
-      const sectionFilters = { ...intent.current.sectionFilters };
-      if (mode === "all") delete sectionFilters[key];
-      else sectionFilters[key] = mode;
-      update({ ...intent.current, sectionFilters });
-    },
     toggle,
   };
 }

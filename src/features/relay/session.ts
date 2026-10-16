@@ -1400,6 +1400,23 @@ export function createRelaySession(
             )
         : undefined;
     })(),
+    undefined,
+    (() => {
+      const write = transport?.writeSidebarFilter;
+      return write
+        ? (group, mode, sectionIds, signal) =>
+            write(
+              group,
+              mode,
+              sectionIds,
+              AbortSignal.any([
+                lifetime.signal,
+                AbortSignal.timeout(20_000),
+                signal,
+              ]),
+            )
+        : undefined;
+    })(),
   );
   let meHead: string | undefined;
   const stopMeGroups = channelKit.capability.subscribe(() => {

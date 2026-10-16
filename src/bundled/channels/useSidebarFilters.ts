@@ -8,7 +8,8 @@ import {
 import type { UnreadCapability } from "../../features/relay/unread";
 import type { sidebarSections } from "./sidebar-sections";
 
-export type SidebarFilter = "all" | "unreads" | "active";
+export type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
+import type { SidebarFilterMode as SidebarFilter } from "../../features/relay/sidebar-preferences";
 export const SIDEBAR_ACTIVE_WINDOW = 30 * 24 * 60 * 60 * 1000;
 
 /** Filter only the existing section roster; the current destination always stays. */

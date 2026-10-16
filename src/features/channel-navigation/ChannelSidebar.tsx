@@ -521,7 +521,12 @@ function ReadySidebar({
     : [];
   const filteredSections = useSidebarFilters(
     sections,
-    sidebar.filters,
+    Object.fromEntries(
+      Object.entries(preferences.data?.filters ?? {}).map(([key, mode]) => [
+        key.startsWith("section:") ? `group:${key.slice(8)}` : key,
+        mode,
+      ]),
+    ),
     current?.id,
     queries.unread,
   );
@@ -596,6 +601,18 @@ function ReadySidebar({
   const setSectionSort = (key: string, mode: "alpha" | "recent") => {
     void preferences
       .setSort(
+        key.startsWith("group:") ? `section:${key.slice(6)}` : key,
+        mode,
+        preferences.data?.sections.map((section) => section.id) ?? [],
+      )
+      .catch(() => {});
+  };
+  const setSectionFilter = (
+    key: string,
+    mode: "all" | "unreads" | "active",
+  ) => {
+    void preferences
+      .setFilter(
         key.startsWith("group:") ? `section:${key.slice(6)}` : key,
         mode,
         preferences.data?.sections.map((section) => section.id) ?? [],
@@ -1148,10 +1165,20 @@ function ReadySidebar({
                   open={!sidebar.collapsed.includes(section.key)}
                   onToggle={(open) => sidebar.toggle(section.key, open)}
                   channelCount={section.allRows.length}
-                  filter={{
-                    value: sidebar.filters[section.key] ?? "all",
-                    change: (mode) => sidebar.filter(section.key, mode),
-                  }}
+                  filter={
+                    preferences.data
+                      ? {
+                          value:
+                            preferences.data.filters?.[
+                              section.key.startsWith("group:")
+                                ? `section:${section.key.slice(6)}`
+                                : section.key
+                            ] ?? "all",
+                          disabled: !preferences.filterWritable,
+                          change: (mode) => setSectionFilter(section.key, mode),
+                        }
+                      : undefined
+                  }
                   channels={{
                     rows: section.hiddenRows,
                     selected: current?.id,
@@ -1224,7 +1251,7 @@ function ReadySidebar({
                       : undefined
                   }
                 >
-                  {!section.rows.length && sidebar.filters[section.key] && (
+                  {!section.rows.length && section.hiddenRows.length > 0 && (
                     <p className={styles.empty}>
                       No channels match this filter.
                     </p>
@@ -1335,6 +1362,33 @@ function ReadySidebar({
               <button
                 type="button"
                 onClick={() => preferences.dismissSortError(group)}
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
+          {preferences.filterErrors?.map(({ group, mode, error }) => (
+            <div key={group} className={styles.preferenceNotice} role="alert">
+              <p>
+                Couldn’t save the filter for{" "}
+                {sections.find(
+                  ({ key }) =>
+                    key ===
+                    (group.startsWith("section:")
+                      ? `group:${group.slice(8)}`
+                      : group),
+                )?.title ?? "this section"}
+                . {error}
+              </p>
+              <button
+                type="button"
+                onClick={() => setSectionFilter(group, mode)}
+              >
+                Retry filter
+              </button>
+              <button
+                type="button"
+                onClick={() => preferences.dismissFilterError(group)}
               >
                 Dismiss
               </button>

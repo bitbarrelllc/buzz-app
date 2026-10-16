@@ -16,6 +16,7 @@ import { createSidebarPreferencesStore } from "../relay/sidebar-preferences-stor
 import type {
   SidebarGroups,
   SidebarPreferences,
+  SidebarFilterMode,
 } from "../relay/sidebar-preferences";
 import type { RelayData, RelaySnapshot } from "../relay/service";
 import type { ChannelList } from "../relay/contracts";
@@ -196,9 +197,34 @@ function fixture(
   return { view, navigator, snapshot, list, session, publish };
 }
 
-it("preserves local section filters across navigation and remount, and offers only hidden channels", async () => {
+it("uses relay section filters across navigation and remount, and offers only hidden channels", async () => {
   const user = userEvent.setup();
-  const h = fixture();
+  let filters: Record<string, SidebarFilterMode> = {};
+  const preferences = createSidebarPreferencesStore(
+    async () => ({
+      sections: [],
+      assignments: {},
+      starred: [],
+      muted: [],
+      filters,
+    }),
+    true,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    async (group, mode) => {
+      filters = mode === "all" ? {} : { [group]: mode };
+      return filters;
+    },
+  );
+  const h = fixture(preferences.queries);
   const mounted = render(h.view("alpha"));
   await screen.findByRole("button", { name: "gamma" });
   await user.click(
@@ -232,9 +258,10 @@ it("preserves local section filters across navigation and remount, and offers on
   mounted.rerender(h.view("not-in-this-section"));
   expect(screen.getByText("No channels match this filter.")).toBeVisible();
   mounted.unmount();
+  expect(filters).toEqual({ channels: "unreads" });
   expect(
     readView("https://relay.test:viewer", "channel-sidebar", {}),
-  ).toMatchObject({ sectionFilters: { channels: "unreads" } });
+  ).not.toHaveProperty("sectionFilters");
   const restored = render(h.view("gamma"));
   expect(await screen.findByRole("button", { name: "gamma" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "beta" })).toBeNull();
@@ -255,10 +282,12 @@ it("preserves local section filters across navigation and remount, and offers on
   restored.unmount();
   expect(
     readView("https://relay.test:viewer", "channel-sidebar", {}),
-  ).toMatchObject({ sectionFilters: {} });
+  ).not.toHaveProperty("sectionFilters");
+  expect(filters).toEqual({});
+  preferences.dispose();
 });
 
-it("restores only supported section filters without reusing legacy filter state", async () => {
+it("ignores local and legacy filter state", async () => {
   writeView("https://relay.test:viewer", "channel-sidebar", {
     filter: "unreads",
     sectionFilters: { channels: "bogus", dms: null },

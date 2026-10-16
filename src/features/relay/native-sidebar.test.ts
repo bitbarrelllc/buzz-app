@@ -18,7 +18,7 @@ const records = new Map<string, ReturnType<typeof finalizeEvent>>();
 const defaultValue = (coordinate: string) =>
   coordinate === "channel-sections"
     ? { version: 1, sections: [], assignments: {} }
-    : coordinate === "channel-sort"
+    : coordinate === "channel-sort" || coordinate === "channel-filter"
       ? { version: 1, groups: {} }
       : { version: 1, channels: {} };
 function signedRecord(
@@ -54,6 +54,7 @@ function decode(events: ReturnType<typeof finalizeEvent>[]) {
         "channel-stars",
         "channel-mutes",
         "channel-sort",
+        "channel-filter",
       ].includes(coordinate)
     )
       throw new Error("Invalid sidebar record");
@@ -782,3 +783,44 @@ it.each([
       });
   },
 );
+
+it("uses the native filter signer and confirmed writer without changing sort", async () => {
+  const transport = await connectNativeTransport(community);
+  await transport.writeSidebarSort?.("channels", "recent", [], signal);
+  const sort = records.get("channel-sort");
+  expect(
+    await transport.writeSidebarFilter?.(
+      "section:work",
+      "unreads",
+      ["work"],
+      signal,
+    ),
+  ).toEqual({ "section:work": "unreads" });
+  expect(
+    await transport.writeSidebarFilter?.(
+      "channels",
+      "active",
+      ["work"],
+      signal,
+    ),
+  ).toEqual({ "section:work": "unreads", channels: "active" });
+  expect(
+    await transport.writeSidebarFilter?.(
+      "section:work",
+      "all",
+      ["work"],
+      signal,
+    ),
+  ).toEqual({ channels: "active" });
+  expect(records.get("channel-sort")).toEqual(sort);
+  const record = records.get("channel-filter");
+  expect(record).toBeDefined();
+  expect(decode(record ? [record] : [])["channel-filter"]).toMatchObject({
+    meta: {
+      g: { "section:work": [expect.any(Number), expect.any(String), null] },
+    },
+  });
+  await expect(
+    transport.writeSidebarFilter?.("section:missing", "active", [], signal),
+  ).rejects.toThrow("Invalid sidebar filter intent");
+});

@@ -3,6 +3,7 @@ import {
   type SidebarAssignmentIntent,
   type SidebarGroups,
   type SidebarSortMode,
+  type SidebarFilterMode,
 } from "./sidebar-preferences.ts";
 import {
   editSidebarRecord,
@@ -98,6 +99,17 @@ export function validSidebarSort(
   );
 }
 
+export function validSidebarFilter(
+  group: string,
+  mode: SidebarFilterMode,
+  sectionIds: readonly string[],
+): boolean {
+  return (
+    ["all", "unreads", "active"].includes(mode) &&
+    validSidebarSort(group, "alpha", sectionIds)
+  );
+}
+
 // Pure edits of validated, projected heads. Hosts retain validation, signing,
 // publication, readback and serialization; these functions never perform I/O.
 export function editSidebarAssignment(
@@ -151,6 +163,22 @@ export function editSidebarSort(
     current,
     createdAt,
     [[["g", group], mode === "alpha" ? null : mode]],
+    now,
+  );
+}
+
+export function editSidebarFilter(
+  current: Record<string, unknown>,
+  createdAt: number,
+  group: string,
+  mode: SidebarFilterMode,
+  now = Date.now(),
+): Record<string, unknown> {
+  return editSidebarRecord(
+    "channel-filter",
+    current,
+    createdAt,
+    [[["g", group], mode === "all" ? null : mode]],
     now,
   );
 }

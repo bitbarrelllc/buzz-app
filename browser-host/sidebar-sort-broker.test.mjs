@@ -221,3 +221,62 @@ it("refuses invalid sort intent, excessive bodies and foreign origins before ups
   );
   expect(h.calls).toEqual([]);
 });
+
+it("persists filters through the real broker transport, preserves sort, confirms reset and rejects unsafe requests", async () => {
+  const h = await harness();
+  const signal = new AbortController().signal;
+  await h.transport.writeSidebarSort("channels", "recent", [], signal);
+  const savedSort = h.heads.get("channel-sort");
+  expect(
+    await h.transport.writeSidebarFilter(
+      "section:work",
+      "unreads",
+      ["work"],
+      signal,
+    ),
+  ).toEqual({ "section:work": "unreads" });
+  expect(
+    await h.transport.writeSidebarFilter(
+      "channels",
+      "active",
+      ["work"],
+      signal,
+    ),
+  ).toEqual({ "section:work": "unreads", channels: "active" });
+  expect(h.heads.get("channel-sort")).toEqual(savedSort);
+  expect(
+    await h.transport.writeSidebarFilter(
+      "section:work",
+      "all",
+      ["work"],
+      signal,
+    ),
+  ).toEqual({ channels: "active" });
+  for (const call of h.calls.filter(
+    ({ body }) =>
+      Array.isArray(body) && body[0]?.["#d"]?.[0] === "channel-filter",
+  ))
+    expect(call.body[0].consistency).toBe("strong");
+  expect(
+    (
+      await h.post(
+        { group: "channels", mode: "recent", sectionIds: [] },
+        undefined,
+        "sidebar-filter",
+      )
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await h.post(
+        { group: "channels", mode: "all", sectionIds: [] },
+        "https://evil.test",
+        "sidebar-filter",
+      )
+    ).status,
+  ).toBe(403);
+  h.conflict();
+  await expect(
+    h.transport.writeSidebarFilter("channels", "unreads", [], signal),
+  ).rejects.toThrow("Relay request failed (502)");
+});

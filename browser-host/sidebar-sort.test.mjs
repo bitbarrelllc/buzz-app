@@ -6,7 +6,12 @@ import {
   nip44,
   verifyEvent,
 } from "nostr-tools";
-import { prepareSidebarSort, mutateSidebarSort } from "./sidebar-sort.mjs";
+import {
+  prepareSidebarSort,
+  mutateSidebarSort,
+  prepareSidebarFilter,
+  mutateSidebarFilter,
+} from "./sidebar-sort.mjs";
 import { projectSidebarPreferences } from "../src/features/relay/sidebar-preferences.ts";
 function harness() {
   const secret = generateSecretKey(),
@@ -267,4 +272,62 @@ it("edits the authoritative metadata, preserves tombstones and confirms projecte
     ),
   ).rejects.toThrow("metadata");
   expect(publish).not.toHaveBeenCalled();
+});
+
+it("stores independent filters, preserves other registers and tombstones All, and rejects untrusted filter heads", async () => {
+  const h = harness();
+  const choice = {
+    group: "section:work",
+    mode: "unreads",
+    sectionIds: ["work"],
+  };
+  const draft = prepareSidebarFilter([], choice, h.secret, 100_000);
+  expect(draft.groups).toEqual({ "section:work": "unreads" });
+  expect(draft.event.tags).toEqual([
+    ["d", "channel-filter"],
+    ["t", "channel-filter"],
+  ]);
+  const other = prepareSidebarFilter(
+    [draft.event],
+    { ...choice, group: "channels", mode: "active" },
+    h.secret,
+  );
+  const reset = prepareSidebarFilter(
+    [other.event],
+    { ...choice, mode: "all" },
+    h.secret,
+  );
+  expect(reset.groups).toEqual({ channels: "active" });
+  expect(h.decode(reset.event).meta.g["section:work"][2]).toBeNull();
+  expect(h.decode(reset.event).meta.g.channels).toEqual(
+    h.decode(other.event).meta.g.channels,
+  );
+  expect(
+    prepareSidebarFilter([reset.event], { ...choice, mode: "all" }, h.secret)
+      .event,
+  ).toBeUndefined();
+  expect(() =>
+    prepareSidebarFilter(
+      [h.encrypt({ version: 1, groups: {} })],
+      choice,
+      h.secret,
+    ),
+  ).toThrow("Invalid sidebar filter head");
+  const invalid = h.encrypt(
+    { version: 1, groups: { channels: "future" } },
+    { tags: [["d", "channel-filter"]] },
+  );
+  expect(() => prepareSidebarFilter([invalid], choice, h.secret)).toThrow(
+    "Invalid sidebar filter mode",
+  );
+  const read = vi.fn(async () => []),
+    publish = vi.fn();
+  await expect(
+    mutateSidebarFilter({ ...choice, mode: "recent" }, h.secret, read, publish),
+  ).rejects.toThrow("Invalid sidebar filter intent");
+  expect(read).not.toHaveBeenCalled();
+  await expect(
+    mutateSidebarFilter(choice, h.secret, read, publish),
+  ).rejects.toThrow("changed on another device");
+  expect(publish).toHaveBeenCalledOnce();
 });

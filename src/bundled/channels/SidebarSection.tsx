@@ -91,7 +91,11 @@ export function SidebarSection({
       }
     | undefined;
   filter?:
-    | { value: SidebarFilter; change: (mode: SidebarFilter) => void }
+    | {
+        value: SidebarFilter;
+        disabled?: boolean;
+        change: (mode: SidebarFilter) => void;
+      }
     | undefined;
   channels?:
     | {
@@ -258,7 +262,7 @@ export function SidebarSection({
               )}
               {filter && (
                 <MenuSubmenu>
-                  <MenuSubmenuTrigger>
+                  <MenuSubmenuTrigger disabled={filter.disabled}>
                     <MenuIcon>
                       <SlidersHorizontalIcon size={14} />
                     </MenuIcon>
