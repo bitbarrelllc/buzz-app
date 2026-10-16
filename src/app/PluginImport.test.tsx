@@ -410,7 +410,7 @@ it("signs in only to repositories the community authorizes", async () => {
   expect(git).toHaveBeenLastCalledWith("block/plugins", "");
 });
 
-it("keeps installation errors and retry inside the open dialog and clears stale success", async () => {
+it("replaces Add with an error view and returns to the retained preview for retry", async () => {
   const preview: ImportPreview = {
     token: "retry-preview",
     source: "test",
@@ -458,10 +458,21 @@ it("keeps installation errors and retry inside the open dialog and clears stale 
   const install = await within(dialog).findByRole("button", {
     name: "Install plugin",
   });
+  install.focus();
   fireEvent.click(install);
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(
     "Publisher mismatch",
   );
+  expect(
+    within(dialog).queryByRole("region", { name: "Plugin import preview" }),
+  ).toBeNull();
+  expect(
+    within(dialog).queryByRole("button", { name: "Browse plugin folder" }),
+  ).toBeNull();
+  const back = within(dialog).getByRole("button", { name: "Back" });
+  expect(back).toHaveFocus();
+  fireEvent.click(back);
+  expect(install).toHaveFocus();
   expect(
     within(dialog).getByRole("region", { name: "Plugin import preview" }),
   ).toBeVisible();
@@ -555,4 +566,42 @@ it("shows a rejected dropped candidate's warning beside a usable sibling preview
     { path: "good/manifest.json", text: "{}" },
     { path: "good/plugin.js", text: "{}" },
   ]);
+});
+
+it("Back restores source fields and focus after acquisition fails", async () => {
+  const user = userEvent.setup();
+  const git = vi.fn(async () => {
+    throw new Error("Repository unavailable");
+  });
+  const manager = { imports: { git } } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Add" }));
+  await user.type(
+    screen.getByLabelText("Git or GitHub repository"),
+    "https://github.com/example/plugin",
+  );
+  await user.type(screen.getByLabelText("Branch or tag (optional)"), "stable");
+  const find = screen.getByRole("button", { name: "Find plugins" });
+  await user.click(find);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Repository unavailable",
+  );
+  expect(screen.queryByRole("form", { name: "Add from Git" })).toBeNull();
+  const back = screen.getByRole("button", { name: "Back" });
+  expect(back).toHaveFocus();
+  await user.click(back);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByLabelText("Git or GitHub repository")).toHaveValue(
+    "https://github.com/example/plugin",
+  );
+  expect(screen.getByLabelText("Branch or tag (optional)")).toHaveValue(
+    "stable",
+  );
+  expect(find).toHaveFocus();
 });

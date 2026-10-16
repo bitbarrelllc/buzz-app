@@ -457,7 +457,11 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   await expect(
     page.getByRole("alert").filter({ hasText: "Repository unavailable" }),
   ).toBeVisible();
+  await expect(button(page, "Find plugins")).toHaveCount(0);
+  await button(page, "Back").click();
   await expect(button(page, "Find plugins")).toBeEnabled();
+  await expect(button(page, "Find plugins")).toBeFocused();
+  await expect(page.getByLabel("Git or GitHub repository")).toHaveValue("bad");
 });
 
 test("leaving Settings discards a late preview without installing", async ({
@@ -599,13 +603,31 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(dialog.getByRole("alert")).toContainText("Publisher mismatch");
   await expect(
     dialog.getByRole("region", { name: "Plugin import preview" }),
+  ).toBeHidden();
+  await expect(
+    dialog.getByRole("region", { name: "Add from folder" }),
+  ).toBeHidden();
+  const back = dialog.getByRole("button", { name: "Back", exact: true });
+  await expect(back).toBeFocused();
+  for (const [width, mode] of [
+    [900, "light"],
+    [480, "dark"],
+  ]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.emulateMedia({ colorScheme: mode });
+    await expect(page.locator("html")).toHaveAttribute("data-color-mode", mode);
+    await expect(back).toBeInViewport({ ratio: 1 });
+    await dialog.screenshot({
+      path: info.outputPath(`plugin-install-error-${mode}.png`),
+    });
+  }
+  await back.press("Enter");
+  await expect(
+    dialog.getByRole("region", { name: "Plugin import preview" }),
   ).toBeVisible();
   await expect(
     dialog.getByRole("button", { name: "Install plugin", exact: true }),
   ).toBeFocused();
-  await dialog.screenshot({
-    path: info.outputPath("plugin-install-error.png"),
-  });
   await page.evaluate(() => {
     window.importInstallError = null;
   });

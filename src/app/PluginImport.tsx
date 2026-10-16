@@ -6,7 +6,7 @@ import { Button } from "../shared/design-system/ui/Button";
 import { Dialog } from "../shared/design-system/ui/Dialog";
 import { readPluginFolder } from "./plugin-folder-drop";
 import styles from "./PluginImport.module.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FolderOpenIcon } from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
@@ -71,6 +71,21 @@ export function PluginImport({
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [selected, setSelected] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const browse = useRef<HTMLButtonElement>(null);
+  const errorBack = useRef<HTMLButtonElement>(null);
+  const errorTrigger = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (error) errorBack.current?.focus();
+    else if (errorTrigger.current) {
+      if (errorTrigger.current === document.body) browse.current?.focus();
+      else errorTrigger.current.focus();
+      errorTrigger.current = null;
+    }
+  }, [error]);
+  function showError(reason: unknown) {
+    errorTrigger.current = document.activeElement as HTMLElement | null;
+    setError(String(reason));
+  }
   const [notice, setNotice] = useState<string | null>(null);
   const lifetime = useRef({ active: true, token: "" });
   const pending = useRef(false);
@@ -106,7 +121,7 @@ export function PluginImport({
         next?.candidates.length === 1 ? (next.candidates[0]?.path ?? "") : "",
       );
     } catch (reason) {
-      if (current.active) setError(String(reason));
+      if (current.active) showError(reason);
     } finally {
       pending.current = false;
       if (current.active) setLoading(false);
@@ -121,7 +136,7 @@ export function PluginImport({
       lifetime.current.token = "";
       setPreview(null);
     } catch (reason) {
-      setError(String(reason));
+      showError(reason);
     } finally {
       pending.current = false;
       setDiscarding(false);
@@ -136,12 +151,13 @@ export function PluginImport({
         await imports?.discard(lifetime.current.token);
       lifetime.current.token = "";
       setPreview(null);
+      errorTrigger.current = null;
       setError(null);
       setNotice(null);
       setDragging(false);
       setOpen(false);
     } catch (reason) {
-      setError(String(reason));
+      showError(reason);
     } finally {
       pending.current = false;
       setDiscarding(false);
@@ -203,270 +219,294 @@ export function PluginImport({
           if (!next) void close();
         }}
         title="Add a plugin"
-        description="Load built plugins containing manifest.json and plugin.js. Buzz doesn’t build source code or run install scripts. Only load code you trust: plugins aren’t sandboxed."
-        size="wide"
+        description={
+          error
+            ? undefined
+            : "Load built plugins containing manifest.json and plugin.js. Buzz doesn’t build source code or run install scripts. Only load code you trust: plugins aren’t sandboxed."
+        }
+        size={error ? "default" : "wide"}
+        actions={
+          error ? (
+            <Button
+              ref={errorBack}
+              type="button"
+              disabled={blocked}
+              onClick={() => setError(null)}
+            >
+              Back
+            </Button>
+          ) : undefined
+        }
         dismissOnOutsideClick
         preventClose={blocked}
         finalFocus={trigger}
       >
-        <div className={styles.columns}>
-          <section
-            aria-label="Add from folder"
-            className={styles.folder}
-            data-dragging={dragging || undefined}
-            onDragOver={(event) => {
-              if (!event.dataTransfer.types.includes("Files")) return;
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = blocked ? "none" : "copy";
-              setDragging(!blocked);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setDragging(false);
-              const items = Array.from(event.dataTransfer.items);
-              const entry =
-                items.length === 1 ? items[0]?.webkitGetAsEntry?.() : null;
-              const current = lifetime.current;
-              void load(async () => {
-                if (!entry?.isDirectory)
-                  throw new Error("Drop one folder, or choose Browse.");
-                const upload = await readPluginFolder(entry);
-                if (!current.active) return null;
-                const next = await imports.files(upload.source, upload.files);
-                return next
-                  ? {
-                      ...next,
-                      warnings: [...upload.warnings, ...next.warnings],
-                    }
-                  : null;
-              });
-            }}
-          >
-            <FolderOpenIcon size={32} aria-hidden="true" />
-            <p className="m-0 text-body-sm">Drop a plugin folder here</p>
-            <Button
-              size="sm"
-              aria-label="Browse plugin folder"
-              disabled={blocked}
-              onClick={() => void load(imports.folder)}
-            >
-              Browse
-            </Button>
-          </section>
-          <form
-            aria-label="Add from Git"
-            className={styles.git}
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (repository.trim())
-                void load(async () => {
-                  const signed = await authorizeGit?.(repository);
-                  return signed
-                    ? imports.git(signed.repository, reference, signed.token)
-                    : imports.git(repository, reference);
-                });
-            }}
-          >
-            <SettingsGroup layout="form">
-              <Field label="Git or GitHub repository">
-                <Input
-                  required
-                  value={repository}
-                  disabled={blocked}
-                  placeholder="https://github.com/owner/repository"
-                  onChange={(event) => setRepository(event.target.value)}
-                />
-              </Field>
-              <Field label="Branch or tag (optional)">
-                <Input
-                  value={reference}
-                  disabled={blocked}
-                  placeholder="Repository default"
-                  onChange={(event) => setReference(event.target.value)}
-                />
-              </Field>
-              <p className="m-0 text-caption text-muted">
-                HTTPS or SSH; GitHub owner/repository also works. SSH uses your
-                agent and known hosts. Password prompts and credential helpers
-                are not used. Buzz git repositories in this community sign in
-                with your account.
-              </p>
-              <div className="justify-self-start">
-                <Button
-                  type="submit"
-                  size="sm"
-                  aria-label="Find plugins"
-                  disabled={blocked || !repository.trim()}
-                >
-                  Find
-                </Button>
-              </div>
-            </SettingsGroup>
-          </form>
-        </div>
-        {loading && (
-          <p role="status">
-            Reading plugin folders… Git imports may take up to a minute.
-          </p>
-        )}
         {error && (
           <p role="alert" className="error break-words">
             {error}
           </p>
         )}
-        {notice && <p role="status">{notice}</p>}
-        {preview && (
-          <section aria-label="Plugin import preview" className="mt-4">
-            <SettingsGroup layout="form">
-              <div className="min-w-0 text-body-sm">
-                <p className="m-0 break-all font-medium">{preview.source}</p>
-                {preview.commit && (
-                  <p className="m-0 break-all text-caption text-muted">
-                    Commit: {preview.commit}
-                  </p>
-                )}
-              </div>
-              {preview.candidates.length === 0 ? (
-                <p className="m-0">
-                  No built plugins found. Build the plugin first, then choose
-                  its output folder, or use a repository that includes built
-                  artifacts.
-                </p>
-              ) : (
-                <Field label="Choose a plugin folder">
-                  <RadioGroup
-                    name="plugin-folder"
-                    value={selected}
-                    disabled={busy}
-                    onValueChange={(value) => {
-                      setSelected(value);
-                      setNotice(null);
-                    }}
-                  >
-                    {preview.candidates.map((item) => (
-                      <Radio
-                        key={item.path}
-                        value={item.path}
-                        variant="card"
-                        label={item.manifest.name}
-                        description={
-                          <span className="break-all">
-                            {item.path} · {item.manifest.id}
-                          </span>
-                        }
-                      />
-                    ))}
-                  </RadioGroup>
+        <div hidden={!!error}>
+          <div className={styles.columns}>
+            <section
+              aria-label="Add from folder"
+              className={styles.folder}
+              data-dragging={dragging || undefined}
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes("Files")) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = blocked ? "none" : "copy";
+                setDragging(!blocked);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setDragging(false);
+                const items = Array.from(event.dataTransfer.items);
+                const entry =
+                  items.length === 1 ? items[0]?.webkitGetAsEntry?.() : null;
+                const current = lifetime.current;
+                void load(async () => {
+                  if (!entry?.isDirectory)
+                    throw new Error("Drop one folder, or choose Browse.");
+                  const upload = await readPluginFolder(entry);
+                  if (!current.active) return null;
+                  const next = await imports.files(upload.source, upload.files);
+                  return next
+                    ? {
+                        ...next,
+                        warnings: [...upload.warnings, ...next.warnings],
+                      }
+                    : null;
+                });
+              }}
+            >
+              <FolderOpenIcon size={32} aria-hidden="true" />
+              <p className="m-0 text-body-sm">Drop a plugin folder here</p>
+              <Button
+                size="sm"
+                ref={browse}
+                aria-label="Browse plugin folder"
+                disabled={blocked}
+                onClick={() => void load(imports.folder)}
+              >
+                Browse
+              </Button>
+            </section>
+            <form
+              aria-label="Add from Git"
+              className={styles.git}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (repository.trim())
+                  void load(async () => {
+                    const signed = await authorizeGit?.(repository);
+                    return signed
+                      ? imports.git(signed.repository, reference, signed.token)
+                      : imports.git(repository, reference);
+                  });
+              }}
+            >
+              <SettingsGroup layout="form">
+                <Field label="Git or GitHub repository">
+                  <Input
+                    required
+                    value={repository}
+                    disabled={blocked}
+                    placeholder="https://github.com/owner/repository"
+                    onChange={(event) => setRepository(event.target.value)}
+                  />
                 </Field>
-              )}
-              {preview.warnings.length > 0 && (
-                <details className="text-body-sm text-muted">
-                  <summary>Folders skipped ({preview.warnings.length})</summary>
-                  <ul className="break-words">
-                    {preview.warnings.map((warning) => (
-                      <li key={warning}>{warning}</li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {packageContent.length > 0 && (
-                <section aria-label="Package content" className="text-body-sm">
-                  <p className="m-0 font-medium">Package content</p>
-                  <ul className="m-0">
-                    {packageContent.map((description) => (
-                      <li key={description}>{description}</li>
-                    ))}
-                  </ul>
-                  <p className="m-0 text-caption text-muted">
-                    Supplied by the plugin publisher; inclusion is not an
-                    endorsement by Buzz.
-                  </p>
-                </section>
-              )}
-              {candidate && (
-                <section
-                  aria-label="Declared host access"
-                  className="text-body-sm"
-                >
-                  <p className="m-0 font-medium">Declared host access</p>
-                  {declaredGrants.length ? (
-                    <ul className="m-0 break-all">
-                      {declaredGrants.map((grant) => (
-                        <li key={grant}>
-                          {grant}
-                          {existing && !previousGrants.includes(grant)
-                            ? " (new or changed)"
-                            : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="m-0">
-                      No commands or HTTPS origins declared.
+                <Field label="Branch or tag (optional)">
+                  <Input
+                    value={reference}
+                    disabled={blocked}
+                    placeholder="Repository default"
+                    onChange={(event) => setReference(event.target.value)}
+                  />
+                </Field>
+                <p className="m-0 text-caption text-muted">
+                  HTTPS or SSH; GitHub owner/repository also works. SSH uses
+                  your agent and known hosts. Password prompts and credential
+                  helpers are not used. Buzz git repositories in this community
+                  sign in with your account.
+                </p>
+                <div className="justify-self-start">
+                  <Button
+                    type="submit"
+                    size="sm"
+                    aria-label="Find plugins"
+                    disabled={blocked || !repository.trim()}
+                  >
+                    Find
+                  </Button>
+                </div>
+              </SettingsGroup>
+            </form>
+          </div>
+          {loading && (
+            <p role="status">
+              Reading plugin folders… Git imports may take up to a minute.
+            </p>
+          )}
+          {notice && <p role="status">{notice}</p>}
+          {preview && (
+            <section aria-label="Plugin import preview" className="mt-4">
+              <SettingsGroup layout="form">
+                <div className="min-w-0 text-body-sm">
+                  <p className="m-0 break-all font-medium">{preview.source}</p>
+                  {preview.commit && (
+                    <p className="m-0 break-all text-caption text-muted">
+                      Commit: {preview.commit}
                     </p>
                   )}
-                  {existing &&
-                    previousGrants.filter(
-                      (grant) => !declaredGrants.includes(grant),
-                    ).length > 0 && (
-                      <p className="m-0 break-all">
-                        Removed:{" "}
-                        {previousGrants
-                          .filter((grant) => !declaredGrants.includes(grant))
-                          .join(", ")}
+                </div>
+                {preview.candidates.length === 0 ? (
+                  <p className="m-0">
+                    No built plugins found. Build the plugin first, then choose
+                    its output folder, or use a repository that includes built
+                    artifacts.
+                  </p>
+                ) : (
+                  <Field label="Choose a plugin folder">
+                    <RadioGroup
+                      name="plugin-folder"
+                      value={selected}
+                      disabled={busy}
+                      onValueChange={(value) => {
+                        setSelected(value);
+                        setNotice(null);
+                      }}
+                    >
+                      {preview.candidates.map((item) => (
+                        <Radio
+                          key={item.path}
+                          value={item.path}
+                          variant="card"
+                          label={item.manifest.name}
+                          description={
+                            <span className="break-all">
+                              {item.path} · {item.manifest.id}
+                            </span>
+                          }
+                        />
+                      ))}
+                    </RadioGroup>
+                  </Field>
+                )}
+                {preview.warnings.length > 0 && (
+                  <details className="text-body-sm text-muted">
+                    <summary>
+                      Folders skipped ({preview.warnings.length})
+                    </summary>
+                    <ul className="break-words">
+                      {preview.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {packageContent.length > 0 && (
+                  <section
+                    aria-label="Package content"
+                    className="text-body-sm"
+                  >
+                    <p className="m-0 font-medium">Package content</p>
+                    <ul className="m-0">
+                      {packageContent.map((description) => (
+                        <li key={description}>{description}</li>
+                      ))}
+                    </ul>
+                    <p className="m-0 text-caption text-muted">
+                      Supplied by the plugin publisher; inclusion is not an
+                      endorsement by Buzz.
+                    </p>
+                  </section>
+                )}
+                {candidate && (
+                  <section
+                    aria-label="Declared host access"
+                    className="text-body-sm"
+                  >
+                    <p className="m-0 font-medium">Declared host access</p>
+                    {declaredGrants.length ? (
+                      <ul className="m-0 break-all">
+                        {declaredGrants.map((grant) => (
+                          <li key={grant}>
+                            {grant}
+                            {existing && !previousGrants.includes(grant)
+                              ? " (new or changed)"
+                              : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="m-0">
+                        No commands or HTTPS origins declared.
                       </p>
                     )}
-                </section>
-              )}
-              {candidate && (
-                <p className="m-0 text-body-sm">
-                  {existing
-                    ? `This replaces ${existing.manifest.name} (${existing.manifest.id}). ${existing.enabled ? "It stays on and may run immediately unless this launch is in safe mode." : "It stays off."} ${rollbackNotice}`
-                    : "This plugin starts off. Turn it on in the list when you’re ready."}
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2">
+                    {existing &&
+                      previousGrants.filter(
+                        (grant) => !declaredGrants.includes(grant),
+                      ).length > 0 && (
+                        <p className="m-0 break-all">
+                          Removed:{" "}
+                          {previousGrants
+                            .filter((grant) => !declaredGrants.includes(grant))
+                            .join(", ")}
+                        </p>
+                      )}
+                  </section>
+                )}
                 {candidate && (
+                  <p className="m-0 text-body-sm">
+                    {existing
+                      ? `This replaces ${existing.manifest.name} (${existing.manifest.id}). ${existing.enabled ? "It stays on and may run immediately unless this launch is in safe mode." : "It stays off."} ${rollbackNotice}`
+                      : "This plugin starts off. Turn it on in the list when you’re ready."}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {candidate && (
+                    <Button
+                      type="button"
+                      disabled={blocked}
+                      onClick={async () => {
+                        const current = lifetime.current;
+                        setError(null);
+                        setNotice(null);
+                        const success = await plugins.installImport(
+                          preview.token,
+                          candidate.path,
+                        );
+                        if (!current.active) return;
+                        if (success)
+                          setNotice(
+                            `${candidate.manifest.name} installed. You can choose another folder or close this preview.`,
+                          );
+                        else
+                          showError(
+                            plugins.snapshot().error ??
+                              "Plugin installation wasn’t confirmed. Check the preview and try again.",
+                          );
+                      }}
+                    >
+                      {existing ? "Update plugin" : "Install plugin"}
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     disabled={blocked}
-                    onClick={async () => {
-                      const current = lifetime.current;
-                      setError(null);
-                      setNotice(null);
-                      const success = await plugins.installImport(
-                        preview.token,
-                        candidate.path,
-                      );
-                      if (!current.active) return;
-                      if (success)
-                        setNotice(
-                          `${candidate.manifest.name} installed. You can choose another folder or close this preview.`,
-                        );
-                      else
-                        setError(
-                          plugins.snapshot().error ??
-                            "Plugin installation wasn’t confirmed. Check the preview and try again.",
-                        );
-                    }}
+                    onClick={() => void dismiss()}
                   >
-                    {existing ? "Update plugin" : "Install plugin"}
+                    Close preview
                   </Button>
-                )}
-                <Button
-                  type="button"
-                  disabled={blocked}
-                  onClick={() => void dismiss()}
-                >
-                  Close preview
-                </Button>
-              </div>
-            </SettingsGroup>
-          </section>
-        )}
+                </div>
+              </SettingsGroup>
+            </section>
+          )}
+        </div>
       </Dialog>
     </>
   );
