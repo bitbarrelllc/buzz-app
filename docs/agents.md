@@ -773,3 +773,14 @@ on channel/access changes. Saved metrics remain
 subject to the independent 90-day/byte eviction policy above, so loaded history
 is never a completeness guarantee. Restored usage is display-only and cannot
 establish working, typing, or online status.
+
+
+### Model-menu design exception
+
+The AI defaults and Goose creation controls intentionally use the shared Menu
+for family → model → effort navigation, as explicitly requested in product
+review. This is a scoped exception to DESIGN.md's Select/Combobox form-value
+guidance. Keep the selected model and effort accessible, preserve compact chip
+appearance and truncation, and offer a trailing action to restore inheritance
+without duplicating the current model as the first option. Provider selection
+continues to use a searchable Combobox.

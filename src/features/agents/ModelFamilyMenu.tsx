@@ -36,6 +36,8 @@ export function modelFamily(model: ModelChoice): string {
 
 export function ModelFamilyMenu({
   leading,
+  appearance = "outlined",
+  resetLabel,
   label,
   effort,
   effortLabel,
@@ -51,6 +53,8 @@ export function ModelFamilyMenu({
   onCustom,
 }: {
   leading?: ReactNode;
+  appearance?: "outlined" | "subtle";
+  resetLabel?: string | undefined;
   label: string;
   effort?: string | undefined;
   effortLabel?: string | undefined;
@@ -77,10 +81,11 @@ export function ModelFamilyMenu({
         render={(props) => (
           <Button
             {...props}
-            variant="outline"
+            variant={appearance === "subtle" ? "subtle" : "outline"}
             shape="control"
             size="sm"
-            aria-label={label}
+            aria-label={`${label}: ${selected.label}${effortLabel ? `, ${effortLabel}` : ""}`}
+            title={selected.label}
           >
             {leading ?? <ModelIcon model={selected.id || selected.label} />}
             <span className="buzz-select-value">{selected.label}</span>
@@ -141,6 +146,9 @@ export function ModelFamilyMenu({
               </MenuSubmenuPopup>
             </MenuSubmenu>
           ))}
+        {resetLabel && (
+          <MenuItem onClick={() => onChange("")}>{resetLabel}</MenuItem>
+        )}
         {onConfigure && (
           <MenuItem onClick={onConfigure}>Edit configuration</MenuItem>
         )}
@@ -149,7 +157,9 @@ export function ModelFamilyMenu({
     </MenuRoot>
   );
   return compact ? (
-    menu
+    <div className="buzz-select" data-variant="compact">
+      {menu}
+    </div>
   ) : (
     <PreferenceRow title={label} subtitle={description} trailing={menu} />
   );
@@ -181,7 +191,7 @@ function EffortMenu({
           .finally(() => setLoading(false));
       }}
     >
-      <MenuSubmenuTrigger>
+      <MenuSubmenuTrigger role="menuitemradio" aria-checked={selected}>
         {model.label}
         {selected && <CheckIcon size={16} aria-hidden="true" />}
       </MenuSubmenuTrigger>

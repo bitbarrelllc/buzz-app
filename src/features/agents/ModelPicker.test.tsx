@@ -290,7 +290,7 @@ it("opens a family before selecting a model and strips only its display prefix",
       onChange={onChange}
     />,
   );
-  const trigger = screen.getByRole("button", { name: "Model" });
+  const trigger = screen.getByRole("button", { name: /^Model:/ });
   expect(trigger).toHaveTextContent("gpt-6");
   expect(trigger).not.toHaveTextContent("databricks-");
   await user.click(trigger);
@@ -318,7 +318,7 @@ it("keeps custom entry and default selection in the family menu", async () => {
       onChange={onChange}
     />,
   );
-  await user.click(screen.getByRole("button", { name: "Model" }));
+  await user.click(screen.getByRole("button", { name: /^Model:/ }));
   await user.click(
     await screen.findByRole("menuitemradio", {
       name: "Provider default · Default",
@@ -326,7 +326,7 @@ it("keeps custom entry and default selection in the family menu", async () => {
   );
   expect(onChange).toHaveBeenLastCalledWith("");
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-  await user.click(screen.getByRole("button", { name: "Model" }));
+  await user.click(screen.getByRole("button", { name: /^Model:/ }));
   await user.click(
     await screen.findByRole("menuitem", { name: "Custom model" }),
   );
@@ -334,6 +334,6 @@ it("keeps custom entry and default selection in the family menu", async () => {
   await user.click(screen.getByRole("button", { name: "Use model" }));
   expect(onChange).toHaveBeenLastCalledWith("new-model");
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Model" })).toHaveFocus(),
+    expect(screen.getByRole("button", { name: /^Model:/ })).toHaveFocus(),
   );
 });

@@ -512,17 +512,25 @@ it("selects a model in the Settings dropdown without changing local Codex prefer
   await f.provider.check();
   render(<f.tabs.DefaultControl onConfigure={vi.fn()} />);
   const user = userEvent.setup();
-  const control = screen.getByRole("button", { name: "Codex default model" });
+  const control = screen.getByRole("button", { name: /^Codex default model:/ });
   expect(control).toHaveTextContent("Model A");
   expect(control).toHaveTextContent("Automatic");
   await user.click(control);
   fireEvent.click(await screen.findByRole("menuitem", { name: "Other" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Model B" }));
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Model B" }),
+  );
   fireEvent.click(await screen.findByRole("menuitemradio", { name: "Medium" }));
   expect(
     new CodexProvider(f.spawn, localStorage).resolve(defaults),
   ).toMatchObject({ model: "model-b", effort: "medium" });
   expect(control).toHaveTextContent("Medium");
+  fireEvent.click(control);
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Use Codex recommended" }),
+  );
+  expect(f.provider.snapshot().defaults.model).toBe("");
+
   expect(configured).toEqual({
     model: "model-b",
     model_reasoning_effort: "high",

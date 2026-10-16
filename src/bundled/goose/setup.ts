@@ -91,6 +91,7 @@ export class GooseSetup {
 
   private state: AgentProviderSnapshot = { readiness: "checking" };
   private readonly listeners = new Set<() => void>();
+  private checkedDefaults: string | undefined;
   private checking: Promise<void> | undefined;
 
   constructor(
@@ -120,6 +121,13 @@ export class GooseSetup {
     this.checking = this.providers()
       .then(
         ({ defaults, providers }) => {
+          const key = JSON.stringify(defaults);
+          if (
+            this.checkedDefaults !== undefined &&
+            this.checkedDefaults !== key
+          )
+            this.defaultsChanged();
+          this.checkedDefaults = key;
           const ready = providers.some(
             (provider) =>
               provider.id === defaults.provider && provider.configured,
@@ -143,10 +151,14 @@ export class GooseSetup {
   };
 
   /** Writes Goose's own defaults, never a parallel Buzz preference. */
-  async saveDefaults(choice: Choice) {
+  async saveDefaults(
+    choice: Choice,
+    fields: Readonly<Record<string, string>> = {},
+  ) {
     await this.checking;
     this.update({ ...this.state, blocking: true });
     try {
+      if (Object.keys(fields).length) await this.save(choice.provider, fields);
       await this.with((goose) =>
         goose.request("_goose/unstable/defaults/save", {
           providerId: choice.provider.trim(),
@@ -154,6 +166,7 @@ export class GooseSetup {
         }),
       );
       this.defaultsChanged();
+      this.checkedDefaults = undefined;
       await this.check();
     } finally {
       this.update({ ...this.state, blocking: false });

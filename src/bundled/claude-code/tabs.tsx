@@ -409,6 +409,7 @@ export function createTabs({
       <>
         <ModelPicker
           includeDefault={false}
+          resetLabel="Use Claude default"
           compact
           groupByFamily
           label="Claude default model"
@@ -446,6 +447,14 @@ export function createTabs({
             }
           }}
         />
+        {state.modelsError && (
+          <>
+            <span role="alert">{state.modelsError}</span>
+            <Button onClick={() => void setup.loadModels(true)}>
+              Try again
+            </Button>
+          </>
+        )}
         {error && <span role="alert">{error}</span>}
       </>
     );

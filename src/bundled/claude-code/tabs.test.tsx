@@ -485,7 +485,7 @@ it("edits the model through the Settings dropdown and preserves agent inheritanc
   render(<Control onConfigure={vi.fn()} />);
   const user = userEvent.setup();
   const control = await screen.findByRole("button", {
-    name: "Claude default model",
+    name: /^Claude default model:/,
   });
   await waitFor(() => expect(control).toHaveTextContent("Opus 5.5"));
   await user.click(control);
@@ -1057,15 +1057,20 @@ it("saves model-specific default effort from the nested menu and inherits it", a
   if (!Control) throw new Error("Missing default control");
   render(<Control onConfigure={vi.fn()} />);
   const control = await screen.findByRole("button", {
-    name: "Claude default model",
+    name: /^Claude default model:/,
   });
   await waitFor(() => expect(control).toHaveTextContent("Opus 5.5"));
   expect(control).toHaveTextContent("Automatic");
   fireEvent.click(control);
   fireEvent.click(await screen.findByRole("menuitem", { name: "Claude" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Sonnet 5.5" }));
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Sonnet 5.5" }),
+  );
   fireEvent.click(await screen.findByRole("menuitemradio", { name: "High" }));
-  expect(control).toHaveTextContent("High");
+  expect(control).toHaveAccessibleName(
+    "Claude default model: Sonnet 5.5, High",
+  );
+
   const reopened = new ClaudeDefaults(localStorage);
   expect(reopened.resolve(DEFAULT_CONFIG)).toMatchObject({
     model: "sonnet",
@@ -1077,4 +1082,25 @@ it("saves model-specific default effort from the nested menu and inherits it", a
   expect(reopened.resolve({ ...DEFAULT_CONFIG, model: "haiku" }).effort).toBe(
     "",
   );
+  fireEvent.click(control);
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Use Claude default" }),
+  );
+  expect(new ClaudeDefaults(localStorage).snapshot().model).toBe("");
+});
+
+it("retries failed model discovery from the defaults row", async () => {
+  const catalog = { listed: false };
+  const Control = installed({ catalog }).type.provider?.DefaultControl;
+  if (!Control) throw new Error("Missing default control");
+  render(<Control onConfigure={vi.fn()} />);
+  await screen.findByRole("alert");
+  catalog.listed = true;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: /^Claude default model:/ }),
+    ).toHaveTextContent("Opus 5.5"),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
 });

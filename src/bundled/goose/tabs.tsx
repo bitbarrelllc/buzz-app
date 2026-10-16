@@ -143,7 +143,7 @@ export function createTabs({
     const [listing, reload] = useRead(() => setup.providers(), "providers");
     const current = listing.value?.defaults;
     const id = current?.provider ?? "";
-    const [models] = useRead(
+    const [models, reloadModels] = useRead(
       () => (id ? setup.models(id) : Promise.resolve([] as ModelChoice[])),
       id,
       id,
@@ -154,6 +154,7 @@ export function createTabs({
       <>
         <ModelPicker
           includeDefault={false}
+          resetLabel="Use provider default"
           compact
           groupByFamily
           label="Goose default model"
@@ -185,6 +186,12 @@ export function createTabs({
               .finally(() => setSaving(false));
           }}
         />
+        {models.status === "error" && (
+          <>
+            <span role="alert">{models.error}</span>
+            <Button onClick={reloadModels}>Try again</Button>
+          </>
+        )}
         {error && <span role="alert">{error}</span>}
       </>
     );
@@ -249,9 +256,7 @@ export function createTabs({
                 const entered = Object.fromEntries(
                   Object.entries(keys).filter(([, text]) => text.trim()),
                 );
-                if (Object.keys(entered).length)
-                  await setup.save(value.provider, entered);
-                await setup.saveDefaults(value);
+                await setup.saveDefaults(value, entered);
                 onClose();
               } catch (reason) {
                 setError(message(reason));
@@ -1053,6 +1058,7 @@ export function createTabs({
           compact
           groupByFamily
           includeDefault={false}
+          resetLabel="Use Goose default"
           allowCustomModel
           label="Goose model"
           appearance={modelAppearance === "subtle" ? "subtle" : "outlined"}

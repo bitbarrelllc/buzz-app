@@ -416,6 +416,7 @@ export function createTabs(
       <>
         <ModelPicker
           includeDefault={false}
+          resetLabel="Use Codex recommended"
           compact
           groupByFamily
           label="Codex default model"

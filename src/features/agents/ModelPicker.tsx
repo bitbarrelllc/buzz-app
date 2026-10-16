@@ -124,6 +124,7 @@ export function ModelPicker({
   groupByFamily = false,
   leading,
   onConfigure,
+  resetLabel,
   modelLabelPrefixes,
   effort,
   effortLabel,
@@ -143,6 +144,7 @@ export function ModelPicker({
   description,
 }: {
   label?: string;
+  resetLabel?: string;
   groupByFamily?: boolean;
   leading?: ReactNode;
   onConfigure?: (() => void) | undefined;
@@ -210,6 +212,8 @@ export function ModelPicker({
         {groupByFamily ? (
           <ModelFamilyMenu
             leading={leading}
+            appearance={appearance}
+            resetLabel={resetLabel}
             effort={effort}
             effortLabel={effortLabel}
             onEffortChange={onEffortChange}

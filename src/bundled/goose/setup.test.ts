@@ -345,3 +345,45 @@ it("invalidates runtime defaults only after a successful save", async () => {
   ).rejects.toThrow();
   expect(changed).toHaveBeenCalledTimes(1);
 });
+
+it("blocks dismissal throughout credential persistence and clears blocking on failure", async () => {
+  const { setup: goose } = setup();
+  await goose.check();
+  let reject!: (reason: Error) => void;
+  const gate = new Promise<void>((_, fail) => {
+    reject = fail;
+  });
+  const save = vi.spyOn(goose, "save").mockReturnValue(gate);
+  const pending = goose.saveDefaults(
+    { provider: "ollama", model: "qwen3" },
+    { OLLAMA_HOST: "host" },
+  );
+  const result = expect(pending).rejects.toThrow("key failure");
+  try {
+    await Promise.resolve();
+    expect(save).toHaveBeenCalledOnce();
+    expect(goose.snapshot().blocking).toBe(true);
+  } finally {
+    reject(new Error("key failure"));
+  }
+  await result;
+  expect(goose.snapshot().blocking).toBe(false);
+});
+
+it("invalidates inherited sessions when a fresh check finds external defaults changes", async () => {
+  const fake = fakeSpawn({
+    providers: PROVIDERS,
+    defaults: { providerId: "ollama", modelId: "qwen3" },
+  });
+  const changed = vi.fn();
+  const goose = new GooseSetup(fake.spawn, changed);
+  await goose.check();
+  await new GooseSetup(fake.spawn).saveDefaults({
+    provider: "ollama",
+    model: "llama4",
+  });
+  await goose.check();
+  expect(changed).toHaveBeenCalledTimes(1);
+  await goose.check();
+  expect(changed).toHaveBeenCalledTimes(1);
+});

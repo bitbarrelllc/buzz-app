@@ -2,6 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -131,7 +132,7 @@ async function choose(label: string, option: string) {
 }
 
 /** The model field, labeled with goose's default or the agent's choice. */
-const modelButton = () => screen.getByRole("button", { name: "Goose model" });
+const modelButton = () => screen.getByRole("button", { name: /^Goose model:/ });
 
 /** Opens the provider dialog from the model field. */
 async function openChoices() {
@@ -179,7 +180,7 @@ it("keeps provider fields visible while saving its key and selecting a model", a
   ).toBeNull();
 
   await choose("Provider", "Anthropic");
-  expect(within(dialog).queryByRole("button", { name: "Model" })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: /^Model:/ })).toBeNull();
   const key = await within(dialog).findByLabelText("API key", {
     selector: "input:not([aria-hidden])",
   });
@@ -188,7 +189,7 @@ it("keeps provider fields visible while saving its key and selecting a model", a
   expect(
     within(dialog).queryByRole("button", { name: "Save to goose" }),
   ).toBeNull();
-  expect(within(dialog).queryByRole("button", { name: "Model" })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: /^Model:/ })).toBeNull();
   expect(changes).toEqual([]);
   await user.click(within(dialog).getByRole("button", { name: "Save" }));
   await waitFor(() =>
@@ -199,7 +200,9 @@ it("keeps provider fields visible while saving its key and selecting a model", a
   await user.click(modelButton());
   (await screen.findByRole("menuitem", { name: "Claude" })).focus();
   await user.keyboard("{ArrowRight}");
-  (await screen.findByRole("menuitem", { name: "claude-opus-5-5" })).focus();
+  (
+    await screen.findByRole("menuitemradio", { name: "claude-opus-5-5" })
+  ).focus();
   await user.keyboard("{ArrowRight}");
   await user.click(
     await screen.findByRole("menuitemradio", { name: "Automatic" }),
@@ -209,6 +212,11 @@ it("keeps provider fields visible while saving its key and selecting a model", a
     effort: "",
   });
   expect(modelButton()).toHaveTextContent("Automatic");
+  fireEvent.click(modelButton());
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Use Goose default" }),
+  );
+  expect(changes.at(-1)).toMatchObject({ model: "", effort: "" });
 });
 
 it("saves a key on Enter in Settings, and only an absolute or ~/ workspace", async () => {
@@ -469,7 +477,7 @@ it("shows no other provider's models when a provider's models fail to load", asy
     />,
   );
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Model" }));
+  await user.click(await screen.findByRole("button", { name: /^Model:/ }));
   await user.click(await screen.findByRole("menuitem", { name: "Other" }));
   expect(
     await screen.findByRole("menuitemradio", { name: "dbx-only-model" }),
@@ -682,7 +690,7 @@ it("shows and changes the device default from the compact control without stripp
   render(<DefaultControl onConfigure={configure} />);
   const user = userEvent.setup();
   const trigger = await screen.findByRole("button", {
-    name: "Goose default model",
+    name: /^Goose default model:/,
   });
   await waitFor(() => expect(trigger).toBeEnabled());
   expect(trigger).toHaveTextContent("gpt-6");
@@ -781,4 +789,20 @@ it("keeps the creation menu open when its provider finishes loading", async () =
   expect(
     screen.getByRole("menuitem", { name: "Edit configuration" }),
   ).toBeVisible();
+});
+
+it("retries Goose default model discovery", async () => {
+  const fake = fakeSpawn({
+    providers: PROVIDERS,
+    defaults: { providerId: "databricks", modelId: "goose-claude" },
+  });
+  const setup = new GooseSetup(fake.spawn);
+  vi.spyOn(setup, "models")
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue([{ id: "claude", label: "Claude" }]);
+  const { DefaultControl } = createTabs({ setup, ...unused });
+  render(<DefaultControl onConfigure={vi.fn()} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("offline");
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });
