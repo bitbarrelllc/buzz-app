@@ -673,9 +673,15 @@ it("hides old trial rooms using signed expiry metadata while keeping ordinary pr
   h.session.channels.list = () => list;
   render(h.view("alpha"));
   expect(
-    await screen.findByRole("button", { name: "Private project" }),
+    await screen.findByRole("button", {
+      name: "Private projectTemporary channel. Cleans up after 1 hour without activity.",
+    }),
   ).toBeVisible();
-  expect(screen.getAllByRole("button", { name: "Huddle" })).toHaveLength(3);
+  expect(
+    screen.getAllByRole("button", {
+      name: /^Huddle(?:Temporary channel\. Cleans up after 1 hour without activity\.)?$/,
+    }),
+  ).toHaveLength(3);
   expect(
     screen.queryByRole("button", { name: `huddle-${legacy.slice(0, 8)}` }),
   ).toBeNull();
