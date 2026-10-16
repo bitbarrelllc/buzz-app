@@ -329,13 +329,9 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
       expect([box.width, box.height]).toEqual([32, 32]);
     }
     expect(await icons.count()).toBeGreaterThanOrEqual(5);
-    for (const control of await controls.all()) {
-      const size =
-        (await control.getAttribute("aria-label")) === "New" ? 18 : 16;
-      for (const icon of await control.locator("svg").all()) {
-        const box = await icon.boundingBox();
-        expect([box.width, box.height]).toEqual([size, size]);
-      }
+    for (const icon of await icons.all()) {
+      const box = await icon.boundingBox();
+      expect([box.width, box.height]).toEqual([16, 16]);
     }
     await page.mouse.move(700, 500);
     for (const control of await ghosts.all())
@@ -368,9 +364,18 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
         );
       } else await expect(control).toHaveCSS("border-radius", "10px");
       if (await control.isDisabled()) continue;
+      const capsuleControl = ["New", "Search Buzz", "More pages"].includes(
+        await control.getAttribute("aria-label"),
+      );
       for (const [mode, fill] of [
-        ["light", "rgba(0, 0, 0, 0.06)"],
-        ["dark", "rgba(255, 255, 255, 0.1)"],
+        [
+          "light",
+          capsuleControl ? "rgb(241, 241, 242)" : "rgba(0, 0, 0, 0.06)",
+        ],
+        [
+          "dark",
+          capsuleControl ? "rgb(46, 46, 46)" : "rgba(255, 255, 255, 0.1)",
+        ],
       ]) {
         await page.emulateMedia({ colorScheme: mode });
         await expect(page.locator("html")).toHaveAttribute(

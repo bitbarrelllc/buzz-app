@@ -461,7 +461,7 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
     .click();
   await expect(composer).toBeInViewport();
   await openPage(page, "Projects");
-  // Search selection and the sidebar share page state, so Projects is current.
+  // Search selection and the header share page state, so Projects is current.
   // Projects moves focus to its heading once the directory opens.
   await expect(
     page.getByRole("heading", { name: "Projects", exact: true }),
@@ -470,7 +470,12 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
   await expect(hiddenDestinations).toHaveText(destinationTitles);
   await expect(
     hiddenDestinations.and(page.locator("[aria-current]")),
-  ).toHaveText(["Projects"]);
+  ).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Topbar pages", includeHidden: true })
+      .getByRole("tab", { name: "Projects", exact: true, includeHidden: true }),
+  ).toHaveAttribute("aria-selected", "true");
   await button(page, "Your profile").click();
   await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
   await expect(
