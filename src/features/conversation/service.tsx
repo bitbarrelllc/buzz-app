@@ -1,6 +1,7 @@
 // FOUNDATION: Shared conversation UI and plugin-owned tools/renderers; never another data owner.
 import type { ReactNode } from "react";
 import { EmbeddedThread, type EmbeddedThreadProps } from "./EmbeddedThread";
+import { PageTabs, type PageTabsProps } from "../../bundled/channels/PageTabs";
 import { Service, type Context } from "@deepseek-ai/cordis";
 import { createContributions } from "../../plugins/contributions";
 import {
@@ -47,6 +48,8 @@ export type Conversation = {
     Thread: (props: EmbeddedThreadProps) => ReactNode;
     Composer: (props: Omit<MessageComposerProps, "extensions">) => ReactNode;
     Message: (props: Omit<MessageRowProps, "extensions">) => ReactNode;
+    /** The page's content as the first tab, beside conversations it opens. */
+    Tabs: (props: PageTabsProps) => ReactNode;
   };
   /** The host's date labels, so plugin text reads like the message rows. */
   format: {
@@ -221,6 +224,9 @@ export class ConversationService extends Service implements Conversation {
     ),
     Message: (props: Omit<MessageRowProps, "extensions">) => (
       <MessageRow {...props} extensions={this} />
+    ),
+    Tabs: (props: PageTabsProps) => (
+      <PageTabs {...props} host={this.ctx} extensions={this} />
     ),
   };
 }

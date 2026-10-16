@@ -292,6 +292,9 @@ export function useConversationTabs({
         : undefined,
     [scope, viewer, current, threadId],
   );
+  // A page without its own conversation can host any thread in its main pane.
+  const mainThread = (channelId: string) =>
+    mainPane && (!current || channelId === currentId);
   const sideTabs = tabState.tabs.filter((tab) => tabPane(tab) === "side");
   const mainTabs = mainPane
     ? tabState.tabs.filter((tab) => tabPane(tab) === "main")
@@ -431,8 +434,7 @@ export function useConversationTabs({
     const order = pane === "main" ? mainTabs : sideTabs;
     const index = order.indexOf(tab);
     const crossing =
-      mainPane &&
-      tab.channelId === currentId &&
+      mainThread(tab.channelId) &&
       ((pane === "main" && delta === 1 && index === order.length - 1) ||
         (pane === "side" && delta === -1 && index === 0));
     let target: TabPane = pane;
@@ -465,7 +467,7 @@ export function useConversationTabs({
       return (
         currentVisit() &&
         tab?.kind === "thread" &&
-        (pane === "side" || (mainPane && tab.channelId === currentId))
+        (pane === "side" || mainThread(tab.channelId))
       );
     },
     move: (id, pane, index) => {
@@ -569,7 +571,7 @@ export function useConversationTabs({
         messageId,
         rootId,
         undefined,
-        mainPane && channelId === currentId ? undefined : "side",
+        mainThread(channelId) ? undefined : "side",
       );
       if (
         opening.current &&

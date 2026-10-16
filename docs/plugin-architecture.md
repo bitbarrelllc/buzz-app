@@ -978,7 +978,7 @@ unambiguous signed person/agent mentions share the inline hover styling. Names i
 ordinary prose never create notification intent or establish an identity.
 
 The conversation preview exposes top-level `registerTool`, `registerCompletion` and `registerInline`
-methods and stable `conversation.ui.Composer` / `.Message` / `.Thread` components. Generated
+methods and stable `conversation.ui.Composer` / `.Message` / `.Thread` / `.Tabs` components. Generated
 type-only `@buzz/author` declarations are exercised by a source-only external consumer
 fixture in `tests/fixtures/conversation-consumer`; it is built and installed only in
 the browser test's temporary profile.
@@ -1007,6 +1007,16 @@ Channels, showing a thread is one visit to its channel for unread state, and
 that visit lasts across threads of the same channel. The page holds no second
 message reader, cache or outbox.
 Exact message links still navigate to Channels rather than the page's route.
+
+`conversation.ui.Tabs({ id, session, scope, label, icon, children })` makes the
+page's content the first main tab of the host's conversation tab workspace.
+`children(open)` renders that tab; `open({ channelId, threadId? })` adds a host
+tab for a joined conversation and returns false for any other. A thread opens
+as a thread tab in the main or side pane per the thread placement setting, and
+a whole conversation opens as a side-pane conversation tab, each with the same
+reader and composer as Channels tabs. On such a page any thread can move between
+panes. `id` keys the page's tabs, which last for its community session as
+Channels tabs do; they keep no Back/Forward visits.
 
 ### Composer ownership and mention tools
 
