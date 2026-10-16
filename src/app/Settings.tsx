@@ -498,6 +498,8 @@ export function Settings({
   const [pluginFilter, setPluginFilter] = useState<"all" | "essentials">("all");
   const [pluginQuery, setPluginQuery] = useState("");
   const pluginSearch = useRef<HTMLElement>(null);
+  const pluginFiltersActive =
+    pluginFilter !== "all" || pluginQuery.trim() !== "";
   const reducedMotion = useReducedMotion();
   const listMotion = {
     layout: reducedMotion ? (false as const) : ("position" as const),
@@ -967,19 +969,33 @@ export function Settings({
                     {catalog && pluginGroups.length === 0 && (
                       <EmptyState
                         icon={<SquaresFourIcon size={24} />}
-                        title="No plugins found"
-                        description="Try another search or show all plugins."
+                        title={
+                          pluginFiltersActive
+                            ? coreGroup
+                              ? "No other plugins match"
+                              : "No plugins match"
+                            : coreGroup
+                              ? "No other plugins"
+                              : "No plugins yet"
+                        }
+                        description={
+                          pluginFiltersActive
+                            ? "Try another search or show all plugins."
+                            : "Additional plugins will appear here."
+                        }
                         action={
-                          <Button
-                            variant="subtle"
-                            onClick={() => {
-                              setPluginQuery("");
-                              setPluginFilter("all");
-                              pluginSearch.current?.focus();
-                            }}
-                          >
-                            Clear filters
-                          </Button>
+                          pluginFiltersActive ? (
+                            <Button
+                              variant="subtle"
+                              onClick={() => {
+                                setPluginQuery("");
+                                setPluginFilter("all");
+                                pluginSearch.current?.focus();
+                              }}
+                            >
+                              Clear filters
+                            </Button>
+                          ) : undefined
                         }
                       />
                     )}

@@ -365,7 +365,7 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   );
   fireEvent.change(search, { target: { value: "no-match" } });
   expect(within(content).queryAllByRole("article")).toHaveLength(0);
-  expect(within(content).getByText("No plugins found")).toBeVisible();
+  expect(within(content).getByText("No plugins match")).toBeVisible();
   const clearFilters = within(content).getByRole("button", {
     name: "Clear filters",
   });
@@ -813,11 +813,19 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
     within(featured).getByRole("button", { name: "View Profiles details" }),
   ).toBeVisible();
   fireEvent.change(search, { target: { value: "no-match" } });
-  expect(within(content).getByText("No plugins found")).toBeVisible();
+  expect(within(content).getByText("No other plugins match")).toBeVisible();
   expect(within(featured).queryAllByRole("article")).toHaveLength(3);
   fireEvent.click(trigger);
   fireEvent.click(screen.getByRole("button", { name: "Close plugin details" }));
   expect(trigger).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  snapshot.configuration.catalog = {
+    ...snapshot.configuration.catalog,
+    plugins: core,
+  };
+  act(publish);
+  expect(within(content).getByText("No other plugins")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
 });
 
 it("keeps external Essentials tags from granting curated markers or priority", () => {
