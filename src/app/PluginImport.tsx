@@ -435,13 +435,21 @@ export function PluginImport({
                     disabled={blocked}
                     onClick={async () => {
                       const current = lifetime.current;
+                      setError(null);
+                      setNotice(null);
                       const success = await plugins.installImport(
                         preview.token,
                         candidate.path,
                       );
-                      if (success && current.active)
+                      if (!current.active) return;
+                      if (success)
                         setNotice(
                           `${candidate.manifest.name} installed. You can choose another folder or close this preview.`,
+                        );
+                      else
+                        setError(
+                          plugins.snapshot().error ??
+                            "Plugin installation wasn’t confirmed. Check the preview and try again.",
                         );
                     }}
                   >

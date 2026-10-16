@@ -100,6 +100,8 @@ async function nativeImports(page, samples = []) {
         }
         if (command === "plugin_import_discard") return;
         if (command === "plugin_import_install") {
+          if (window.importInstallError)
+            throw new Error(window.importInstallError);
           const candidate = preview.candidates.find(
             (p) => p.path === args.path,
           );
@@ -569,4 +571,56 @@ test("checked-in local examples activate and work independently", async ({
   await expect(
     navigation.getByRole("option", { name: "Notes playground", exact: true }),
   ).toBeVisible();
+});
+
+// Browser-only: real modal focus and manager error propagation across the IPC boundary.
+test("Add keeps a rejected install reachable and retries the same preview", async ({
+  page,
+  app,
+}, info) => {
+  await nativeImports(page, [
+    {
+      path: "dist",
+      revision: "one",
+      manifest: { id: "example.retry", name: "Retry plugin", apiVersion: 1 },
+    },
+  ]);
+  await openPlugins(page, app.origin);
+  await button(page, "Add").click();
+  await button(page, "Browse plugin folder").click();
+  const dialog = page.getByRole("dialog", { name: "Add a plugin" });
+  await page.evaluate(() => {
+    window.importInstallError =
+      "Publisher mismatch. Choose a package from the installed publisher.";
+  });
+  await dialog
+    .getByRole("button", { name: "Install plugin", exact: true })
+    .click();
+  await expect(dialog.getByRole("alert")).toContainText("Publisher mismatch");
+  await expect(
+    dialog.getByRole("region", { name: "Plugin import preview" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Install plugin", exact: true }),
+  ).toBeFocused();
+  await dialog.screenshot({
+    path: info.outputPath("plugin-install-error.png"),
+  });
+  await page.evaluate(() => {
+    window.importInstallError = null;
+  });
+  await dialog
+    .getByRole("button", { name: "Install plugin", exact: true })
+    .press("Enter");
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(dialog.getByRole("status")).toContainText(
+    "Retry plugin installed",
+  );
+  expect(
+    await page.evaluate(() =>
+      window.importCalls
+        .filter((c) => c.command === "plugin_import_install")
+        .map((c) => c.args),
+    ),
+  ).toEqual(Array(2).fill({ token: "preview-one", path: "dist" }));
 });

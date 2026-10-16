@@ -410,6 +410,79 @@ it("signs in only to repositories the community authorizes", async () => {
   expect(git).toHaveBeenLastCalledWith("block/plugins", "");
 });
 
+it("keeps installation errors and retry inside the open dialog and clears stale success", async () => {
+  const preview: ImportPreview = {
+    token: "retry-preview",
+    source: "test",
+    commit: null,
+    warnings: [],
+    candidates: [
+      {
+        path: ".",
+        manifest: { id: "example.retry", name: "Retry plugin", apiVersion: 1 },
+        revision: "one",
+        publisher: null,
+      },
+    ],
+  };
+  let error: string | null = "Publisher mismatch";
+  let finish!: (success: boolean) => void;
+  const installImport = vi
+    .fn()
+    .mockResolvedValueOnce(false)
+    .mockResolvedValueOnce(true)
+    .mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const manager = {
+    imports: {
+      folder: vi.fn(async () => preview),
+      discard: vi.fn(async () => {}),
+    },
+    snapshot: () => ({ error }),
+    installImport,
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Browse plugin folder" }));
+  const dialog = screen.getByRole("dialog", { name: "Add a plugin" });
+  const install = await within(dialog).findByRole("button", {
+    name: "Install plugin",
+  });
+  fireEvent.click(install);
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Publisher mismatch",
+  );
+  expect(
+    within(dialog).getByRole("region", { name: "Plugin import preview" }),
+  ).toBeVisible();
+  error = null;
+  fireEvent.click(install);
+  expect(await within(dialog).findByRole("status")).toHaveTextContent(
+    "Retry plugin installed",
+  );
+  expect(within(dialog).queryByRole("alert")).toBeNull();
+  fireEvent.click(install);
+  expect(within(dialog).queryByRole("status")).toBeNull();
+  error = "Persistence failed";
+  finish(false);
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Persistence failed",
+  );
+  expect(installImport.mock.calls).toEqual(
+    Array(3).fill(["retry-preview", "."]),
+  );
+});
+
 it("shows a rejected dropped candidate's warning beside a usable sibling preview", async () => {
   const entryFile = (name: string, size: number) => ({
     name,
