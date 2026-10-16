@@ -42,6 +42,7 @@ function fixture() {
   const channels = [
     { id: "alpha", name: "alpha" },
     { id: "beta", name: "beta" },
+    { id: "pending", name: "pending", cached: true },
   ];
   const list = { channels };
   const rows = { rows: [{ id: "root", content: "Root text" }] };
@@ -68,6 +69,7 @@ function fixture() {
     navigation: { open: vi.fn() },
   } as unknown as ConversationHostServices;
   let open: (target: PageTabTarget) => boolean = () => false;
+  const openers = new Set<typeof open>();
   render(
     <PageTabs
       id="switchboard"
@@ -79,11 +81,13 @@ function fixture() {
     >
       {(next) => {
         open = next;
+        openers.add(next);
         return <p>Session list</p>;
       }}
     </PageTabs>,
   );
   return {
+    openers,
     open(target: PageTabTarget) {
       let opened = false;
       act(() => {
@@ -111,6 +115,8 @@ it("opens whole conversations as side tabs and refuses unknown ones", () => {
   setThreadPlacementPreference("side");
   const page = fixture();
   expect(page.open({ channelId: "missing" })).toBe(false);
+  // Membership a cached channel has not confirmed cannot show a tab.
+  expect(page.open({ channelId: "pending" })).toBe(false);
   expect(page.open({ channelId: "beta" })).toBe(true);
   expect(page.open({ channelId: "alpha", threadId: "root" })).toBe(true);
   expect(screen.getAllByRole("tablist")).toHaveLength(2);
@@ -125,4 +131,6 @@ it("opens whole conversations as side tabs and refuses unknown ones", () => {
   // Opening the same conversation again selects its tab.
   expect(page.open({ channelId: "beta" })).toBe(true);
   expect(screen.getByText("conversation in beta")).toBeVisible();
+  // Pages can depend on one opener across the renders its tabs cause.
+  expect(page.openers.size).toBe(1);
 });

@@ -717,6 +717,9 @@ export function useConversationTabs({
     openConversationLink,
     openConversationThread,
     openLinkedThread,
+    /** Whether a tab for this conversation could show it. */
+    canOpenConversation: (channelId: string) =>
+      !!tabChannel({ kind: "conversation", channelId }),
     announcement,
     drag,
     mainItems: mainTabs.map(tabItem),

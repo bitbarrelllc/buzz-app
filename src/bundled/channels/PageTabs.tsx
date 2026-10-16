@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import type { RelaySession } from "../../features/relay/session";
 import type { ConversationExtensions } from "../../features/conversation/contracts";
 import type { ConversationHostServices } from "../../features/conversation/ConversationHost";
@@ -6,6 +7,7 @@ import {
   buzzLinkTarget,
   isBuzzLink,
 } from "../../features/navigation/buzz-links";
+import { LinkThreadTabContext } from "../../features/conversation/LinkLabelContext";
 import { useChannelList } from "../../features/relay/react";
 import { channelIcon } from "../../features/channels/channel-icon";
 import { PanelWorkspace } from "../../features/panels/PanelWorkspace";
@@ -52,9 +54,13 @@ export function PageTabs({
     session.profiles,
     session.names,
   );
+  const mounted = useRef(false);
   const continuing = useRef(false);
   useLayoutEffect(() => {
-    continuing.current = true;
+    mounted.current = continuing.current = true;
+    return () => {
+      mounted.current = false;
+    };
   }, []);
   const fallbackFocus = useRef<HTMLDivElement>(null);
   const secondary = useConversationTabs({
@@ -89,29 +95,86 @@ export function PageTabs({
       return <Icon size="1rem" />;
     },
   });
-  const open = ({ channelId, threadId }: PageTabTarget) => {
-    if (!channels.some((channel) => channel.id === channelId)) return false;
-    if (threadId) {
-      secondary.openConversationThread(channelId, threadId, threadId);
+  // One stable opener, so a page's effects can depend on it; it reads the
+  // live workspace when called.
+  const opening = useRef<(target: PageTabTarget) => boolean>(() => false);
+  useLayoutEffect(() => {
+    opening.current = ({ channelId, threadId }) => {
+      if (!mounted.current || !secondary.canOpenConversation(channelId))
+        return false;
+      if (threadId) {
+        secondary.openConversationThread(channelId, threadId, threadId);
+        return true;
+      }
+      const tab = `conversation:${channelId}`;
+      tabState.setTabs((tabs) =>
+        tabs.some((item) => item.id === tab)
+          ? tabs
+          : [...tabs, { id: tab, kind: "conversation", channelId }],
+      );
+      tabState.select(tab);
       return true;
-    }
-    const tab = `conversation:${channelId}`;
-    tabState.setTabs((tabs) =>
-      tabs.some((item) => item.id === tab)
-        ? tabs
-        : [...tabs, { id: tab, kind: "conversation", channelId }],
-    );
-    tabState.select(tab);
+    };
+  });
+  const open = useCallback(
+    (target: PageTabTarget) => opening.current(target),
+    [],
+  );
+  const focusPage = useRef(false);
+  const closeAll = () => {
+    if (!secondary.closeAllTabs()) return false;
+    focusPage.current = true;
     return true;
   };
+  // The page owns the close-all command while its workspace is shown.
+  useLayoutEffect(() => {
+    const close = (event: Event) => {
+      const workspace = fallbackFocus.current;
+      if (
+        event.defaultPrevented ||
+        !workspace?.isConnected ||
+        workspace.closest('[hidden], [inert], [aria-hidden="true"]') ||
+        !workspace.getClientRects().length ||
+        document.querySelector('dialog[open], [aria-modal="true"]')
+      )
+        return;
+      flushSync(() => {
+        if (closeAll()) event.preventDefault();
+      });
+    };
+    window.addEventListener("buzz:close-all-tabs", close);
+    return () => window.removeEventListener("buzz:close-all-tabs", close);
+  });
+  // Surviving content keeps focus; a removed tab or closing menu returns it
+  // to the page's own tab.
+  useLayoutEffect(() => {
+    if (!focusPage.current) return;
+    focusPage.current = false;
+    const focused = document.activeElement;
+    if (
+      focused instanceof HTMLElement &&
+      focused !== document.body &&
+      focused.isConnected &&
+      !focused.closest('[inert], [hidden], [aria-hidden="true"], [role="menu"]')
+    )
+      return;
+    (
+      fallbackFocus.current?.querySelector<HTMLElement>(
+        '[role="tab"][data-tab-value="conversation"]',
+      ) ?? fallbackFocus.current
+    )?.focus({ preventScroll: true });
+  });
   const split = usePanelSplit();
   const hasTabs = secondary.items.length > 0;
   const showingPanel = tabState.paneOpen && hasTabs;
   const tabMenu = {
     key: JSON.stringify([scope, id]),
-    closeAll: secondary.closeAllTabs,
+    closeAll,
   };
-  const paneToggle = (ref?: typeof secondary.splitTrigger) => (
+  const paneToggle = (
+    onClick: () => void,
+    ref?: typeof secondary.splitTrigger,
+  ) => (
     <IconButton
       ref={ref}
       data-tab-pane-toggle=""
@@ -119,64 +182,73 @@ export function PageTabs({
       aria-label="Toggle tab pane"
       title={showingPanel ? "Close tab pane" : "Open tab pane"}
       aria-expanded={showingPanel}
-      onClick={() => tabState.setPaneOpen(!showingPanel)}
+      onClick={onClick}
       icon={<SidebarRightIcon size="1rem" aria-hidden="true" />}
     />
   );
   return (
-    <div className={styles.root}>
-      <div ref={split.ref} style={split.style} className={styles.board}>
-        <div ref={fallbackFocus} tabIndex={-1} className={styles.conversation}>
-          <PanelWorkspace
-            main
-            tabMenu={tabMenu}
-            drag={secondary.drag.main}
-            label={`${label} tabs`}
-            focusOnMount={false}
-            value={secondary.selectedMain}
-            select={(tab) =>
-              tabState.selectMain(tab === "conversation" ? undefined : tab)
-            }
-            actions={
-              hasTabs &&
-              !showingPanel && (
-                <span className={panelStyles.paneToggle}>
-                  {paneToggle(secondary.splitTrigger)}
-                </span>
-              )
-            }
-            items={[
-              { id: "conversation", label, icon, content: children(open) },
-              ...secondary.mainItems,
-            ]}
-          />
+    <LinkThreadTabContext value={secondary.openLinkedThread}>
+      <div className={styles.root}>
+        <div ref={split.ref} style={split.style} className={styles.board}>
+          <div
+            ref={fallbackFocus}
+            tabIndex={-1}
+            className={styles.conversation}
+          >
+            <PanelWorkspace
+              main
+              tabMenu={tabMenu}
+              drag={secondary.drag.main}
+              label={`${label} tabs`}
+              focusOnMount={false}
+              value={secondary.selectedMain}
+              select={(tab) =>
+                tabState.selectMain(tab === "conversation" ? undefined : tab)
+              }
+              actions={
+                hasTabs &&
+                !showingPanel && (
+                  <span className={panelStyles.paneToggle}>
+                    {paneToggle(
+                      () => tabState.setPaneOpen(true),
+                      secondary.splitTrigger,
+                    )}
+                  </span>
+                )
+              }
+              items={[
+                { id: "conversation", label, icon, content: children(open) },
+                ...secondary.mainItems,
+              ]}
+            />
+          </div>
+          {secondary.drag.feedback}
+          {secondary.hosts}
+          <p role="status" className="sr-only">
+            {secondary.announcement}
+          </p>
+          <PanelDock
+            open={showingPanel}
+            keepMounted={hasTabs && !tabState.paneOpen}
+            className={styles.panelStack}
+            resizeHandle={split.handle}
+          >
+            {hasTabs && (
+              <div className={styles.retainedPanel}>
+                <PanelWorkspace
+                  drag={secondary.drag.side}
+                  actions={paneToggle(secondary.closePane)}
+                  tabMenu={tabMenu}
+                  value={secondary.selectedTab}
+                  select={secondary.selectPanelTab}
+                  items={secondary.items}
+                  focusOnMount={continuing.current}
+                />
+              </div>
+            )}
+          </PanelDock>
         </div>
-        {secondary.drag.feedback}
-        {secondary.hosts}
-        <p role="status" className="sr-only">
-          {secondary.announcement}
-        </p>
-        <PanelDock
-          open={showingPanel}
-          keepMounted={hasTabs && !tabState.paneOpen}
-          className={styles.panelStack}
-          resizeHandle={split.handle}
-        >
-          {hasTabs && (
-            <div className={styles.retainedPanel}>
-              <PanelWorkspace
-                drag={secondary.drag.side}
-                actions={paneToggle()}
-                tabMenu={tabMenu}
-                value={secondary.selectedTab}
-                select={secondary.selectPanelTab}
-                items={secondary.items}
-                focusOnMount={continuing.current}
-              />
-            </div>
-          )}
-        </PanelDock>
       </div>
-    </div>
+    </LinkThreadTabContext>
   );
 }
