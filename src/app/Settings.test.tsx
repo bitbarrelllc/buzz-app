@@ -1257,6 +1257,18 @@ it("focuses details on open and restores the row after Escape", () => {
   expect(row).toHaveFocus();
 });
 
+it("announces the selected plugin's failure only once", () => {
+  const fixture = reviewPluginFixture();
+  fixture.external.error = "Activation failed";
+  fixture.publish();
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  );
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent("Activation failed");
+  expect(screen.getAllByText("Activation failed")).toHaveLength(2);
+});
+
 it("describes plugin rows with their supporting copy, publisher and curated marker", () => {
   const fixture = reviewPluginFixture();
   Object.assign(fixture.external.manifest, {

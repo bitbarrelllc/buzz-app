@@ -831,7 +831,7 @@ export function Settings({
                                 </article>
                                 {failure && (
                                   <p
-                                    role="alert"
+                                    role={active ? undefined : "alert"}
                                     className={`${styles.pluginRowError} error text-body-sm`}
                                   >
                                     {failure}
