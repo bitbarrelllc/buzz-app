@@ -140,9 +140,8 @@ export class DecisionsService extends Service implements Decisions {
     }
     this.current = isBackend(saved) ? saved : DEFAULT_DECISION_BACKEND;
   }
-  backend(): DecisionBackend {
-    return this.current;
-  }
+  // Bound, so a caller can pass these on, as React's external stores do.
+  backend = (): DecisionBackend => this.current;
   /** Host-only: Settings chooses the backend. Not part of `Decisions`. */
   setBackend(backend: DecisionBackend): void {
     if (!isBackend(backend) || backend === this.current) return;
@@ -154,10 +153,10 @@ export class DecisionsService extends Service implements Decisions {
     }
     for (const listener of [...this.listeners]) listener();
   }
-  subscribe(listener: () => void): () => void {
+  subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
-  }
+  };
   async decide(request: DecisionRequest): Promise<DecisionResult> {
     const backend = this.current;
     const failed = (reason: DecisionFailure): DecisionResult =>

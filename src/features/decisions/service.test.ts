@@ -41,8 +41,11 @@ it("uses and saves the backend Settings chooses, and tells subscribers", async (
   const native = vi.fn<DecisionsNative>(async (backend) => answered(backend));
   const service = new DecisionsService(new Context(), native, storage);
   const listener = vi.fn();
-  const stop = service.subscribe(listener);
+  // Unbound, as React's useSyncExternalStore calls them.
+  const { backend, subscribe } = service;
+  const stop = subscribe(listener);
   service.setBackend("typesafe");
+  expect(backend()).toBe("typesafe");
   expect(listener).toHaveBeenCalledTimes(1);
   expect(storage.values.get(DECISION_BACKEND_KEY)).toBe("typesafe");
   await service.decide(request);
