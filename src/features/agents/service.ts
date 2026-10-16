@@ -1128,18 +1128,13 @@ export class AgentsService extends Service implements Agents {
           ...(teams ? { teams } : {}),
         });
       },
-      team: (pubkey, admitted) => {
+      team: (agent, admitted) => {
         // Local teams stay local; for an id the relay knows in this run's
         // owner and community, archived or unreadable too, its copy wins.
-        const agent = this.agent(pubkey);
         const relay = new Set(
-          (agent
-            ? this.configJournals.teams.known(
-                agent.owner,
-                originOf(agent.relay) ?? "",
-              )
-            : undefined
-          )?.map((team) => team.id),
+          this.configJournals.teams
+            .known(agent.owner, originOf(agent.relay) ?? "")
+            ?.map((team) => team.id),
         );
         return teamPrompt(
           admitted
@@ -1149,7 +1144,7 @@ export class AgentsService extends Service implements Agents {
               ]
             : this.teamList,
           this.identities.filter((identity) => !identity.deleted),
-          pubkey,
+          agent.pubkey,
         );
       },
       templates: (agent) => {

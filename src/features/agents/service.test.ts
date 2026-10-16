@@ -110,6 +110,7 @@ async function setup({
   runOnce = undefined as AgentType<Config>["runOnce"],
   jev = undefined as ClassifierNative | undefined,
   binding = undefined as ((agent: Agent) => ConfigBinding) | undefined,
+  models = async () => {},
 } = {}) {
   const ctx = new Context();
   ctx.provide("pluginStatus", {
@@ -179,20 +180,23 @@ async function setup({
         },
       },
     }),
-    models: async () => ({
-      current: "fast",
-      models: [
-        {
-          id: "fast",
-          label: "Fast",
-          efforts: [
-            { id: "low", label: "Low" },
-            { id: "high", label: "High" },
-          ],
-        },
-        { id: "deep", label: "Deep", efforts: [{ id: "max", label: "Max" }] },
-      ],
-    }),
+    models: async () => {
+      await models();
+      return {
+        current: "fast",
+        models: [
+          {
+            id: "fast",
+            label: "Fast",
+            efforts: [
+              { id: "low", label: "Low" },
+              { id: "high", label: "High" },
+            ],
+          },
+          { id: "deep", label: "Deep", efforts: [{ id: "max", label: "Max" }] },
+        ],
+      };
+    },
     run,
     ...(runOnce ? { runOnce } : {}),
   };
@@ -6493,6 +6497,52 @@ describe("Delete as a recoverable archive", () => {
       expect(f.run.mock.calls[0]?.[0].team).toContain("TEAM RULE");
       expect(f.run.mock.calls[0]?.[0].team).not.toContain("LOCAL COPY MUST GO");
     } finally {
+      await f.ctx.fiber.dispose();
+    }
+  });
+
+  it("with config sync on, keeps the relay team over its local copy when the community disconnects during model selection", async () => {
+    const relay = configRelay();
+    communityFake.value = relay.opens;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const selecting = vi.fn(() => gate);
+    const f = await setup({ identities: [here(alder)], models: selecting });
+    try {
+      await vi.waitFor(() =>
+        expect(f.service.find(alder)?.configBase).toBeDefined(),
+      );
+      const local = await f.service.saveTeam({
+        name: "Local",
+        instructions: "LOCAL COPY MUST GO",
+        members: [alder],
+      });
+      await relay.remoteTeam(local.id, [alder]);
+      await relay.opens.mock.results[0]?.value.refreshTeams();
+      f.emit({
+        events: [
+          event("disconnect-during-pick", {
+            pubkey: viewer,
+            tags: [
+              ["h", channel],
+              ["p", alder],
+              ["model", alder, "fast"],
+            ],
+          }),
+        ],
+        channelId: channel,
+      });
+      await vi.waitFor(() => expect(selecting).toHaveBeenCalledTimes(1));
+      f.connect(false);
+      expect(f.service.snapshot().running).toEqual([]);
+      release();
+      await vi.waitFor(() => expect(f.run).toHaveBeenCalledTimes(1));
+      expect(f.run.mock.calls[0]?.[0].team).toContain("TEAM RULE");
+      expect(f.run.mock.calls[0]?.[0].team).not.toContain("LOCAL COPY MUST GO");
+    } finally {
+      release();
       await f.ctx.fiber.dispose();
     }
   });

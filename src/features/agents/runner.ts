@@ -336,8 +336,9 @@ export type RunnerHost = {
   /** Saves one record; throws when storage refuses it. */
   write(record: AgentRecord): void;
   /** The team sections of its prompt; empty without a team. `admitted`: the
-   * teams its start resolved from synced config, used instead of local ones. */
-  team(pubkey: string, admitted?: readonly Team[]): string;
+   * teams its start resolved from synced config, which win over local copies
+   * with the same id in `agent`'s owner and community. */
+  team(agent: Agent, admitted?: readonly Team[]): string;
   /** What its next run starts with, from this device's storage only. */
   start(agent: Agent): Start<unknown>;
   /** The owner's channel templates as the agent's handle offers them. */
@@ -1786,7 +1787,7 @@ export class AgentRunners {
       const pick = await pickFor(job.trigger, agent, type);
       const start = this.host.start(agent);
       if (!start.ok) throw new Error(start.reason);
-      const team = this.host.team(agent.pubkey, start.teams);
+      const team = this.host.team(agent, start.teams);
       signal.throwIfAborted();
       const delivery = Object.freeze({
         trigger: job.trigger,
