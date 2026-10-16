@@ -169,11 +169,24 @@ hide its Retry. Move stays gated until that read succeeds. Mute optimism remains
 presentation-only; notification policy continues to use confirmed mutes. This
 composition does not change the whole-record cross-device limitation below.
 
-Collapsed section keys and sidebar scroll remain separate, scoped view intent.
+Sections collapse and expand through their headers; the ellipsis menu does not
+repeat that action. Collapsed section keys and sidebar scroll remain separate, scoped view intent.
 They survive page switches in the same mounted sidebar, are saved when that
 sidebar exits its session, and restore before paint when the roster and groups
 are available; navigation history does not own them. Search lives in the top-bar
-palette; legacy sidebar filters are ignored. The saved-groups
+palette; legacy sidebar filters are ignored. Each section's ellipsis menu offers
+**Filter → All, Unreads, Active in last 30 days**. Unreads shows channels with observed or
+manually marked unread messages or unread thread activity; Active in last 30 days uses verified
+activity within the last 30 days. These filters are local view intent, scoped to
+the community and viewer, and leave saved sorting and section membership unchanged.
+The currently open channel remains visible in its section regardless of its filter,
+however it was opened. Navigating away removes that exception. **View All**
+appears first in the section menu only when Unreads or Active in last 30 days is selected. It
+lists only eligible channels not currently visible in the section, in its existing order; choosing one opens
+the section and channel without changing the filter. Choices reuse the sidebar's
+channel-type icons, unread emphasis, attention/thread dots and working-agent
+indicators. The temporarily visible open channel is excluded. Empty filtered sections retain
+their header and menu so the filter can be changed or a hidden row opened. The saved-groups
 browser regression records every visible return frame and holds the redundant
 decode path, so eventual restoration cannot conceal a fallback-group/scroll jump.
 

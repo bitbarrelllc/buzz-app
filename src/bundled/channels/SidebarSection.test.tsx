@@ -15,6 +15,52 @@ import { SidebarSection } from "./SidebarSection";
 
 afterEach(cleanup);
 
+it("chooses a filter with the keyboard and lists all channels independently of visible children", async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  const select = vi.fn();
+  const toggle = vi.fn();
+  render(
+    <SidebarSection
+      sectionKey="channels"
+      title="Channels"
+      open={false}
+      onToggle={toggle}
+      filter={{ value: "unreads", change }}
+      channels={{ rows: [{ id: "quiet", name: "Quiet channel" }], select }}
+    >
+      <p>No channels match this filter.</p>
+    </SidebarSection>,
+  );
+  const trigger = screen.getByRole("button", {
+    name: "More actions for Channels",
+  });
+  await user.click(trigger);
+  expect(
+    within(
+      await screen.findByRole("menu", { name: "More actions for Channels" }),
+    ).getAllByRole("menuitem")[0],
+  ).toHaveTextContent("View All");
+  await user.keyboard("{ArrowDown}{ArrowDown}{ArrowRight}");
+  expect(
+    await screen.findByRole("menuitemradio", { name: "Unreads" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await user.click(
+    screen.getByRole("menuitemradio", { name: "Active in last 30 days" }),
+  );
+  expect(change).toHaveBeenCalledExactlyOnceWith("active");
+  await waitFor(() => expect(trigger).toHaveFocus());
+  await user.click(trigger);
+  await user.click(await screen.findByRole("menuitem", { name: "View All" }));
+  // jsdom has no submenu geometry; browser checks own pointer travel/focus.
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Quiet channel" }),
+  );
+  expect(select).toHaveBeenCalledExactlyOnceWith("quiet");
+  expect(toggle).toHaveBeenCalledExactlyOnceWith(true);
+  expect(change).toHaveBeenCalledOnce();
+});
+
 it.each([true, false])(
   "keeps Starred creation independent of collapse and respects availability (%s)",
   async (available) => {
@@ -79,15 +125,12 @@ function Section({
 }
 it("keeps section actions independent of disclosure and supports menu keyboard dismissal", async () => {
   const user = userEvent.setup();
-  render(<Section />);
+  render(<Section sort={{ value: "alpha", change: vi.fn() }} />);
   expect(screen.getByRole("button", { name: "General" })).toBeVisible();
   const trigger = screen.getByRole("button", {
     name: "More actions for Channels",
   });
-  await user.click(trigger);
-  await user.click(
-    await screen.findByRole("menuitem", { name: "Collapse section" }),
-  );
+  await user.click(screen.getByLabelText("Channels"));
   expect(
     screen.getByLabelText("Channels").closest("details"),
   ).not.toHaveAttribute("open");
@@ -95,6 +138,9 @@ it("keeps section actions independent of disclosure and supports menu keyboard d
   expect(section).not.toHaveAttribute("data-menu-open");
   await user.click(trigger);
   await waitFor(() => expect(screen.getByRole("menu")).toHaveFocus());
+  expect(
+    screen.queryByRole("menuitem", { name: "Expand section" }),
+  ).not.toBeInTheDocument();
   expect(section).toHaveAttribute("data-menu-open");
   await user.keyboard("{Escape}");
   await waitFor(() =>
@@ -118,7 +164,9 @@ it("keeps one controlled actions menu, closes it after sorting, and restores tri
     name: "More actions for Channels",
   });
   expect(actions).toHaveTextContent("Sort");
-  expect(actions).toHaveTextContent("Collapse section");
+  expect(
+    within(actions).queryByRole("menuitem", { name: "Collapse section" }),
+  ).not.toBeInTheDocument();
   await user.keyboard("{ArrowDown}{ArrowRight}");
   await user.click(
     await screen.findByRole("menuitemradio", { name: "Recent" }),
@@ -315,7 +363,7 @@ it("never offers removal for built-in sections even when a callback is supplied"
   await user.click(
     screen.getByRole("button", { name: "More actions for Channels" }),
   );
-  await screen.findByRole("menuitem", { name: "Collapse section" });
+  await screen.findByRole("menu", { name: "More actions for Channels" });
   expect(screen.queryByRole("menuitem", { name: "Remove section" })).toBeNull();
   expect(remove).not.toHaveBeenCalled();
 });
@@ -381,7 +429,7 @@ it("never offers moves without a move capability", async () => {
   await user.click(
     screen.getByRole("button", { name: "More actions for Channels" }),
   );
-  await screen.findByRole("menuitem", { name: "Collapse section" });
+  await screen.findByRole("menu", { name: "More actions for Channels" });
   expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
   expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
 });

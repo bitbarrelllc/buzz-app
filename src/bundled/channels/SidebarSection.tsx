@@ -25,9 +25,12 @@ import {
   ArrowUpIcon,
   ArrowsDownUpIcon,
   CaretDownIcon,
-  CaretUpIcon,
+  ChatsCircleIcon,
+  ChatUnreadIcon,
   DotsThreeIcon,
+  EyeIcon,
   PlusIcon,
+  SlidersHorizontalIcon,
   TextAaIcon,
   TimerIcon,
   TrashIcon,
@@ -36,8 +39,11 @@ import { IconButton } from "../../shared/design-system/ui/IconButton";
 import { Button } from "../../shared/design-system/ui/Button";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import type { RelaySession } from "../../features/relay/session";
+import type { ChannelSummary } from "../../features/relay/contracts";
+import type { SidebarFilter } from "./useSidebarFilters";
 import { SidebarGroupIcon } from "./SidebarGroupIcon";
 import { SidebarStarIcon } from "./SidebarStarIcon";
+import { ChannelSidebarMenuItem } from "./ChannelSidebarMenuItem";
 import styles from "./Channels.module.css";
 
 export function SidebarSection({
@@ -51,6 +57,8 @@ export function SidebarSection({
   createChannel,
   newMessage,
   sort,
+  filter,
+  channels,
   dropRef,
   dropTarget = false,
   dropEdge,
@@ -80,6 +88,16 @@ export function SidebarSection({
     | {
         value: "alpha" | "recent";
         change: (mode: "alpha" | "recent") => void;
+      }
+    | undefined;
+  filter?:
+    | { value: SidebarFilter; change: (mode: SidebarFilter) => void }
+    | undefined;
+  channels?:
+    | {
+        rows: readonly ChannelSummary[];
+        selected?: string | undefined;
+        select: (id: string) => void;
       }
     | undefined;
   dropRef?: Ref<HTMLDivElement> | undefined;
@@ -192,6 +210,93 @@ export function SidebarSection({
               )}
             />
             <MenuPopup align="end" aria-label={`More actions for ${title}`}>
+              {channels && filter && filter.value !== "all" && (
+                <>
+                  <MenuSubmenu>
+                    <MenuSubmenuTrigger disabled={!channels.rows.length}>
+                      <MenuIcon>
+                        <EyeIcon size={14} />
+                      </MenuIcon>
+                      View All
+                    </MenuSubmenuTrigger>
+                    <MenuSubmenuPopup
+                      aria-label={`Hidden channels in ${title}`}
+                      finalFocus={false}
+                    >
+                      {channels.rows.map((channel) => {
+                        const select = () => {
+                          onToggle(true);
+                          channels.select(channel.id);
+                          setMenuOpen(false);
+                        };
+                        return session ? (
+                          <ChannelSidebarMenuItem
+                            key={channel.id}
+                            channel={channel}
+                            session={session}
+                            selected={channels.selected === channel.id}
+                            onSelect={select}
+                          />
+                        ) : (
+                          <MenuItem
+                            key={channel.id}
+                            aria-current={
+                              channels.selected === channel.id
+                                ? "page"
+                                : undefined
+                            }
+                            onClick={select}
+                          >
+                            {channel.name}
+                          </MenuItem>
+                        );
+                      })}
+                    </MenuSubmenuPopup>
+                  </MenuSubmenu>
+                  <MenuSeparator />
+                </>
+              )}
+              {filter && (
+                <MenuSubmenu>
+                  <MenuSubmenuTrigger>
+                    <MenuIcon>
+                      <SlidersHorizontalIcon size={14} />
+                    </MenuIcon>
+                    Filter
+                  </MenuSubmenuTrigger>
+                  <MenuSubmenuPopup
+                    aria-label={`Filter ${title}`}
+                    finalFocus={false}
+                  >
+                    <MenuRadioGroup
+                      value={filter.value}
+                      onValueChange={(mode) => {
+                        filter.change(mode as SidebarFilter);
+                        setMenuOpen(false);
+                      }}
+                    >
+                      <MenuRadioItem closeOnClick={false} value="all">
+                        <MenuIcon>
+                          <ChatsCircleIcon size={14} />
+                        </MenuIcon>
+                        All
+                      </MenuRadioItem>
+                      <MenuRadioItem closeOnClick={false} value="unreads">
+                        <MenuIcon>
+                          <ChatUnreadIcon size={14} />
+                        </MenuIcon>
+                        Unreads
+                      </MenuRadioItem>
+                      <MenuRadioItem closeOnClick={false} value="active">
+                        <MenuIcon>
+                          <TimerIcon size={14} />
+                        </MenuIcon>
+                        Active in last 30 days
+                      </MenuRadioItem>
+                    </MenuRadioGroup>
+                  </MenuSubmenuPopup>
+                </MenuSubmenu>
+              )}
               {sort && (
                 <MenuSubmenu>
                   <MenuSubmenuTrigger>
@@ -227,21 +332,6 @@ export function SidebarSection({
                   </MenuSubmenuPopup>
                 </MenuSubmenu>
               )}
-              <MenuItem
-                onClick={() => {
-                  onToggle(!open);
-                  setMenuOpen(false);
-                }}
-              >
-                <MenuIcon>
-                  {open ? (
-                    <CaretUpIcon size={14} />
-                  ) : (
-                    <CaretDownIcon size={14} />
-                  )}
-                </MenuIcon>
-                {open ? "Collapse section" : "Expand section"}
-              </MenuItem>
               {move && (
                 <>
                   <MenuItem

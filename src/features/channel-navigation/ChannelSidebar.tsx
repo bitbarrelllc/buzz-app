@@ -67,6 +67,7 @@ import { useChannelLabels } from "../../bundled/channels/useChannelLabels";
 import { useHiddenDms } from "../../bundled/channels/useHiddenDms";
 import { useSidebarPreferences } from "../../bundled/channels/useSidebarPreferences";
 import { useSidebarView } from "../../bundled/channels/useSidebarView";
+import { useSidebarFilters } from "../../bundled/channels/useSidebarFilters";
 import {
   sidebarSections,
   isChannelSectionKey,
@@ -518,6 +519,12 @@ function ReadySidebar({
         new Set([...hiddenDms.hiddenIds, ...dmVisibility.hidden]),
       )
     : [];
+  const filteredSections = useSidebarFilters(
+    sections,
+    sidebar.filters,
+    current?.id,
+    queries.unread,
+  );
   const focusChannelPlacement = (channelId: string) => {
     const data = queries.sidebarPreferences.snapshot().data;
     const sectionId = data?.assignments[channelId];
@@ -818,7 +825,7 @@ function ReadySidebar({
     rowMenu,
     open: openMenu,
     close: closeMenu,
-  } = useChannelRowMenu(sections, rowActions);
+  } = useChannelRowMenu(filteredSections, rowActions);
   const openRowMenu = useCallback(
     (channel: ChannelSummary, sectionKey: string, anchor?: HTMLElement) => {
       readAction.reset();
@@ -1104,7 +1111,7 @@ function ReadySidebar({
                 );
               }}
             >
-              {sections.map((section) => (
+              {filteredSections.map((section) => (
                 <DroppableSidebarSection
                   key={section.key}
                   groupIndex={groupIds.indexOf(
@@ -1140,7 +1147,16 @@ function ReadySidebar({
                   session={queries}
                   open={!sidebar.collapsed.includes(section.key)}
                   onToggle={(open) => sidebar.toggle(section.key, open)}
-                  channelCount={section.rows.length}
+                  channelCount={section.allRows.length}
+                  filter={{
+                    value: sidebar.filters[section.key] ?? "all",
+                    change: (mode) => sidebar.filter(section.key, mode),
+                  }}
+                  channels={{
+                    rows: section.hiddenRows,
+                    selected: current?.id,
+                    select,
+                  }}
                   onRemove={
                     preferences.removeSectionWritable &&
                     section.key.startsWith("group:")
@@ -1208,6 +1224,11 @@ function ReadySidebar({
                       : undefined
                   }
                 >
+                  {!section.rows.length && sidebar.filters[section.key] && (
+                    <p className={styles.empty}>
+                      No channels match this filter.
+                    </p>
+                  )}
                   {section.rows.map((channel) => {
                     const selected =
                       current?.id === channel.id ? current.id : undefined;
