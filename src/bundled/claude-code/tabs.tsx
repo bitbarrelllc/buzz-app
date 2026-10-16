@@ -1,5 +1,6 @@
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { AgentSaveButton } from "../../features/agents/AgentSaveButton";
+import { ProviderDialogActions } from "../../features/agents/ProviderDialogActions";
 // Claude's provider controls, New agent choices, and agent settings.
 import {
   useEffect,
@@ -522,17 +523,6 @@ export function createTabs({
                   ? "Waiting for Claude Code sign-in…"
                   : (latestOutputLine ?? "Installing Claude Code…")}
               </p>
-              <Button onClick={() => void setup.cancel()}>Cancel</Button>
-            </div>
-          ) : action ? (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                autoFocus
-                variant="prominent"
-                onClick={() => void setup.run(action.step)}
-              >
-                {action.label}
-              </Button>
             </div>
           ) : null}
           {status?.state === "missing" && !state.running && (
@@ -584,7 +574,16 @@ export function createTabs({
         {ready && (
           <p className="m-0 text-body-sm text-subtle">Claude is signed in.</p>
         )}
-        <Button onClick={onClose}>Done</Button>
+        <ProviderDialogActions>
+          <Button onClick={() => state.running && !ready ? void setup.cancel() : onClose()}>
+            {ready ? "Done" : "Cancel"}
+          </Button>
+          {!ready && action && !state.running && !state.checking && (
+            <Button autoFocus variant="prominent" onClick={() => void setup.run(action.step)}>
+              {action.label}
+            </Button>
+          )}
+        </ProviderDialogActions>
       </div>
     );
   }
@@ -837,6 +836,7 @@ export function createTabs({
             setupState.models,
           )}
           defaultDescription="Following the provider's model default"
+          loading={setupState.modelsChecking}
           onChange={(model) => {
             // An effort the new model does not list goes back to the default;
             // without Claude's list, the effort is kept.
@@ -858,6 +858,7 @@ export function createTabs({
         <Select
           label="Thinking"
           valueLabel={draft.effort ? undefined : "Automatic"}
+          valueSuffix={draft.effort ? undefined : " · Default"}
           variant="preference"
           value={draft.effort}
           groups={[{ label: "", options: effortOptions }]}

@@ -102,15 +102,17 @@ function applied({
   loggedIn = true,
   available = true,
   version = "2.1.292",
+  latest = version,
   files = {},
   catalog = { listed: true },
 }: {
   loggedIn?: boolean;
   available?: boolean;
   version?: string;
+  latest?: string;
   files?: Record<string, string>;
   /** Whether Claude lists its models when asked. */
-  catalog?: { listed: boolean };
+  catalog?: { listed: boolean; ready?: Promise<void> };
 } = {}) {
   let type: AgentType<Config> | undefined;
   const spawn = vi.fn(async (id: string, options: HostProcessOptions = {}) => {
@@ -194,6 +196,7 @@ function applied({
           request?: { subtype?: string };
         };
         if (message.request?.subtype !== "initialize") return;
+        await catalog.ready;
         queueMicrotask(() =>
           options.onStdout?.(
             `${JSON.stringify({
@@ -218,12 +221,12 @@ function applied({
     pluginOwner: { id: "buzz.claude-code", revision: "r1" },
     host: {
       spawn,
-      // downloads.claude.ai offering the release installed, so no update runs.
+      // Offer the installed release unless the test requests an update.
       request: vi.fn(async ({ url }: { url: string }) => ({
         status: 200,
         headers: {},
         body: url.endsWith("/latest")
-          ? version
+          ? latest
           : JSON.stringify({
               platforms: { "darwin-arm64": { checksum: "a".repeat(64) } },
             }),
@@ -646,7 +649,7 @@ it("offers the model's thinking levels, dropping one the next model lacks", asyn
   await user.click(screen.getByRole("combobox", { name: "Model" }));
   await user.click(await screen.findByRole("option", { name: "Haiku 4.5" }));
   const thinking = screen.getByRole("combobox", { name: "Thinking" });
-  expect(thinking).toHaveTextContent("Automatic");
+  expect(thinking).toHaveTextContent("Automatic · Default");
   await user.click(thinking);
   await user.click(await screen.findByRole("option", { name: "High" }));
   await user.click(screen.getByRole("button", { name: "Save" }));
@@ -674,6 +677,7 @@ it("keeps a saved thinking level changeable without Claude's model list", async 
   await user.click(
     await screen.findByRole("option", { name: "Automatic · Default" }),
   );
+  expect(thinking).toHaveTextContent("Automatic · Default");
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(save).toHaveBeenCalledWith(DEFAULT_CONFIG);
 });

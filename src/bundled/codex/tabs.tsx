@@ -420,6 +420,7 @@ export function createTabs(
           compact
           groupByFamily
           label="Codex default model"
+          loading={state.checking}
           models={choices(state.data).map((choice) => ({
             ...choice,
             efforts: [
@@ -570,6 +571,7 @@ export function createTabs(
             valueLabel={
               draft.effort ? undefined : codexDefaultEffortLabel("", selected)
             }
+            valueSuffix={draft.effort ? undefined : " · Default"}
             variant="preference"
             value={draft.effort}
             groups={[{ label: "", options: efforts }]}
@@ -922,6 +924,7 @@ export function createTabs(
                 ? undefined
                 : codexDefaultEffortLabel(effective.effort, selected)
             }
+            valueSuffix={draft.effort ? undefined : " · Default"}
             variant="preference"
             value={draft.effort}
             groups={[{ label: "", options: efforts }]}

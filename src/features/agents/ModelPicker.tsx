@@ -199,6 +199,8 @@ export function ModelPicker({
     };
   });
   const selected = shown.find((model) => model.id === value) ?? fallback;
+  const inherited = includeDefault && selected.id === "";
+  const selectedLabel = inherited ? `${selected.label} · Default` : selected.label;
   const choices =
     allowCustomModel && !compact ? [...shown, CUSTOM_MODEL_ACTION] : shown;
   const openCustomDialog = () => {
@@ -221,7 +223,7 @@ export function ModelPicker({
             compact={compact}
             onConfigure={onConfigure}
             models={shown.filter((model) => model.id !== "")}
-            selected={selected}
+            selected={loading ? { ...selected, label: "Loading models…" } : selected}
             defaultChoice={includeDefault ? fallback : undefined}
             disabled={disabled || loading}
             description={description}
@@ -232,8 +234,9 @@ export function ModelPicker({
           <Select
             label={label}
             value={selected.id}
-            valueLabel={selected.label}
-            valueTitle={selected.label}
+            valueLabel={loading ? "Loading models…" : selected.label}
+            valueSuffix={!loading && inherited ? " · Default" : undefined}
+            valueTitle={loading ? "Loading models…" : selectedLabel}
             leading={<ModelIcon model={`${selected.id} ${selected.label}`} />}
             variant={compact ? "compact" : "preference"}
             appearance={appearance}
@@ -260,7 +263,6 @@ export function ModelPicker({
             }}
           />
         )}
-        {loading && <p className="buzz-field-description">Loading models…</p>}
       </div>
       {allowCustomModel && customModel !== null && (
         <CustomModelDialog

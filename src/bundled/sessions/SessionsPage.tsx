@@ -53,7 +53,7 @@ import {
 } from "react";
 import type { PageNavigation } from "../../features/navigation/service";
 import { useMePlacement } from "../../features/sessions/personal";
-import { meSelection, meSection, meTarget } from "../me/routes";
+import { meAgent, meSelection, meSection, meTarget } from "../me/routes";
 import { subscribeView } from "../../shared/view-state";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
@@ -78,12 +78,7 @@ import {
 } from "../../features/conversation/Conversation";
 import type { MessageLinkOrigin } from "../../features/messages/MessageRow";
 import { NewSessionComposer } from "../../features/sessions/NewSessionComposer";
-import { SessionAgentControl } from "../../features/sessions/SessionAgentControl";
 import { SessionProjectControl } from "../../features/sessions/SessionProjectControl";
-import {
-  readSelectedAssistant,
-  writeSelectedAssistant,
-} from "../../features/sessions/selected-assistant";
 import {
   SessionColumn,
   SessionHeading,
@@ -205,6 +200,7 @@ function SessionsView({
   const placement = useMePlacement(session);
   const selected = meSelection(navigation?.target);
   const newSection = meSection(navigation?.target);
+  const newAgent = meAgent(navigation?.target);
   const pendingDraft = useSyncExternalStore(
     useCallback((notify) => subscribeView(scope, notify), [scope]),
     () =>
@@ -276,8 +272,13 @@ function SessionsView({
           focusRequest={
             navigation?.focus === "preserve" ? 0 : (navigation?.signal ?? 0)
           }
-          key={pendingDraft ?? newSection ?? "unfiled"}
+          key={
+            pendingDraft ??
+            newSection ??
+            (newAgent ? `agent:${newAgent}` : "unfiled")
+          }
           resumeDraftKey={pendingDraft}
+          agent={newAgent}
           sectionId={
             pendingDraft?.includes(":section:")
               ? pendingDraft.split(":section:")[1]
@@ -402,13 +403,6 @@ function SessionWork({
   const [settingsOpen, setSettingsOpen] = useState<{
     visit: AbortSignal | undefined;
   }>();
-  const [selectedAgent, setSelectedAgent] = useState(() =>
-    readSelectedAssistant(scope, channel.id),
-  );
-  const selectAgent = (agent: string) => {
-    setSelectedAgent(agent);
-    writeSelectedAssistant(scope, channel.id, agent);
-  };
   const placement = useMePlacement(session);
   const inMe = placement.ids.includes(channel.id);
   const personalChat = inMe && channel.channelType === "session";
@@ -518,6 +512,7 @@ function SessionWork({
             <ChannelMembersButton session={session} channelId={channel.id} />
             {drawer.launchers}
             <SessionShare
+              navigator={navigator}
               session={session}
               channel={channel}
               signal={navigation?.signal}
@@ -672,27 +667,16 @@ function SessionWork({
                 channel.channelType === "session" &&
                 (placement.status !== "ready" || inMe)
               }
-              selectedAgent={personalChat ? selectedAgent : undefined}
+              requireMention={personalChat}
               trailingTool={
                 personalChat ? (
-                  <>
-                    <SessionAgentControl
-                      session={session}
-                      channelId={channel.id}
-                      value={selectedAgent}
-                      onChange={selectAgent}
-                      disabled={
-                        !!channel.archived || placement.status !== "ready"
-                      }
-                    />
-                    <SessionProjectControl
-                      session={session}
-                      channelId={channel.id}
-                      disabled={
-                        !!channel.archived || placement.status !== "ready"
-                      }
-                    />
-                  </>
+                  <SessionProjectControl
+                    session={session}
+                    channelId={channel.id}
+                    disabled={
+                      !!channel.archived || placement.status !== "ready"
+                    }
+                  />
                 ) : undefined
               }
               onSend={setSent}

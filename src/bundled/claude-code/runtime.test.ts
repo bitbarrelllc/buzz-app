@@ -53,11 +53,27 @@ function setup(
     /** Channels filed in the owner's Me; the owner is the viewer. */
     me?: Set<string>;
     channelType?: "stream" | "session";
+    named?: Delivery["named"];
+    title?: string;
   }> = {},
 ) {
   const fake = fakeSpawn();
   const spawn: typeof fake.spawn = async (id, spawnOptions) => {
     await options.starting;
+    if (options.title && (id === "workspace" || id === "read")) {
+      spawnOptions?.onStdout?.(
+        id === "workspace"
+          ? "/Users/me/.buzz\n"
+          : Buffer.from(
+              JSON.stringify({ type: "ai-title", aiTitle: options.title }) +
+                "\n",
+            ).toString("base64"),
+      );
+      return {
+        exited: Promise.resolve(0),
+        kill: async () => {},
+      } as unknown as Awaited<ReturnType<typeof fake.spawn>>;
+    }
     const process = fake.spawn(id, spawnOptions);
     const started = fake.processes.at(-1);
     if (options.hold && started) started.hold = true;
@@ -185,6 +201,7 @@ function setup(
       config: DEFAULT_CONFIG,
       signal,
       workingUntil,
+      ...(options.named ? { named: options.named } : {}),
       // The host's answer, as it is when asked.
       current: () =>
         trigger.type === "mention" ||
@@ -286,6 +303,21 @@ it("hands a mention to its thread's session", async () => {
   expect(claude?.options.args).toContain("--mcp-config");
   expect(claude?.options.cwd).toBe("~/.buzz");
   expect(published).toEqual([]);
+});
+
+it("tells a subscriber when a new conversation's first turn starts working", async () => {
+  const { runtime, deliver, claudes } = setup([], { hold: true });
+  // As a view does: each notification reads the snapshot again.
+  runtime.subscribe(() => void runtime.sessions(self));
+  expect(runtime.sessions(self)).toEqual([]);
+  await deliver({ type: "mention", event: message("1", "@Claude hi") });
+  await flush(10);
+  const claude = claudes().find((process) => process.prompts.length);
+  expect(claude?.prompts).toHaveLength(1);
+  expect(runtime.sessions(self)).toMatchObject([{ busy: true }]);
+  claude?.finish();
+  await flush(10);
+  expect(runtime.sessions(self)).toMatchObject([{ busy: false }]);
 });
 
 const EFFORTS = [
@@ -1568,4 +1600,35 @@ it("method calls: a session launch makes no config call on the relay session; on
   expect(made()).toEqual({
     "profiles.ensure": [[[alice, self], "foreground"]],
   });
+});
+
+it("a failed first Me turn releases naming so a successful retry can offer Claude's title", async () => {
+  const named = vi.fn();
+  const f = setup([], {
+    hold: true,
+    me: new Set([channel]),
+    named,
+    title: "A useful title",
+  });
+  await f.deliver({ type: "mention", event: message("1", "Name this chat") });
+  await flush();
+  const first = f.claudes().find((process) => process.prompts.length);
+  if (!first) throw new Error("No Claude turn started");
+  first.finish({ error: "Try again" });
+  await flush();
+  expect(named).not.toHaveBeenCalled();
+  await f.deliver({
+    type: "mention",
+    event: message("2", "Try again", { created_at: 101 }),
+  });
+  await flush();
+  const retry = f
+    .claudes()
+    .filter((process) => process.prompts.length)
+    .at(-1);
+  if (!retry) throw new Error("No Claude retry started");
+  retry.finish();
+  await flush();
+  expect(named).toHaveBeenCalledExactlyOnceWith("A useful title");
+  f.runtime.dispose();
 });

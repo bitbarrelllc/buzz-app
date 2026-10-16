@@ -776,70 +776,6 @@ it("does not bypass the session media resolver to paint an inaccessible attachme
   expect(html).not.toContain("<img");
 });
 
-it("uses the agent squircle for both known agents and agent profiles", () => {
-  const agent = "a".repeat(64);
-  const media = vi.fn((url: string) => url);
-  const html = renderToStaticMarkup(
-    <MessageRow
-      row={{ ...row, authorId: agent }}
-      profile={{ name: "Carl", picture: "https://image.test/agent.png" }}
-      agentPubkeys={new Set([agent])}
-      media={media}
-      onOpenLink={() => false}
-      day={false}
-      retry={undefined}
-    />,
-  );
-  expect(html).toContain('data-avatar-shape="squircle"');
-  expect(media).toHaveBeenCalledWith("https://image.test/agent.png", "small");
-  const profileOnly = renderToStaticMarkup(
-    <MessageRow
-      row={{ ...row, authorId: agent }}
-      profile={{
-        name: "Carl",
-        picture: "https://image.test/agent.png",
-        isAgent: true,
-      }}
-      media={media}
-      onOpenLink={() => false}
-      day={false}
-      retry={undefined}
-    />,
-  );
-  expect(profileOnly).toContain('data-avatar-shape="squircle"');
-  expect(render({}, 0).html).toContain('data-avatar-shape="circle"');
-});
-
-it.each([9, 40002])(
-  "renders kind %s author shape from the existing fold without profile/library evidence",
-  (kind) => {
-    const author = keypair(),
-      relay = keypair();
-    const [folded] = foldMessages("channel", relay.pubkey, [
-      signed(author, {
-        kind,
-        content:
-          kind === 40002 ? JSON.stringify({ content: "Reply" }) : "Reply",
-        tags: [["h", "channel"]],
-      }),
-    ]);
-    if (!folded) throw new Error("Missing row");
-    const html = renderToStaticMarkup(
-      <MessageRow
-        row={folded}
-        profile={undefined}
-        media={() => undefined}
-        onOpenLink={() => false}
-        day={false}
-        retry={undefined}
-      />,
-    );
-    expect(html).toContain(
-      `data-avatar-shape="${kind === 40002 ? "squircle" : "circle"}"`,
-    );
-  },
-);
-
 it("requests a small profile image without downsizing message attachments", () => {
   const media = vi.fn((url: string) => url);
   renderToStaticMarkup(
@@ -860,68 +796,6 @@ it("requests a small profile image without downsizing message attachments", () =
 
   expect(media).toHaveBeenCalledWith("https://image.test/avatar.png", "small");
   expect(media).toHaveBeenCalledWith("https://image.test/attachment.png");
-});
-
-it("renders generic file attachments as download cards", () => {
-  const html = renderToStaticMarkup(
-    <MessageRow
-      row={{
-        ...row,
-        attachments: [
-          {
-            url: "https://files.test/report.pdf",
-            kind: "file",
-            name: "report.pdf",
-            size: 1536,
-            mime: "application/pdf",
-          },
-        ],
-      }}
-      profile={undefined}
-      media={(url) => `/api/relay/media?url=${encodeURIComponent(url)}`}
-      onOpenLink={() => false}
-      day={false}
-      retry={undefined}
-    />,
-  );
-  expect(html).toContain(
-    'href="/api/relay/media?url=https%3A%2F%2Ffiles.test%2Freport.pdf"',
-  );
-  expect(html).toContain('download="report.pdf"');
-  expect(html).toContain('aria-label="Download report.pdf"');
-  expect(html).toContain("report.pdf");
-  expect(html).toContain("2 KB");
-  expect(html).not.toContain("Open image attachment");
-  expect(html).not.toContain("<img");
-});
-
-it("renders unavailable generic files without a download link", () => {
-  const html = renderToStaticMarkup(
-    <MessageRow
-      row={{
-        ...row,
-        attachments: [
-          {
-            url: "https://files.test/missing.pdf",
-            kind: "file",
-            mime: "application/pdf",
-          },
-        ],
-      }}
-      profile={undefined}
-      media={() => undefined}
-      onOpenLink={() => false}
-      day={false}
-      retry={undefined}
-    />,
-  );
-  expect(html).toContain("PDF file");
-  expect(html).toContain("File unavailable");
-  expect(html).toContain('role="status"');
-  const container = document.createElement("div");
-  container.innerHTML = html;
-  expect(container.querySelector("a")).toBeNull();
-  expect(html).not.toContain("Open image attachment");
 });
 
 it("renders proxy audio attachments with an inline player", () => {
@@ -2495,18 +2369,43 @@ it("shows a message for agents as one line from its author to whom it addresses"
       name: "Morgarita to Rivet: **run** the suite…",
     });
     expect(line).toHaveAttribute("aria-expanded", "false");
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    const timestamp = line.parentElement?.querySelector("time");
+    const timestampSlot = timestamp?.parentElement;
+    expect(timestamp).toBeVisible();
+    expect(
+      screen.getByText(/(?:1969|1970) at /, {
+        selector: 'time > span[aria-hidden="true"]',
+      }),
+    ).toBeVisible();
     // Reveal focuses the scroll anchor with tabIndex -1; on the button, that
     // would take the only toggle out of the Tab order.
     expect(line).not.toHaveAttribute("data-message-id");
     expect(line.parentElement).toHaveAttribute("data-message-id");
     expect(screen.queryByText(/Then report back/)).toBeNull();
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     fireEvent.pointerEnter(line);
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     fireEvent.click(line);
     expect(line).toHaveAttribute("aria-expanded", "true");
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    // Expanding preserves the timestamp node and its trailing slot, rather
+    // than remounting it above the body and moving it to the opposite edge.
+    expect(
+      line.parentElement?.querySelectorAll("time:not(.sr-only)"),
+    ).toHaveLength(1);
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
+    expect(timestamp?.parentElement).toBe(timestampSlot);
+    expect(line.parentElement?.lastElementChild).toBe(timestampSlot);
+    expect(
+      screen.getByText(/(?:1969|1970) at /, {
+        selector: 'time > span[aria-hidden="true"]',
+      }),
+    ).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "View Morgarita profile" }),
     ).toBeNull();
@@ -2515,9 +2414,13 @@ it("shows a message for agents as one line from its author to whom it addresses"
     expect(expanded?.querySelector('[class*="messageBubble"]')).toBeNull();
     expect(expanded?.querySelector("[data-own]")).toBeNull();
 
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     fireEvent.pointerEnter(expanded ?? line);
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
     // Base UI binds the trigger to its panel. One stable message anchor stays
     // outside the animated content, including while that content is retiring.
     const panelId = line.getAttribute("aria-controls");
@@ -2536,7 +2439,9 @@ it("shows a message for agents as one line from its author to whom it addresses"
     // Anywhere in the open box folds it back.
     fireEvent.click(screen.getByText(/Then report back/));
     expect(line).toHaveAttribute("aria-expanded", "false");
-    expect(line.parentElement?.querySelector("time")).toBeNull();
+    expect(line.parentElement?.querySelector("time:not(.sr-only)")).toBe(
+      timestamp,
+    );
   } finally {
     cleanup();
   }

@@ -22,6 +22,7 @@ import { ownerReads } from "./reads";
 // records with its type as the `runtime` tag, so every device of the owner's
 // can show it: as here, hosted, or on another device.
 import { migrateAgentStorage } from "./migrate-storage";
+import { migrateWatchFilters } from "./migrate-filter";
 import { Service, type Context } from "@deepseek-ai/cordis";
 import { npubEncode } from "nostr-tools/nip19";
 import { bytesToHex } from "nostr-tools/utils";
@@ -108,6 +109,7 @@ import {
 import { meChat } from "./me-chat";
 import { readCheckpoints, writeCheckpoints } from "./catch-up";
 import { type AddedTool, BUZZ_SESSION } from "../../buzz-mcp/session-tools";
+import { nameMeChat } from "./me-chat-name";
 
 /** Where an agent runs: `here`, with its key on this device; `hosted`, by its
  * type's provider; or `elsewhere`, on another of the owner's devices. Only an
@@ -203,6 +205,23 @@ export type AgentTab<Config = unknown> = Readonly<{
   splitSettings?: boolean;
   component: ComponentType<AgentViewProps<Config>>;
 }>;
+/** One of an agent's conversation sessions on this device. Without `root` it
+ * is the channel's one session: a channel-scoped agent's, a DM's or a Me
+ * chat's; with it, the thread's. `at` is when it last took in a message
+ * or ended a turn, in milliseconds. `status` is the type's latest
+ * observation of it while running here, such as "Working", "Idle" or a
+ * failed turn's outcome; absent means unobserved, not idle. */
+export type AgentSession = Readonly<{
+  channelId: string;
+  root?: string;
+  at?: number;
+  status?: string;
+}>;
+/** Read-only: reading never starts, stops or changes a session. */
+export type AgentSessions = Readonly<{
+  list(pubkey: string): readonly AgentSession[];
+  subscribe(listener: () => void): () => void;
+}>;
 /** The agent as `run` holds it. It works for as long as the agent exists. */
 export type AgentHandle = Readonly<{
   pubkey: string;
@@ -211,6 +230,10 @@ export type AgentHandle = Readonly<{
   publish(event: AgentEventTemplate): Promise<RelayEvent>;
   /** Reads the community as the agent, seeing only what it may see. */
   query(filters: readonly object[]): Promise<RelayEvent[]>;
+  audienceAuthority?(
+    destination: string,
+    sources: readonly string[],
+  ): Promise<unknown>;
   /** Finds profiles by `name` or `display_name`, as the agent, best match
    * first. `undefined` when its community has no profile name search. */
   searchProfiles(
@@ -357,6 +380,9 @@ export type Delivery<Config = unknown> = Readonly<{
   /** A newer acknowledged request owns this turn's activity; hide this message's
    * bubble without claiming success or changing the execution outcome. */
   superseded?(): void;
+  /** The harness's own title for this mention's conversation. The host may
+   * name a Me chat with it once; the type need not know whether it did. */
+  named?(title: string): void;
   /** Whether the trigger should still run, asked again now. False once the
    * agent is removed or its type replaced; for a watch or timer, also once
    * attention was turned off or its object disabled or removed; and for a
@@ -449,6 +475,8 @@ export type AgentType<Config = unknown> = {
   provider?: AgentProvider;
   /** The type's settings tabs, in order. The host adds Attention after them. */
   tabs?: readonly AgentTab<Config>[];
+  /** Each agent's sessions, for views across agents. */
+  sessions?: AgentSessions;
   /** Models and effort levels the owner can pick for the next run while
    * mentioning the agent. Discovery may be async but must not start a turn.
    * The picks reach that run as `Delivery.model` and `Delivery.effort`. */
@@ -931,6 +959,7 @@ export class AgentsService extends Service implements Agents {
     this.contributions = createContributions<AgentType>(ctx);
     this.addedTools = createContributions<AddedTool & { id: string }>(ctx);
     migrateAgentStorage(storage);
+    migrateWatchFilters(storage);
     this.records = readRecords(storage);
     this.unfinished = Object.freeze(readUnfinished(storage));
     this.unarchiving = readArchiveUnchecked(storage);
@@ -1041,6 +1070,14 @@ export class AgentsService extends Service implements Agents {
       remembered: (pubkey, slug, body) =>
         this.coreMemory.wrote(pubkey, slug, body),
       finished: (pubkey) => void this.coreMemory.refresh(pubkey),
+      named: (agent, event, title) =>
+        void nameMeChat(
+          this.relay(agent.pubkey),
+          agent.owner,
+          agent.pubkey,
+          event,
+          title,
+        ).catch((error) => console.warn("Couldn't name the Me chat", error)),
     });
     ctx.effect(() => {
       const stops = [
