@@ -1,4 +1,3 @@
-import { Header } from "../shared/design-system/ui/Header";
 import { SettingsGroup } from "../shared/design-system/ui/SettingsGroup";
 import { Field } from "../shared/design-system/ui/Field";
 import { Input } from "../shared/design-system/ui/Input";
@@ -10,10 +9,7 @@ import { readPluginFolder } from "./plugin-folder-drop";
 import styles from "./PluginImport.module.css";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  FolderOpenIcon,
-  SquaresFourIcon,
-} from "../shared/design-system/icons/index";
+import { FolderOpenIcon } from "../shared/design-system/icons/index";
 import type { PluginManager } from "../plugins/manager";
 import type { Catalog, ImportPreview } from "../plugins/types";
 import type { PluginManifest } from "../plugins/api";
@@ -44,18 +40,6 @@ function hostGrants(manifest: PluginManifest): string[] {
       ? ["MCP servers: tools served to local agents over loopback HTTP"]
       : []),
   ];
-}
-
-function contentChange(
-  name: string,
-  next: string | null | undefined,
-  previous: string | null | undefined,
-  updating: boolean,
-) {
-  if (!updating) return next ? `${name} included` : null;
-  if (!next) return previous ? `${name} removed` : null;
-  if (!previous) return `${name} included (new)`;
-  return `${name} included (${next === previous ? "unchanged" : "changed"})`;
 }
 
 export function PluginImport({
@@ -223,28 +207,6 @@ export function PluginImport({
           : "There is no earlier revision to roll back to.";
   const declaredGrants = candidate ? hostGrants(candidate.manifest) : [];
   const previousGrants = existing ? hostGrants(existing.manifest) : [];
-  const packageContent = candidate
-    ? [
-        contentChange(
-          "README.md",
-          candidate.readmeRevision,
-          existing?.readmeRevision,
-          !!existing,
-        ),
-        contentChange(
-          "icon.png",
-          candidate.iconPngRevision,
-          existing?.iconPngRevision,
-          !!existing,
-        ),
-        contentChange(
-          "icon.jpg",
-          candidate.iconJpgRevision,
-          existing?.iconJpgRevision,
-          !!existing,
-        ),
-      ].filter((value) => value !== null)
-    : [];
   const addButton = (
     <Button
       ref={trigger}
@@ -477,33 +439,6 @@ export function PluginImport({
           {notice && <p role="status">{notice}</p>}
           {preview && (
             <section ref={previewRegion} aria-label="Plugin import preview">
-              {reviewing && candidate && (
-                <Header
-                  level={3}
-                  title={candidate.manifest.name}
-                  icon={<SquaresFourIcon size={24} />}
-                  subtitle={
-                    <>
-                      {candidate.manifest.description && (
-                        <span className="mb-1 block break-words">
-                          {candidate.manifest.description}
-                        </span>
-                      )}
-                      <span className="block break-all text-caption text-muted">
-                        {candidate.manifest.id}
-                      </span>
-                      <span className="block break-all text-caption text-muted">
-                        Source: {importLocation(preview, candidate.path)}
-                      </span>
-                      {preview.commit && (
-                        <span className="block break-all text-caption text-muted">
-                          Commit: {preview.commit}
-                        </span>
-                      )}
-                    </>
-                  }
-                />
-              )}
               <div className="flex flex-col gap-4">
                 {!reviewing &&
                   (preview.candidates.length === 0 || preview.commit) && (
@@ -575,23 +510,6 @@ export function PluginImport({
                       </ul>
                     </section>
                   )}
-                {reviewing && packageContent.length > 0 && (
-                  <section
-                    aria-label="Package content"
-                    className="text-body-sm"
-                  >
-                    <p className="m-0 font-medium">Package content</p>
-                    <ul className="m-0">
-                      {packageContent.map((description) => (
-                        <li key={description}>{description}</li>
-                      ))}
-                    </ul>
-                    <p className="m-0 text-caption text-muted">
-                      Supplied by the plugin publisher; inclusion is not an
-                      endorsement by Buzz.
-                    </p>
-                  </section>
-                )}
                 {reviewing && candidate && (
                   <section
                     aria-label="Computer access"

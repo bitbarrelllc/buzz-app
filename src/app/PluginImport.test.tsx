@@ -249,10 +249,7 @@ it("shows exact declared access and changes before an enabled update", async () 
   expect(screen.getByText(/^Removed:/)).toHaveTextContent(
     /--brief.*https:\/\/old.example.com/,
   );
-  expect(screen.getByText("README.md included (changed)")).toBeVisible();
-  expect(screen.getByText("icon.png removed")).toBeVisible();
-  expect(screen.getByText("icon.jpg included (new)")).toBeVisible();
-  expect(screen.getByText(/not an endorsement by Buzz/)).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Package content" })).toBeNull();
   expect(
     screen.getByText(
       /stays on and may run immediately unless this launch is in safe mode/,
@@ -300,7 +297,7 @@ it.each([
     location: "/plugins/example",
   },
 ])(
-  "shows one source location for $source and $path",
+  "shows source locations in choices, then only access in review for $source and $path",
   async ({ source, path, commit, location }) => {
     const preview: ImportPreview = {
       token: "preview",
@@ -312,6 +309,11 @@ it.each([
           path,
           manifest: { id: "example.plugin", name: "Example", apiVersion: 1 },
           revision: "one",
+        },
+        {
+          path: "other",
+          manifest: { id: "example.other", name: "Other", apiVersion: 1 },
+          revision: "other",
         },
       ],
     };
@@ -332,12 +334,17 @@ it.each([
     fireEvent.click(
       screen.getByRole("button", { name: "Browse plugin folder" }),
     );
+    const choice = await screen.findByRole("radio", { name: "Example" });
+    expect(choice).toHaveAccessibleDescription(`${location} · example.plugin`);
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.queryByText("Example", { exact: true })).toBeNull();
+    expect(screen.queryByText("example.plugin", { exact: true })).toBeNull();
+    expect(screen.queryByText(/^Source:/)).toBeNull();
+    expect(screen.queryByText(/^Commit:/)).toBeNull();
     expect(
-      await screen.findByText(`Source: ${location}`, { exact: true }),
+      screen.getByRole("region", { name: "Computer access" }),
     ).toBeVisible();
-    const heading = screen.getByRole("heading", { name: "Example", level: 3 });
-    expect(heading.closest(".buzz-settings-group")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     expect(screen.queryByText(/^Folder:/)).toBeNull();
     expect(
       screen.queryByRole("region", { name: "Skipped folders" }),
@@ -405,8 +412,8 @@ it("separates choosing from access review and restores the chosen folder on Back
   expect(screen.queryByRole("button", { name: "Install plugin" })).toBeNull();
   await user.click(screen.getByRole("button", { name: "Continue" }));
   expect(
-    screen.getByRole("heading", { name: "Example", level: 3 }),
-  ).toBeVisible();
+    screen.queryByRole("heading", { name: "Example", level: 3 }),
+  ).toBeNull();
   expect(screen.getByRole("region", { name: "Computer access" })).toBeVisible();
   expect(screen.queryByRole("radio")).toBeNull();
   await user.click(screen.getByRole("button", { name: "Back" }));
@@ -655,8 +662,8 @@ it("replaces Add with an error view and returns to the retained preview for retr
   });
   expect(within(dialog).queryByRole("radio")).toBeNull();
   expect(within(dialog).queryByText("Choose a plugin folder")).toBeNull();
-  expect(within(dialog).getByText("Retry plugin")).toBeVisible();
-  expect(within(dialog).getByText("example.retry")).toBeVisible();
+  expect(within(dialog).queryByText("Retry plugin")).toBeNull();
+  expect(within(dialog).queryByText("example.retry")).toBeNull();
   expect(install).toHaveAttribute("data-variant", "prominent");
   install.focus();
   fireEvent.click(install);

@@ -489,7 +489,7 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   await page.setViewportSize({ width: 1440, height: 950 });
   await expect(
     page.getByRole("heading", { name: "Example two", level: 3 }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(
     page.getByText(
       "This plugin starts off. Turn it on in the list when you’re ready.",
@@ -499,7 +499,7 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   await expect(page.getByRole("status")).toHaveText(/Example two installed/);
   await expect(
     page.getByRole("heading", { name: "Example two", level: 3 }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   expect(
     await page.evaluate(
       () =>
@@ -721,37 +721,21 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(
     dialog.getByText("Choose a plugin folder", { exact: true }),
   ).toHaveCount(0);
-  const identityHeading = dialog.getByRole("heading", {
-    name: "Retry plugin",
-    level: 3,
-  });
-  await expect(identityHeading).toBeVisible();
+  await expect(
+    dialog.getByRole("heading", { name: "Retry plugin" }),
+  ).toHaveCount(0);
+  await expect(dialog.getByText("example.retry", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByText(/^Source:/)).toHaveCount(0);
   await expect(
     dialog.getByText(
       "Review a local plugin and its computer access before installation.",
       { exact: true },
     ),
-  ).toBeVisible();
-  await expect
-    .poll(() =>
-      identityHeading.evaluate((node) => {
-        const access = node
-          .closest("section")
-          .querySelector('[aria-label="Computer access"]');
-        return (
-          node.getBoundingClientRect().bottom <
-          access.getBoundingClientRect().top
-        );
-      }),
-    )
-    .toBe(true);
+  ).toHaveCount(0);
   await expect(
-    dialog.getByText("example.retry", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    dialog.getByText("Source: /plugins/example/dist", {
-      exact: true,
-    }),
+    dialog.getByRole("region", { name: "Computer access" }),
   ).toBeVisible();
   await expect(dialog.getByText(/^Folder:/)).toHaveCount(0);
   await expect(
