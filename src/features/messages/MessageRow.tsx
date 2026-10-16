@@ -1136,6 +1136,10 @@ export const MessageRow = memo(function AudienceMessageRow(
 function AgentsMessageRow(props: MessageRowProps) {
   const { row, session, media, participantProfiles, agentPubkeys } = props;
   const [open, setOpen] = useState(false);
+  const keepMounted = props.keepMounted;
+  useEffect(() => {
+    if (open) return keepMounted?.(row.id);
+  }, [open, keepMounted, row.id]);
   const resolveName = useChannelIdentityNames(session, row.channelId);
   const directory = useReferenceDirectory(session, participantProfiles);
   const { recipients, body } = useMemo(
@@ -1200,8 +1204,8 @@ function AgentsMessageRow(props: MessageRowProps) {
           data-open={open || undefined}
         >
           {props.day && <DayDivider createdAt={row.createdAt} />}
-          {/* Open, the message stays beside its addresses; hovering the entry
-          shows the same collapse target without a persistent fill. */}
+          {/* Keep the address column and trailing time stable while the
+              details open and close. */}
           <Collapsible.Root
             open={open}
             onOpenChange={setOpen}
@@ -1251,12 +1255,17 @@ function AgentsMessageRow(props: MessageRowProps) {
               )}
             </Collapsible.Trigger>
             <Collapsible.Panel
-              className={styles.audiencePanel}
+              className={`${styles.audiencePanel} ${styles.activityExpansion} ${styles.audienceBody}`}
               inert={!open || undefined}
               aria-hidden={!open || undefined}
             >
-              <div className={styles.audienceBody}>{message}</div>
+              <div className={styles.activityExpansionContent}>
+                <div className={styles.audienceContent}>{message}</div>
+              </div>
             </Collapsible.Panel>
+            <span className={styles.audienceTime}>
+              <MessageTimestamp createdAt={row.createdAt} />
+            </span>
           </Collapsible.Root>
         </div>
       )}
