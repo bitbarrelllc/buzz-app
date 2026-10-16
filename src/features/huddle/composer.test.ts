@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { File as NodeFile } from "node:buffer";
+import { Blob as NodeBlob, File as NodeFile } from "node:buffer";
 import {
   act,
   cleanup as cleanupReact,
@@ -10,6 +10,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { createElement } from "react";
+import { attachmentDraft } from "../messages/attachment-draft";
 import { MessageComposer } from "../messages/MessageComposer";
 import { composerDOMFixture } from "../messages/composer-testing";
 import { followupDraft } from "../messages/mention-draft";
@@ -363,6 +364,7 @@ it("retains valid voice metadata and releases enriched upload identities", async
     onmessage?: (event: { data: unknown }) => void;
   }>();
   vi.stubGlobal("File", NodeFile);
+  vi.stubGlobal("Blob", NodeBlob);
   vi.stubGlobal(
     "BroadcastChannel",
     class {
@@ -388,12 +390,14 @@ it("retains valid voice metadata and releases enriched upload identities", async
     type: "audio/wav",
   });
   if (!remote.attachments) throw new Error("Missing attachments");
-  const upload = await remote.attachments.upload(
-    file,
-    "room",
-    new AbortController().signal,
-  );
-  const voice = { duration: 1, waveform: [0, 20, 80, 100] };
+  const draft = attachmentDraft(remote, "voice-regression", "room");
+  cleanup.push(() => draft.clear());
+  draft.add([file], { file, duration: 1, waveform: [0, 0.2, 0.8, 1] });
+  const [upload] = await draft.prepareForSend(new AbortController().signal);
+  if (!upload) throw new Error("Missing recorded upload");
+  const voice = upload.voice;
+  expect(voice).toEqual({ duration: 1, waveform: [0, 20, 80, 100] });
+  if (!voice) throw new Error("Missing recorded metadata");
   for (const waveform of [[-1], [101], [0.5], [NaN], [Infinity], []]) {
     await expect(
       remote.messages.send(
