@@ -113,9 +113,9 @@ describe("page mark precedence", () => {
       { label: "Inbox", icon: BellIcon },
     ],
     [
-      "bundled channels stays Multiplayer and ignores a declared icon",
+      "bundled channels stays Messages and ignores a declared icon",
       page("buzz.channels/channels", "Channels", owl),
-      { label: "Multiplayer", icon: ChatsCircleIcon },
+      { label: "Messages", icon: ChatsCircleIcon },
     ],
     [
       "an external page with local id channels keeps its own title and image",
@@ -164,12 +164,12 @@ describe("header area selection", () => {
   test.each([
     ["buzz.channels/channels", "buzz.channels/channels"],
     ["buzz.inbox/inbox", "buzz.channels/channels"],
-    ["buzz.reminders/reminders", "buzz.channels/channels"],
-    ["buzz.agents/agents", "buzz.channels/channels"],
-    ["buzz.workflows/workflows", "buzz.channels/channels"],
+    ["buzz.reminders/reminders", "buzz.reminders/reminders"],
+    ["buzz.agents/agents", "buzz.agents/agents"],
+    ["buzz.workflows/workflows", "buzz.workflows/workflows"],
     ["buzz.sessions/sessions", "buzz.channels/channels"],
     ["example.sidebar/me", "buzz.channels/channels"],
-    ["buzz.me/me", "buzz.me/me"],
+    ["buzz.me/me", "buzz.channels/channels"],
     ["settings", "settings"],
     ["example.header/main", "example.header/main"],
     ["example.tools/main", "example.tools/main"],
@@ -191,12 +191,12 @@ describe("header area selection", () => {
       expect(headerPageSelection(registered, inbox.key)).toBe(inbox.key);
     }
   });
-  test("Me stays separate even when its placement is omitted", () => {
+  test("Me belongs to Messages even when its placement is omitted", () => {
     expect(
       headerPageSelection(
         [...entries.filter((entry) => entry.key !== me.key), me],
         me.key,
       ),
-    ).toBe(me.key);
+    ).toBe(messages.key);
   });
 });

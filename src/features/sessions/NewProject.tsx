@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type ComponentProps } from "react";
 import type { RelaySession } from "../relay/session";
 import { emptyLineup } from "../channel-templates/model";
 import type { Resume } from "../channel-templates/capability";
@@ -26,7 +26,9 @@ export function NewProject({
   create,
   close,
   onCreated,
+  finalFocus,
 }: {
+  finalFocus?: ComponentProps<typeof Dialog>["finalFocus"];
   session: RelaySession;
   create(section: { id: string; name: string }): Promise<unknown>;
   close(): void;
@@ -122,6 +124,7 @@ export function NewProject({
       title="New project"
       description="The chats you start in this project begin with its folders and instructions."
       initialFocus={input}
+      finalFocus={finalFocus}
       actions={
         <>
           <Button disabled={busy} onClick={close}>

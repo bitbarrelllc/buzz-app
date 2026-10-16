@@ -27,7 +27,17 @@ import {
   type ClientSnapshot,
 } from "./service";
 
-const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ToastProvider });
+const render = (ui: ReactElement) => {
+  const result = rtlRender(ui, { wrapper: ToastProvider });
+  if (!screen.queryByRole("dialog")) openSwitcher();
+  return result;
+};
+const switcher = () =>
+  screen.getByRole("button", { name: /^Community switcher:/ });
+function openSwitcher() {
+  if (switcher().getAttribute("aria-expanded") !== "true")
+    fireEvent.click(switcher());
+}
 const settingsCards = {
   subscribe: () => () => {},
   has: () => true,
@@ -177,8 +187,10 @@ function harness({
   };
 }
 
-const button = (name: string) =>
-  screen.getByRole("button", { name: `Switch to ${name}` });
+const button = (name: string) => {
+  openSwitcher();
+  return screen.getByRole("button", { name: `Switch to ${name}` });
+};
 async function openMenu(name: string) {
   fireEvent.contextMenu(button(name), { clientX: 20, clientY: 20 });
   return await screen.findByRole("menu", { name: `Actions for ${name}` });
@@ -208,10 +220,11 @@ it("switches using the shared membership owner without acquiring other sessions 
   expect(button("Secondary")).toHaveAttribute("aria-current", "true");
   fireEvent.click(screen.getByRole("button", { name: "Personal space" }));
   expect(h.select).toHaveBeenCalledWith(null);
+  openSwitcher();
   expect(
     screen.getByRole("button", { name: "Personal space" }),
   ).toHaveAttribute("aria-current", "true");
-  const add = screen.getByRole("button", { name: "Add a community" });
+  const add = screen.getByRole("button", { name: "Join a community" });
   fireEvent.click(add);
   expect(
     screen.getByRole("heading", { name: "Add a community" }),
@@ -639,13 +652,9 @@ it("leaves an inactive community after confirming: the relay releases it before 
   expect(h.read).not.toHaveBeenCalled();
   expect(h.select).not.toHaveBeenCalled();
   expect(h.onSelect).not.toHaveBeenCalled();
+  await waitFor(() => expect(switcher()).toHaveFocus());
+  expect(switcher()).toHaveAccessibleName("Community switcher: Primary");
   expect(button("Primary")).toHaveAttribute("aria-current", "true");
-  // Focus follows the selection, which stayed put; Personal space is only
-  // right when a left selection actually landed there.
-  await waitFor(() => expect(button("Primary")).toHaveFocus());
-  expect(
-    screen.getByRole("button", { name: "Personal space" }),
-  ).not.toHaveFocus();
 });
 
 it("leaving the selected community tells the host to select Personal space; an inactive one does not", async () => {
@@ -664,9 +673,8 @@ it("leaving the selected community tells the host to select Personal space; an i
   expect(h.leave.mock.invocationCallOrder[0]).toBeLessThan(
     h.onSelect.mock.invocationCallOrder[0] ?? 0,
   );
-  const personal = screen.getByRole("button", { name: "Personal space" });
-  expect(personal).toHaveAttribute("aria-current", "true");
-  await waitFor(() => expect(personal).toHaveFocus());
+  await waitFor(() => expect(switcher()).toHaveFocus());
+  expect(switcher()).toHaveAccessibleName("Community switcher: Personal space");
 
   h.update({ selected: secondary });
   dialog = await askToLeave(user, "Secondary");
@@ -692,7 +700,7 @@ it("leaving the selected community tells the host to select Personal space; an i
   expect(await screen.findAllByText("Left Secondary.")).toHaveLength(2);
   expect(h.onSelect).toHaveBeenCalledTimes(2);
   expect(button("Primary")).toHaveAttribute("aria-current", "true");
-  await waitFor(() => expect(button("Primary")).toHaveFocus());
+  await waitFor(() => expect(switcher()).toHaveFocus());
 });
 
 it("cancelling the confirmation keeps the membership and returns focus to the community", async () => {
@@ -702,7 +710,7 @@ it("cancelling the confirmation keeps the membership and returns focus to the co
   let dialog = await askToLeave(user, "Secondary");
   await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-  await waitFor(() => expect(button("Secondary")).toHaveFocus());
+  await waitFor(() => expect(switcher()).toHaveFocus());
   // Escape cancels the same way.
   dialog = await askToLeave(user, "Secondary");
   fireEvent.keyDown(dialog, { key: "Escape" });
@@ -757,7 +765,7 @@ it.each([
     expect(h.leave).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(button("Secondary")).toBeInTheDocument();
-    await waitFor(() => expect(button("Secondary")).toHaveFocus());
+    await waitFor(() => expect(switcher()).toHaveFocus());
     // The item is back to its resting label for a retry.
     const menu = await openMenu("Secondary");
     const item = within(menu).getByRole("menuitem", {
@@ -843,7 +851,7 @@ it("reports a device that could not finish forgetting a left community without b
   expect(h.onSelect).not.toHaveBeenCalled();
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   expect(button("Secondary")).toBeInTheDocument();
-  await waitFor(() => expect(button("Secondary")).toHaveFocus());
+  await waitFor(() => expect(switcher()).toHaveFocus());
 });
 
 it("falls back to the save failure's own message when it carries no cause", async () => {
@@ -883,9 +891,8 @@ it("still reports a successful leave when the host's selection callback throws",
   expect(
     screen.queryByRole("button", { name: "Switch to Primary" }),
   ).toBeNull();
-  const personal = screen.getByRole("button", { name: "Personal space" });
-  expect(personal).toHaveAttribute("aria-current", "true");
-  await waitFor(() => expect(personal).toHaveFocus());
+  await waitFor(() => expect(switcher()).toHaveFocus());
+  expect(switcher()).toHaveAccessibleName("Community switcher: Personal space");
 });
 
 it("says when some saved data outlived the purge", async () => {
@@ -907,7 +914,7 @@ it("says when some saved data outlived the purge", async () => {
   );
 });
 
-it("shows the leave in flight on the dialog and the menu item until the relay answers", async () => {
+it("keeps the pending leave modal and prevents another submission until the relay answers", async () => {
   const user = userEvent.setup();
   let release!: (response: Response) => void;
   const h = harness({
@@ -926,22 +933,12 @@ it("shows the leave in flight on the dialog and the menu item until the relay an
   // Closing is refused while the request runs.
   fireEvent.keyDown(dialog, { key: "Escape" });
   expect(screen.getByRole("alertdialog")).toBe(dialog);
-  // The modal hides the rail from assistive tech; should the menu open
-  // regardless, its item reports the flight and does not start another request.
-  fireEvent.contextMenu(
-    screen.getByRole("button", { name: "Switch to Secondary", hidden: true }),
-    { clientX: 20, clientY: 20 },
-  );
-  const menu = await screen.findByRole("menu", {
-    name: "Actions for Secondary",
-    hidden: true,
-  });
-  const item = within(menu).getByRole("menuitem", {
-    name: "Leaving…",
-    hidden: true,
-  });
-  expect(item).toHaveAttribute("aria-disabled", "true");
-  fireEvent.click(item);
+  // The dropdown closes before confirmation, so a second leave action is
+  // unavailable. The pending confirm also cannot submit twice.
+  expect(
+    screen.queryByRole("dialog", { name: "Switch community", hidden: true }),
+  ).toBeNull();
+  fireEvent.click(confirm);
   expect(h.leaveRequests()).toHaveLength(1);
   release(accepted());
   await screen.findByText("Left Secondary.");
@@ -956,9 +953,8 @@ it("leaving the selected community lands on Personal space, and the last one lea
   await user.click(confirmLeave(dialog));
   await screen.findByText("Left Primary.");
   expect(h.leave).toHaveBeenCalledWith(primary, { purge: true });
-  const personal = screen.getByRole("button", { name: "Personal space" });
-  expect(personal).toHaveAttribute("aria-current", "true");
-  await waitFor(() => expect(personal).toHaveFocus());
+  await waitFor(() => expect(switcher()).toHaveFocus());
+  expect(switcher()).toHaveAccessibleName("Community switcher: Personal space");
   // The service owns the fallback; the rail itself selected nothing.
   expect(h.select).not.toHaveBeenCalled();
 
@@ -971,7 +967,7 @@ it("leaving the selected community lands on Personal space, and the last one lea
       within(rail)
         .getAllByRole("button")
         .map((b) => b.getAttribute("aria-label")),
-    ).toEqual(["Personal space", "Add a community"]),
+    ).toEqual(["Community switcher: Personal space"]),
   );
   expect(h.leaveRequests()).toEqual([
     `/api/relay/${encodeURIComponent(primary)}/leave`,
@@ -1002,10 +998,12 @@ it("does not discover saved community icons without a relay host", async () => {
   try {
     await waitFor(() => expect(communities.snapshot().status).toBe("ready"));
     render(<CommunityRail communities={communities} />);
-    expect(
-      screen.getByRole("button", { name: "Switch to Saved" }),
-    ).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Add a community" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Switch to Saved" }),
+      ).toBeVisible(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Join a community" }));
     expect(
       screen.getByText(/connecting to communities is not available/),
     ).toBeVisible();
@@ -1115,4 +1113,51 @@ it("opens a deep-link invite on Personal space without claiming until the user c
   await userEvent.click(screen.getByRole("button", { name: "Back" }));
   expect(onInviteClose).toHaveBeenCalledWith(1);
   expect(t.select).not.toHaveBeenCalled();
+});
+
+it("shows only the active community until opened and routes creation through Hosted communities", async () => {
+  const h = harness();
+  const onOpenTarget = vi.fn();
+  rtlRender(
+    <CommunityRail
+      communities={h.communities}
+      onOpenTarget={onOpenTarget}
+      settingsCards={{
+        subscribe: () => () => {},
+        has: (key) => key === "block.hosted-communities/hosted",
+      }}
+    />,
+    { wrapper: ToastProvider },
+  );
+  expect(
+    within(
+      screen.getByRole("navigation", { name: "Communities" }),
+    ).getAllByRole("button"),
+  ).toHaveLength(1);
+  expect(switcher()).toHaveAccessibleName("Community switcher: Primary");
+  expect(
+    screen.queryByRole("button", { name: "Switch to Secondary" }),
+  ).toBeNull();
+  const user = userEvent.setup();
+  await user.click(switcher());
+  const popup = await screen.findByRole("dialog", { name: "Switch community" });
+  expect(within(popup).getAllByRole("button").at(-1)).toHaveTextContent(
+    "Create community",
+  );
+  await user.keyboard("{End}");
+  expect(
+    screen.getByRole("button", { name: "Create community" }),
+  ).toHaveFocus();
+  await user.keyboard("{Enter}");
+  expect(onOpenTarget).toHaveBeenCalledWith({
+    version: 1,
+    kind: "settings",
+    section: "block.hosted-communities/hosted",
+  });
+  expect(h.select).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Switch community" }),
+    ).toBeNull(),
+  );
 });

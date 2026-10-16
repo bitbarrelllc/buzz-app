@@ -3,13 +3,7 @@ import { useChannelNavigation } from "../../features/channel-navigation/ChannelN
 import { ChannelActivityPopover } from "../channels/ChannelActivityPopover";
 import { useWorkingAgents } from "../channels/useWorkingAgents";
 import { WorkingAgentsBadge } from "../channels/WorkingAgentsBadge";
-import channelStyles from "../channels/Channels.module.css";
 import { sessionLinkTarget } from "../sessions/SessionsPage";
-import { ResizableSidebar } from "../../features/channel-navigation/ResizableSidebar";
-import {
-  SidebarBrand,
-  SidebarFrame,
-} from "../../features/channel-navigation/SidebarFrame";
 import { useChannelList, useRelayConnection } from "../../features/relay/react";
 import type { RelayData } from "../../features/relay/service";
 import type { RelaySession } from "../../features/relay/session";
@@ -21,40 +15,44 @@ import type { Navigation } from "../../features/navigation/controller";
 import type { OpenTarget } from "../../features/navigation/targets";
 import { useMePlacement } from "../../features/sessions/personal";
 import { Button } from "../../shared/design-system/ui/Button";
+import { ChatCircleIcon } from "../../shared/design-system/icons";
 import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import { SessionSections } from "../sessions/SessionSections";
 import { resetNewChatProject } from "../../features/sessions/NewSessionComposer";
 import { UnreadBadge } from "../channels/UnreadBadge";
 import { meSelection, meTarget } from "./routes";
+import channelStyles from "../channels/Channels.module.css";
 import styles from "../sessions/SessionsWorkspace.module.css";
 
-type Props = { relay: RelayData; navigator: Navigation; target: OpenTarget };
-export function MeSidebar({ relay, navigator, target }: Props) {
+type Props = {
+  relay: RelayData;
+  navigator: Navigation;
+  target: OpenTarget;
+  showCreationShortcuts?: boolean;
+};
+export function MeSidebar({
+  relay,
+  navigator,
+  target,
+  showCreationShortcuts = true,
+}: Props) {
   const connection = useRelayConnection(relay);
   const scope = connection.scope ?? "disconnected";
   return (
-    <ResizableSidebar scope={scope}>
-      <SidebarFrame label="Solo sidebar">
-        {connection.status === "ready" ? (
-          <PersonalHistory
-            key={`${scope}:${connection.generation}`}
-            session={connection.session}
-            scope={scope}
-            navigator={navigator}
-            target={target}
-          />
-        ) : (
-          <>
-            <div className={channelStyles.sidebarTop}>
-              <SidebarBrand mark="berd" />
-            </div>
-            <p role="status">
-              Connect to a community to see your conversations.
-            </p>
-          </>
-        )}
-      </SidebarFrame>
-    </ResizableSidebar>
+    <section aria-label="Solo sidebar">
+      {connection.status === "ready" ? (
+        <PersonalHistory
+          key={`${scope}:${connection.generation}`}
+          showCreationShortcuts={showCreationShortcuts}
+          session={connection.session}
+          scope={scope}
+          navigator={navigator}
+          target={target}
+        />
+      ) : (
+        <p role="status">Connect to a community to see your conversations.</p>
+      )}
+    </section>
   );
 }
 
@@ -63,11 +61,13 @@ function PersonalHistory({
   scope,
   navigator,
   target,
+  showCreationShortcuts,
 }: {
   session: RelaySession;
   scope: string;
   navigator: Navigation;
   target: OpenTarget;
+  showCreationShortcuts: boolean;
 }) {
   const list = useChannelList(session.channels);
   const placement = useMePlacement(session);
@@ -114,13 +114,10 @@ function PersonalHistory({
           (a.lastActivityAt ?? a.updatedAt ?? 0) || a.id.localeCompare(b.id),
     );
   return (
-    <nav
-      className={`${styles.sidebar} ${styles.history}`}
-      aria-label="Solo conversations"
-    >
+    <nav className={styles.sidebarContents} aria-label="Solo conversations">
       <SessionSections
-        header={<SidebarBrand mark="berd" />}
         personal
+        showCreationShortcuts={showCreationShortcuts}
         visit={navigator.snapshot().attempt.signal}
         session={session}
         scope={scope}
@@ -226,6 +223,11 @@ function MeConversationRow({
           data-me-channel-id={id}
           aria-current={selected ? "page" : undefined}
           onClick={onSelect}
+          icon={
+            <span className={styles.conversationIcon} aria-hidden="true">
+              <ChatCircleIcon size={16} />
+            </span>
+          }
           label={
             <span className={styles.sessionRow}>
               <UnreadBadge session={session} channelId={id} label={title} />

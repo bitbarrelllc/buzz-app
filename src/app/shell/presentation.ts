@@ -15,7 +15,7 @@ import type { RegisteredPage } from "../../features/pages/service";
 // Add page identities here; unknown plugins inherit a consistent layout default.
 export const shellPresentation = {
   settings: { label: "Settings", icon: GearIcon, tone: "lavender" },
-  channels: { label: "Multiplayer", icon: ChatsCircleIcon, tone: "lime" },
+  channels: { label: "Messages", icon: ChatsCircleIcon, tone: "lime" },
 } as const;
 
 // Navigation order is host policy, never plugin activation timing. Match full
@@ -52,6 +52,16 @@ const bundledIcons = new Map<string, typeof BrowserIcon>([
   ["buzz.agents/agents", RobotIcon],
   ["buzz.workflows/workflows", LightningIcon],
 ]);
+/** Built-in global destinations live in the shell header. */
+export function isGlobalPage(key: string) {
+  return (
+    key === "buzz.channels/channels" ||
+    (bundledIcons.has(key) &&
+      key !== "buzz.inbox/inbox" &&
+      key !== "buzz.bestie/bestie")
+  );
+}
+
 type PagePresentation = Readonly<{
   label: string;
   icon: typeof BrowserIcon;
@@ -78,10 +88,11 @@ export function headerPageSelection(
 ): string {
   const page = pages.find((page) => page.key === selected);
   if (
-    selected !== "buzz.me/me" &&
+    !isGlobalPage(selected) &&
     page &&
     // Placement applies only to primary pages.
-    (!page.primary ||
+    (selected === "buzz.me/me" ||
+      !page.primary ||
       page.placement === undefined ||
       page.placement === "sidebar") &&
     pages.some(

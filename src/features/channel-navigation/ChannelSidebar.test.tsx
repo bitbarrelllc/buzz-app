@@ -451,7 +451,7 @@ it.each(["ready", "connecting"] as const)(
     const { container } = render(h.view("alpha", true, null));
     expect(screen.queryByRole("navigation", { name: "Pages" })).toBeNull();
     expect(container.querySelector(`.${styles.destinations}`)).toBeNull();
-    expect(screen.getByRole("img", { name: "Buzz" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Buzz" })).not.toBeInTheDocument();
   },
 );
 

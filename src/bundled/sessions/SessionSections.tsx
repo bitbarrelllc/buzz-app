@@ -71,13 +71,12 @@ export function SessionSections({
   renderSession,
   onNew,
   personal = false,
+  showCreationShortcuts = true,
   onConverted,
   visit,
-  header,
 }: {
-  /** Shown above the new-item actions, such as the sidebar's brand mark. */
-  header?: ReactNode;
   personal?: boolean;
+  showCreationShortcuts?: boolean;
   onConverted?: ((id: string) => void) | undefined;
   visit?: AbortSignal;
   session: RelaySession;
@@ -210,35 +209,30 @@ export function SessionSections({
     ) ?? [];
   return (
     <>
-      {(header || onNew) && (
-        <div className={channelStyles.sidebarTop}>
-          {header}
-          {onNew && (
-            <div className={channelStyles.destinations}>
-              <NavigationItem
-                variant="row"
-                label={personal ? "New chat" : "New session"}
-                icon={
-                  <span className="shell-page-icon">
-                    <PlusIcon size={16} strokeWidth={2.5} />
-                  </span>
-                }
-                onClick={() => onNew(undefined)}
-              />
-              {personal && (
-                <NavigationItem
-                  variant="row"
-                  label="New project"
-                  disabled={!preferences.sectionCreationWritable}
-                  icon={
-                    <span className="shell-page-icon">
-                      <Cube3dSphereIcon size={16} strokeWidth={2} />
-                    </span>
-                  }
-                  onClick={() => setCreatingProject(true)}
-                />
-              )}
-            </div>
+      {onNew && showCreationShortcuts && (
+        <div className={channelStyles.destinations}>
+          <NavigationItem
+            variant="row"
+            label={personal ? "New chat" : "New session"}
+            icon={
+              <span className="shell-page-icon">
+                <PlusIcon size={16} strokeWidth={2.5} />
+              </span>
+            }
+            onClick={() => onNew(undefined)}
+          />
+          {personal && (
+            <NavigationItem
+              variant="row"
+              label="New project"
+              disabled={!preferences.sectionCreationWritable}
+              icon={
+                <span className="shell-page-icon">
+                  <Cube3dSphereIcon size={16} strokeWidth={2} />
+                </span>
+              }
+              onClick={() => setCreatingProject(true)}
+            />
           )}
         </div>
       )}
@@ -282,7 +276,7 @@ export function SessionSections({
             <DropSection
               sectionKey={DROP + section.id}
               key={section.id}
-              className={styles.section}
+              className={`${styles.section} ${channelStyles.channelSection}`}
               data-project={personal && section.id ? "" : undefined}
               open={!collapsed.includes(section.id)}
               onOpenChange={(open) => toggle(section.id, open)}
@@ -291,13 +285,12 @@ export function SessionSections({
               <SessionActionsMenu
                 id={`section-${section.id}`}
                 title={section.name}
-                className={styles.sectionHeader}
+                className={`${channelStyles.sectionHeader} ${styles.sectionHeader}`}
                 enabled={!!section.id}
                 trailing={
-                  <div className={styles.sectionActions}>
+                  <div className={channelStyles.sectionActions}>
                     {onNew && (
                       <IconButton
-                        data-session-row-action=""
                         size="compact"
                         aria-label={`${personal ? "New chat" : "New session"} in ${section.name}`}
                         title={personal ? "New chat" : "New session"}
@@ -340,13 +333,15 @@ export function SessionSections({
               >
                 <Collapsible.Trigger
                   type="button"
-                  className={styles.sectionHeading}
+                  className={`${channelStyles.sidebarSectionHeading} ${styles.sectionHeading}`}
                   aria-expanded={!collapsed.includes(section.id)}
                   onClick={(event) => setAnimate(event.detail > 0)}
                 >
-                  <span className={styles.sectionName}>{section.name}</span>
+                  <span className={channelStyles.sectionTitle}>
+                    {section.name}
+                  </span>
                   <span
-                    className={`${channelStyles.sectionChevron} ${styles.genericChevron}`}
+                    className={channelStyles.sectionChevron}
                     aria-hidden="true"
                   >
                     <CaretDownIcon size={15} strokeWidth={2.5} />

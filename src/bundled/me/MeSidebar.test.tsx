@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { createRelaySession } from "../../features/relay/session";
@@ -9,6 +16,10 @@ import type { RelayData } from "../../features/relay/service";
 import type { Navigation } from "../../features/navigation/controller";
 import { ChannelNavigationProvider } from "../../features/channel-navigation/ChannelNavigationState";
 import { stubAvatarBrowserApis } from "../../features/agents/avatar-testing";
+import { NewMenu } from "../../app/shell/NewMenu";
+import type { Agents } from "../../features/agents/service";
+import { PrimarySidebar } from "../../app/shell/PrimarySidebar";
+import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { MeSidebar } from "./MeSidebar";
 import { meTarget } from "./routes";
 
@@ -26,7 +37,7 @@ const outsider = "b".repeat(64);
 const viewer = "c".repeat(64);
 const root = "d".repeat(64);
 const scope = `https://relay.test:${viewer}`;
-function fixture() {
+function fixture(combined = false, canCreate = false, agents?: Agents) {
   const owner = createRelaySession(null);
   owners.push(owner);
   const base = owner.session;
@@ -104,7 +115,9 @@ function fixture() {
   ]);
   const session: RelaySession = {
     ...base,
+    scope,
     viewer,
+    channelCreation: { ...base.channelCreation, available: canCreate },
     channels: { ...base.channels, list: () => list, ensureList() {} },
     mePlacement: {
       ...base.mePlacement,
@@ -113,6 +126,7 @@ function fixture() {
     },
     mePreferences: {
       ...base.mePreferences,
+      sectionCreationWritable: canCreate,
       snapshot: () => preferences,
       ensure: async () => {},
     },
@@ -140,10 +154,10 @@ function fixture() {
       markThrough,
     },
   };
-  const snapshot = { status: "ready" as const, session, generation: 1, scope };
+  let snapshot = { status: "ready" as const, session, generation: 1, scope };
   const relay: RelayData = {
     snapshot: () => snapshot,
-    subscribe: () => () => {},
+    subscribe,
     retry() {},
     disconnect() {},
     async clearCache() {},
@@ -159,10 +173,39 @@ function fixture() {
   };
   render(
     <ChannelNavigationProvider relay={relay}>
-      <MeSidebar relay={relay} navigator={navigator} target={target} />
+      <ToastProvider>
+        {combined ? (
+          <>
+            <NewMenu
+              relay={relay}
+              navigator={navigator}
+              agents={agents}
+              meEnabled
+            />
+            <PrimarySidebar
+              relay={relay}
+              navigator={navigator}
+              target={target}
+              meEnabled
+              sessionsEnabled
+            >
+              <button type="button">Inbox</button>
+            </PrimarySidebar>
+          </>
+        ) : (
+          <MeSidebar relay={relay} navigator={navigator} target={target} />
+        )}
+      </ToastProvider>
     </ChannelNavigationProvider>,
   );
   return {
+    session,
+    replaceSession() {
+      act(() => {
+        snapshot = { ...snapshot, session: { ...session }, generation: 2 };
+        publish();
+      });
+    },
     open,
     markThrough,
     listeners,
@@ -195,7 +238,7 @@ function fixture() {
 }
 it("keeps unread state while owned thread typing and observer working signals start and stop", () => {
   const f = fixture();
-  expect(screen.getByRole("img", { name: "Berd" })).toBeVisible();
+  expect(screen.queryByRole("img", { name: "Berd" })).not.toBeInTheDocument();
   const row = screen.getByRole("button", { name: /^Planning/ });
   expect(
     row.querySelector('[data-channel-unread-title="true"]'),
@@ -325,8 +368,10 @@ it.each(["disconnected", "connecting", "error"] as const)(
         target={meTarget(scope)}
       />,
     );
-    const sidebar = screen.getByRole("complementary", { name: "Solo sidebar" });
-    expect(within(sidebar).getByRole("img", { name: "Berd" })).toBeVisible();
+    const sidebar = screen.getByRole("region", { name: "Solo sidebar" });
+    expect(
+      within(sidebar).queryByRole("img", { name: "Berd" }),
+    ).not.toBeInTheDocument();
     expect(within(sidebar).getByRole("status")).toHaveTextContent(
       "Connect to a community",
     );
@@ -335,3 +380,130 @@ it.each(["disconnected", "connecting", "error"] as const)(
     ).toBeNull();
   },
 );
+
+it("filters the combined sidebar without navigating or resetting Solo sections", async () => {
+  const user = userEvent.setup();
+  const f = fixture(true);
+  const all = screen.getByRole("tab", { name: "All" });
+  const solo = screen.getByRole("tab", { name: "Solo" });
+  const multiplayer = screen.getByRole("tab", { name: "Team" });
+  expect(all).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("button", { name: "New" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  expect(
+    screen.getAllByRole("separator", { name: "Resize sidebar" }),
+  ).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "Chats" }));
+  await user.click(multiplayer);
+  expect(
+    screen.queryByRole("button", { name: "New chat" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  expect(screen.getByRole("tabpanel", { name: "Team" })).toHaveAttribute(
+    "id",
+    multiplayer.getAttribute("aria-controls"),
+  );
+  await user.click(solo);
+  expect(screen.getByRole("button", { name: "Inbox" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Chats" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await user.keyboard("{ArrowRight}");
+  expect(multiplayer).toHaveFocus();
+  expect(solo).toHaveAttribute("aria-selected", "true");
+  await user.keyboard("{Enter}");
+  expect(multiplayer).toHaveAttribute("aria-selected", "true");
+  await user.click(all);
+  expect(f.open).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "New" }));
+  expect(
+    (await screen.findAllByRole("menuitem")).map((item) => item.textContent),
+  ).toEqual(["New chat", "New project", "New DM", "New channel"]);
+  await user.click(screen.getByRole("menuitem", { name: "New chat" }));
+  expect(f.open).toHaveBeenCalledWith(meTarget(scope, "new", undefined));
+});
+
+it("opens the direct message composer from New even in the Solo filter", async () => {
+  const user = userEvent.setup();
+  const f = fixture(true);
+  await user.click(screen.getByRole("tab", { name: "Solo" }));
+  await user.click(screen.getByRole("button", { name: "New" }));
+  await user.click(await screen.findByRole("menuitem", { name: "New DM" }));
+  expect(f.open).toHaveBeenCalledWith({
+    version: 1,
+    kind: "page",
+    pluginId: "buzz.channels",
+    pageId: "channels",
+    scope: { viewer, communityOrigin: "https://relay.test" },
+    route: { version: 1, params: "new-message" },
+  });
+});
+
+it.each([
+  ["New project", "New project", "Cancel"],
+  ["New channel", "Create a channel", "Close channel creation"],
+])(
+  "opens %s from any filter and returns focus to New on cancel",
+  async (item, title, close) => {
+    const user = userEvent.setup();
+    fixture(true, true);
+    await user.click(screen.getByRole("tab", { name: "Team" }));
+    const trigger = screen.getByRole("button", { name: "New" });
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitem", { name: item }));
+    const dialog = await screen.findByRole("dialog", { name: title });
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("textbox", { name: "Name" }),
+      ).toHaveFocus(),
+    );
+    await user.click(within(dialog).getByRole("button", { name: close }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+  },
+);
+
+it("keeps unavailable creation actions disabled", async () => {
+  const user = userEvent.setup();
+  fixture(true);
+  await user.click(screen.getByRole("button", { name: "New" }));
+  expect(
+    await screen.findByRole("menuitem", { name: "New project" }),
+  ).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("menuitem", { name: "New channel" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+});
+
+it("does not navigate to a replaced session after project creation completes", async () => {
+  const f = fixture(true, true);
+  const user = userEvent.setup();
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const create = vi
+    .spyOn(f.session.mePreferences, "createSection")
+    .mockReturnValue(pending);
+  await user.click(screen.getByRole("button", { name: "New" }));
+  await user.click(
+    await screen.findByRole("menuitem", { name: "New project" }),
+  );
+  const dialog = await screen.findByRole("dialog", { name: "New project" });
+  await user.type(
+    within(dialog).getByRole("textbox", { name: "Name" }),
+    "Planning",
+  );
+  try {
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(create).toHaveBeenCalledOnce());
+    f.replaceSession();
+  } finally {
+    await act(async () => {
+      finish();
+      await pending;
+    });
+  }
+  expect(f.open).not.toHaveBeenCalled();
+});

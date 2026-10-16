@@ -1,7 +1,7 @@
 // FOUNDATION: Startup, navigation, contributed pages, and built-in Settings.
 import { IdentitySetup } from "../features/identity/IdentitySetup";
-import { MeSidebar } from "../bundled/me/MeSidebar";
-import { ChannelSidebar } from "../features/channel-navigation/ChannelSidebar";
+import { NewMenu } from "./shell/NewMenu";
+import { PrimarySidebar } from "./shell/PrimarySidebar";
 import { ChannelNavigationProvider } from "../features/channel-navigation/ChannelNavigationState";
 import { AgentsContext } from "../features/agents/react";
 import { ToastProvider } from "../shared/design-system/ui/Toast";
@@ -170,6 +170,16 @@ function ConnectedApp({ services }: { services: AppServices }) {
       <ChannelNavigationProvider relay={services.relay}>
         <AgentsContext.Provider value={services.agents}>
           <AppShell
+            creationAction={
+              <NewMenu
+                relay={services.relay}
+                navigator={services.navigation}
+                agents={services.agents}
+                meEnabled={route.pages.some(
+                  (page) => page.key === "buzz.me/me",
+                )}
+              />
+            }
             sidebar={(pageNavigation) =>
               settings ? (
                 <SettingsSidebar
@@ -198,14 +208,8 @@ function ConnectedApp({ services }: { services: AppServices }) {
                     });
                   }}
                 />
-              ) : route.selected === "buzz.me/me" ? (
-                <MeSidebar
-                  relay={services.relay}
-                  navigator={services.navigation}
-                  target={route.target}
-                />
               ) : (
-                <ChannelSidebar
+                <PrimarySidebar
                   relay={services.relay}
                   navigator={services.navigation}
                   agents={services.agents}
@@ -218,7 +222,7 @@ function ConnectedApp({ services }: { services: AppServices }) {
                   )}
                 >
                   {pageNavigation}
-                </ChannelSidebar>
+                </PrimarySidebar>
               )
             }
             navigationControls={

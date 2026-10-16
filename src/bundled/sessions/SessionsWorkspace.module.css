@@ -109,30 +109,15 @@
   overflow-wrap: anywhere;
 }
 
-.section {
-  margin-block: var(--space-2);
-}
 .section[data-drop-target] {
   border-radius: var(--radius-row);
   background: var(--affordance-panel-hover);
 }
 .sectionHeading {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
   width: 100%;
   border: 0;
   background: transparent;
-  color: var(--text-subtle);
-  min-height: var(--session-action-size, var(--size-control-sm));
-  padding: var(--space-half) var(--session-row-inset, var(--space-2));
-  font: inherit;
-  font-size: var(--text-body-sm);
-  line-height: var(--text-body-sm--line-height);
-  letter-spacing: var(--text-body-sm--letter-spacing);
-  font-weight: var(--type-weight-normal);
   text-align: start;
-  cursor: pointer;
 }
 .sectionHeading span {
   overflow-wrap: anywhere;
@@ -152,43 +137,19 @@
   flex: 1;
   min-width: 0;
 }
-.sidebar .organizedRow > div > [data-variant="row"] {
+.sidebar .organizedRow > div > [data-variant="row"],
+.sidebarContents .organizedRow > div > [data-variant="row"] {
   padding-inline-start: var(--session-row-inset);
 }
 
-.sectionHeader {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-height: var(--session-action-size);
-}
-.sectionHeader .sectionHeading {
-  flex: 1;
-  align-self: stretch;
-  min-width: 0;
-  width: auto;
-  padding-inline-end: var(--space-1);
-}
-.sectionHeader .sectionHeading:has(.genericChevron) {
-  padding-inline-end: 0;
-}
-/* The collapse chevron sits in the rows' trailing action slot. */
-.sectionHeading .genericChevron {
-  width: var(--session-action-size);
-  flex-basis: var(--session-action-size);
-  margin-inline-end: var(--session-trailing-offset);
-}
-.sectionActions:empty {
-  display: none;
-}
-
-.sidebar {
+.sidebar,
+.sidebarContents {
   --section-icon-size: 0.9375rem;
   /* Rows and section headers share one height and one trailing slot. */
   /* The compact sidebar row height (Channels' .sidebar rows), as in Berd. */
   --session-action-size: calc(var(--space-6) + var(--space-1));
-  /* Berd's 12px row inset: leading text and trailing glyphs share it. */
-  --session-row-inset: var(--space-3);
+  /* Match the channel sidebar's leading and trailing content inset. */
+  --session-row-inset: var(--space-2);
   /* A 1rem glyph centered in the trailing slot lands on the row inset. */
   --session-trailing-offset: calc(
     var(--session-row-inset) -
@@ -203,19 +164,11 @@
 .organizedRow [data-session-row-action] {
   width: var(--session-action-size);
   height: var(--session-action-size);
-  margin-inline-end: var(--session-trailing-offset);
+  margin-inline-end: calc(
+    var(--session-trailing-offset) +
+    var(--channel-row-fill-end, 0%)
+  );
 }
-/* Project actions sit in flow beside the row menu, ending on the row inset. */
-.sectionHeader [data-session-row-action] {
-  width: var(--session-action-size);
-  height: var(--session-action-size);
-}
-.sectionHeader:is(
-    :hover,
-    :has(:focus-visible),
-    :has([aria-expanded="true"][aria-haspopup="menu"])
-  )
-  [data-session-row-action],
 .organizedRow:is(
     :hover,
     :has(:focus-visible),
@@ -232,23 +185,29 @@
   }
 }
 
-.organizedRow,
-.sectionHeader {
+.organizedRow {
+  position: relative;
   border-radius: var(--radius-row);
+}
+.organizedRow::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline: var(--channel-row-fill-start, 0) var(--channel-row-fill-end, 0);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.organizedRow > * {
+  position: relative;
 }
 .organizedRow:is(
   :hover,
   :has(:focus-visible),
   :has([aria-expanded="true"][aria-haspopup="menu"])
-):not(:has([aria-current="page"])),
-.sectionHeader:is(
-  :hover,
-  :has(:focus-visible),
-  :has([aria-expanded="true"][aria-haspopup="menu"])
-) {
+):not(:has([aria-current="page"]))::before {
   background: var(--affordance-panel-hover);
 }
-.organizedRow:has([aria-current="page"]) {
+.organizedRow:has([aria-current="page"])::before {
   background: var(--interaction-selected);
 }
 
@@ -262,20 +221,6 @@
   overflow: hidden;
   white-space: nowrap;
 }
-.sectionName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.sectionActions {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  flex: 0 0 auto;
-}
 .sectionPanel {
   height: var(--collapsible-panel-height);
   overflow: hidden;
@@ -286,7 +231,7 @@
 .sectionPanel:is([data-starting-style], [data-ending-style]) {
   height: 0;
 }
-.sectionHeading[aria-expanded="false"] .genericChevron {
+.sectionHeading[aria-expanded="false"] > :last-child {
   transform: rotate(-90deg);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -334,46 +279,20 @@
   }
 }
 
-/* Section headers end in the collapse chevron. New chat sits just left of
-   it and a project's row menu left of that, revealed on hover without
-   reserving space. */
-.sectionHeader {
-  position: relative;
-}
-.sectionHeader > [data-session-overflow-action],
-.sectionHeader .sectionActions {
+/* Project menus share the channel header's trailing action slots. */
+.sectionHeader > [data-session-overflow-action] {
   position: absolute;
   top: 50%;
-  translate: 0 -50%;
-  margin-inline-end: 0;
-}
-.sectionHeader .sectionActions {
-  inset-inline-end: calc(
-    var(--session-trailing-offset) +
-    var(--session-action-size)
-  );
-}
-.sectionHeader > [data-session-overflow-action] {
-  inset-inline-end: calc(
-    var(--session-trailing-offset) +
-    2 *
-    var(--session-action-size)
-  );
+  transform: translateY(-50%);
+  inset-inline-end: calc(var(--space-1) + var(--size-control-sm));
 }
 .sectionHeader:is(
     :hover,
-    :has(:focus-visible),
+    :focus-within,
     :has([aria-expanded="true"][aria-haspopup="menu"])
   )
-  .sectionName {
-  margin-inline-end: calc(2 * var(--session-action-size));
-}
-
-/* Touch exposes actions without hover, so names need the same space. */
-@media (hover: none) {
-  .sectionHeader .sectionName {
-    margin-inline-end: calc(2 * var(--session-action-size));
-  }
+  > [data-session-overflow-action] {
+  opacity: 1;
 }
 
 /* Working occupies the same trailing action slot as attention, as in Messages. */
@@ -406,4 +325,12 @@
   .organizedRow:has([data-channel-working]) .sessionRow {
     padding-inline-end: var(--session-action-size);
   }
+}
+
+.conversationIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  flex: 0 0 var(--space-5);
 }

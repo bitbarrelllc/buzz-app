@@ -20,7 +20,13 @@ import { CommunityDialog } from "./CommunityDialog";
 import type { InviteLink } from "./invite-link";
 import { CommunityRailItem, MEMBERSHIP_SECTION } from "./CommunityRailItem";
 import { communityDestination } from "./destination";
-import { Tooltip } from "../../shared/design-system/ui/Tooltip";
+import { Avatar } from "../../shared/design-system/ui/Avatar";
+import {
+  PopoverRoot,
+  PopoverTrigger,
+  PopoverPopup,
+} from "../../shared/design-system/ui/Popover";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import styles from "./Communities.module.css";
 import { fetchCommunityIcon } from "./community-icon";
 import { useCommunityRole } from "./useCommunityRole";
@@ -44,11 +50,13 @@ export function CommunityRail({
   /** Menu destinations (Invites, Community settings) open through the host's navigation. */
   onOpenTarget?: ((target: OpenTarget) => void) | undefined;
 }) {
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [joining, setJoining] = useState(false);
-  const addRef = useRef<HTMLButtonElement>(null);
+  const navigated = useRef(false);
   const wasJoining = useRef(false);
   useEffect(() => {
-    if (wasJoining.current && !joining) addRef.current?.focus();
+    if (wasJoining.current && !joining) triggerRef.current?.focus();
     wasJoining.current = joining;
   }, [joining]);
   // The confirm dialog belongs to the rail so it outlives the item it removes.
@@ -56,8 +64,6 @@ export function CommunityRail({
     membership: Membership;
     pending: boolean;
   } | null>(null);
-  const personalRef = useRef<HTMLButtonElement>(null);
-  const buttons = useRef(new Map<string, HTMLElement>());
   const wasLeaving = useRef<Membership | null>(null);
   const notify = useToastNotification();
   const client = useSyncExternalStore(
@@ -65,18 +71,11 @@ export function CommunityRail({
     communities.snapshot,
   );
   useEffect(() => {
-    // Focus returns to the community when it is still saved (cancel or
-    // failure). Once it is gone, focus follows the selection: the community
-    // still selected, or Personal space where a left selection now lands.
-    const previous = wasLeaving.current;
-    if (previous && !leaving)
-      (
-        buttons.current.get(previous.id) ??
-        (client.selected ? buttons.current.get(client.selected) : undefined) ??
-        personalRef.current
-      )?.focus();
+    // The picker closes before confirmation. Its surviving trigger owns
+    // return focus whether the community was retained or removed.
+    if (wasLeaving.current && !leaving) triggerRef.current?.focus();
     wasLeaving.current = leaving?.membership ?? null;
-  }, [leaving, client.selected]);
+  }, [leaving]);
   // The compatibility reader follows selection, so this is only ever the
   // selected community's session; inactive communities stay unacquired.
   const connection = useRelayConnection(communities.relay);
@@ -98,6 +97,10 @@ export function CommunityRail({
     // Registration is not authorization: the rail refreshes the role on menu
     // open even if Settings last cached a non-admin role.
     () => settingsCards?.has(MEMBERSHIP_SECTION) ?? false,
+  );
+  const hostedAvailable = useSyncExternalStore(
+    settingsCards?.subscribe ?? noSubscription,
+    () => settingsCards?.has("block.hosted-communities/hosted") ?? false,
   );
   const invites = !!onOpenTarget && membershipAvailable;
   const role = useCommunityRole(invites ? session : undefined, client.viewer);
@@ -132,6 +135,7 @@ export function CommunityRail({
     return () => controller.abort();
   }, [client.status, client.relayAvailable, membershipIds]);
   const select = (id: string | null) => {
+    setSwitcherOpen(false);
     if (onSelect) onSelect(id);
     else communities.select(id);
   };
@@ -190,58 +194,146 @@ export function CommunityRail({
     );
     setLeaving(null);
   };
+  const active = client.memberships.find(
+    (membership) => membership.id === client.selected,
+  );
   return (
     <>
       <nav aria-label="Communities" className={styles.rail}>
-        <Tooltip content="Personal space" side="right">
-          <IconButton
-            ref={personalRef}
-            size="md"
-            aria-label="Personal space"
-            aria-current={client.selected === null ? "true" : undefined}
-            data-selected={client.selected === null || undefined}
-            icon={<GlobeIcon size={22} strokeWidth={1.5} aria-hidden="true" />}
-            onClick={() => select(null)}
+        <PopoverRoot
+          open={switcherOpen}
+          onOpenChange={(open) => {
+            if (open) navigated.current = false;
+            setSwitcherOpen(open);
+          }}
+        >
+          <PopoverTrigger
+            render={
+              <IconButton
+                ref={triggerRef}
+                size="md"
+                variant="avatar"
+                shape="round"
+                aria-label={`Community switcher: ${active?.name ?? "Personal space"}`}
+                title={active?.name ?? "Personal space"}
+                icon={
+                  active ? (
+                    <Avatar
+                      size="small"
+                      shape="squircle"
+                      alt=""
+                      fallback={active.name}
+                      src={icons[active.id] ?? active.icon}
+                    />
+                  ) : (
+                    <GlobeIcon size={22} aria-hidden="true" />
+                  )
+                }
+              />
+            }
           />
-        </Tooltip>
-        {client.memberships.map((membership) => {
-          const selected = client.selected === membership.id;
-          return (
-            <CommunityRailItem
-              key={membership.id}
-              membership={membership}
-              icon={icons[membership.id] ?? membership.icon}
-              selected={selected}
-              viewer={client.viewer}
-              session={selected ? session : undefined}
-              manager={selected && invites && role.manager}
-              leaving={
-                leaving?.membership.id === membership.id && leaving.pending
-              }
-              onSelect={select}
-              onOpenTarget={onOpenTarget}
-              // Roles can change while the app runs; opening the selected
-              // community's menu re-reads the roster it gates on.
-              onMenuOpen={selected && invites ? role.refresh : undefined}
-              onLeave={(target) =>
-                setLeaving({ membership: target, pending: false })
-              }
-              buttonRef={(node) => {
-                if (node) buttons.current.set(membership.id, node);
-                else buttons.current.delete(membership.id);
+          <PopoverPopup
+            aria-label="Switch community"
+            onKeyDown={(event) => {
+              if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key))
+                return;
+              const rows = Array.from(
+                event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                  "button:not([disabled])",
+                ),
+              );
+              const index = rows.indexOf(
+                document.activeElement as HTMLButtonElement,
+              );
+              event.preventDefault();
+              const next =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? rows.length - 1
+                    : (index +
+                        (event.key === "ArrowDown" ? 1 : -1) +
+                        rows.length) %
+                      rows.length;
+              rows[next]?.focus();
+            }}
+            align="end"
+            padding="list"
+            size="compact"
+            finalFocus={() =>
+              joining || leaving
+                ? false
+                : navigated.current
+                  ? document.getElementById("main-content")
+                  : triggerRef.current
+            }
+          >
+            <NavigationItem
+              label="Personal space"
+              selected={client.selected === null}
+              aria-current={client.selected === null ? "true" : undefined}
+              icon={<GlobeIcon size={20} />}
+              onClick={() => select(null)}
+            />
+            {client.memberships.map((membership) => {
+              const selected = client.selected === membership.id;
+              return (
+                <CommunityRailItem
+                  key={membership.id}
+                  membership={membership}
+                  icon={icons[membership.id] ?? membership.icon}
+                  selected={selected}
+                  viewer={client.viewer}
+                  session={selected ? session : undefined}
+                  manager={selected && invites && role.manager}
+                  leaving={
+                    leaving?.membership.id === membership.id && leaving.pending
+                  }
+                  onSelect={select}
+                  onOpenTarget={
+                    onOpenTarget
+                      ? (target) => {
+                          navigated.current = true;
+                          setSwitcherOpen(false);
+                          onOpenTarget(target);
+                        }
+                      : undefined
+                  }
+                  // Roles can change while the app runs; opening the selected
+                  // community's menu re-reads the roster it gates on.
+                  onMenuOpen={selected && invites ? role.refresh : undefined}
+                  onLeave={(target) => {
+                    setSwitcherOpen(false);
+                    setLeaving({ membership: target, pending: false });
+                  }}
+                />
+              );
+            })}
+            <NavigationItem
+              label="Join a community"
+              icon={<PlusIcon size={20} />}
+              onClick={() => {
+                setSwitcherOpen(false);
+                setJoining(true);
               }}
             />
-          );
-        })}
-        <Tooltip content="Add a community" side="right">
-          <IconButton
-            ref={addRef}
-            size="md"
-            aria-label="Add a community"
-            icon={<PlusIcon size={22} aria-hidden="true" />}
-            onClick={() => setJoining(true)}
-          />
-        </Tooltip>
+            {onOpenTarget && hostedAvailable && (
+              <NavigationItem
+                label="Create community"
+                icon={<PlusIcon size={20} />}
+                onClick={() => {
+                  navigated.current = true;
+                  setSwitcherOpen(false);
+                  onOpenTarget({
+                    version: 1,
+                    kind: "settings",
+                    section: "block.hosted-communities/hosted",
+                  });
+                }}
+              />
+            )}
+          </PopoverPopup>
+        </PopoverRoot>
       </nav>
       {(joining || invite) && (
         <CommunityDialog

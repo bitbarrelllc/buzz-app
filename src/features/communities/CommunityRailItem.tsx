@@ -18,7 +18,7 @@ import {
   TicketIcon,
 } from "../../shared/design-system/icons/index";
 import { Avatar } from "../../shared/design-system/ui/Avatar";
-import { IconButton } from "../../shared/design-system/ui/IconButton";
+import { NavigationItem } from "../../shared/design-system/ui/NavigationItem";
 import {
   ContextMenuRoot,
   ContextMenuTrigger,
@@ -29,7 +29,6 @@ import {
   MenuSeparator,
 } from "../../shared/design-system/ui/Menu";
 import { useToastNotification } from "../../shared/design-system/ui/Toast";
-import { Tooltip } from "../../shared/design-system/ui/Tooltip";
 import { communityDestination } from "./destination";
 import type { Membership } from "./service";
 import styles from "./Communities.module.css";
@@ -61,7 +60,6 @@ export function CommunityRailItem({
   onOpenTarget,
   onMenuOpen,
   onLeave,
-  buttonRef,
 }: {
   membership: Membership;
   icon: string | undefined;
@@ -78,8 +76,6 @@ export function CommunityRailItem({
   onMenuOpen?: (() => void) | undefined;
   /** Asks the rail to confirm and run a leave; the rail owns the dialog. */
   onLeave: (membership: Membership) => void;
-  /** Lets the rail return focus here after its dialogs close. */
-  buttonRef?: ((node: HTMLElement | null) => void) | undefined;
 }) {
   // A keyboard open anchors to the rail item; a pointer open leaves the anchor
   // to Base UI's cursor point.
@@ -150,28 +146,25 @@ export function CommunityRailItem({
         onKeyDown={openFromKeyboard}
         onPointerDown={rememberInterrupted}
       >
-        <Tooltip content={name} side="right">
-          <IconButton
-            ref={(node) => {
-              button.current = node;
-              buttonRef?.(node);
-            }}
-            size="md"
-            aria-label={`Switch to ${name}`}
-            aria-current={selected ? "true" : undefined}
-            data-selected={selected || undefined}
-            icon={
-              <Avatar
-                size="small"
-                shape="squircle"
-                alt=""
-                fallback={name}
-                src={icon}
-              />
-            }
-            onClick={() => onSelect(membership.id)}
-          />
-        </Tooltip>
+        <NavigationItem
+          ref={(node) => {
+            button.current = node;
+          }}
+          label={name}
+          aria-label={`Switch to ${name}`}
+          aria-current={selected ? "true" : undefined}
+          selected={selected}
+          icon={
+            <Avatar
+              size="small"
+              shape="squircle"
+              alt=""
+              fallback={name}
+              src={icon}
+            />
+          }
+          onClick={() => onSelect(membership.id)}
+        />
       </ContextMenuTrigger>
       <MenuPopup
         aria-label={`Actions for ${name}`}

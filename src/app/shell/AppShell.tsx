@@ -20,7 +20,7 @@ import { CommunityRail } from "../../features/communities/CommunityRail";
 import { ProfileButton } from "./ProfileButton";
 import type { Appearance } from "../../shared/theme/service";
 import { PageSearch, type SearchServices } from "./PageSearch";
-import { headerPageSelection, orderPages } from "./presentation";
+import { headerPageSelection, isGlobalPage, orderPages } from "./presentation";
 import { PageNavigation } from "./PageNavigation";
 import type { NavigationOpenOptions } from "../../features/navigation/controller";
 import {
@@ -55,6 +55,7 @@ export function AppShell({
   onOpenTarget,
   launchers,
   companion,
+  creationAction,
   children,
 }: {
   pages: readonly RegisteredPage[];
@@ -80,11 +81,11 @@ export function AppShell({
   onOpenTarget?: (target: OpenTarget) => void;
   launchers?: ReactNode;
   companion?: ReactNode;
+  creationAction?: ReactNode;
   children: ReactNode;
 }) {
   const fillsWorkspace = workspace || selected === "settings";
-  const channelsNavigation =
-    selected === "buzz.channels/channels" || selected === "buzz.agents/agents";
+  const channelsNavigation = selected === "buzz.channels/channels";
   const [narrow, setNarrow] = useState(
     () => window.matchMedia("(max-width: 650px)").matches,
   );
@@ -130,6 +131,7 @@ export function AppShell({
       pages.filter(
         (page) =>
           page.primary &&
+          !isGlobalPage(page.key) &&
           (page.placement === undefined || page.placement === "sidebar"),
       ),
     );
@@ -158,23 +160,32 @@ export function AppShell({
         pages.filter(
           (page) =>
             page.primary &&
-            (page.placement === "topbar" || page.placement === "toolbar"),
+            page.key !== "buzz.me/me" &&
+            (isGlobalPage(page.key) ||
+              page.placement === "topbar" ||
+              page.placement === "toolbar"),
         ),
       ),
     [pages],
   );
-  const topbarPages = headerPages.filter((page) => page.placement === "topbar");
-  const selectedHeader = headerPageSelection(pages, selected);
+  const topbarPages = headerPages.filter(
+    (page) => isGlobalPage(page.key) || page.placement === "topbar",
+  );
+  const selectedHeader = isGlobalPage(selected)
+    ? selected
+    : headerPageSelection(pages, selected);
   const selectedTopbarPage = topbarPages.some(
     (page) => page.key === selectedHeader,
   );
   const panelKey = selectedTopbarPage ? selectedHeader : selected;
   const toolbarPages = headerPages.filter(
-    (page) => page.placement === "toolbar",
+    (page) => !isGlobalPage(page.key) && page.placement === "toolbar",
   );
   const headerRef = useRef<HTMLElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const creationRef = useRef<HTMLDivElement>(null);
   const topbarRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLElement>(null);
   const overflowTrigger = useRef<HTMLButtonElement>(null);
@@ -198,7 +209,14 @@ export function AppShell({
         (toolbarRef.current?.offsetWidth ?? 0) +
         parseFloat(style.paddingRight) +
         gap;
-      const center = topbarRef.current?.offsetWidth ?? 0;
+      const center =
+        (topbarRef.current?.offsetWidth ?? 0) +
+        2 *
+          Math.max(
+            creationRef.current?.offsetWidth ?? 0,
+            searchRef.current?.offsetWidth ?? 0,
+          ) +
+        gap;
       const compact =
         narrow ||
         2 * (Math.max(left, right) + gap) + center > header.clientWidth;
@@ -220,6 +238,8 @@ export function AppShell({
       historyRef.current,
       actionsRef.current,
       topbarRef.current,
+      creationRef.current,
+      searchRef.current,
       toolbarRef.current,
     ]) {
       if (element) observer.observe(element);
@@ -293,23 +313,90 @@ export function AppShell({
           )}
           {navigationControls}
         </div>
-        {topbarPages.length > 0 && (
-          <nav
-            ref={topbarRef}
-            aria-label="Topbar pages"
-            className="shell-topbar-pages"
-            aria-hidden={compactPages}
-            inert={compactPages}
-          >
-            <PageNavigation
-              pages={topbarPages}
-              selected={selectedHeader}
-              currentPage={selected}
-              onSelect={onSelect}
-              placement="topbar"
-            />
-          </nav>
-        )}
+        <div className="shell-center-capsule shell-capsule">
+          <div ref={creationRef} className="shell-create-action shell-capsule">
+            <Panel as="div" shape="capsule">
+              {creationAction}
+            </Panel>
+          </div>
+          <Panel as="div" shape="capsule">
+            {headerPages.length > 0 && (
+              <PopoverRoot
+                open={overflowOpen && compactPages}
+                onOpenChange={setOverflowOpen}
+              >
+                <PopoverTrigger
+                  render={
+                    <IconButton
+                      ref={overflowTrigger}
+                      data-shell-pages-overflow=""
+                      aria-label="More pages"
+                      title="More pages"
+                      variant="ghost"
+                      icon={<DotsThreeIcon size={16} aria-hidden="true" />}
+                    />
+                  }
+                />
+                <PopoverPopup
+                  size="compact"
+                  padding="list"
+                  align="end"
+                  aria-label="More pages"
+                  finalFocus={() =>
+                    compactPages
+                      ? overflowTrigger.current
+                      : ((
+                          topbarRef.current ?? toolbarRef.current
+                        )?.querySelector<HTMLButtonElement>("button") ??
+                        document.getElementById("main-content"))
+                  }
+                >
+                  <nav
+                    ref={overflowPages}
+                    aria-label="Header pages"
+                    className="shell-pages"
+                  >
+                    <PageNavigation
+                      pages={headerPages}
+                      selected={selectedHeader}
+                      currentPage={selected}
+                      onSelect={(key) => {
+                        setOverflowOpen(false);
+                        onSelect(key);
+                      }}
+                    />
+                  </nav>
+                </PopoverPopup>
+              </PopoverRoot>
+            )}
+            {topbarPages.length > 0 && (
+              <nav
+                ref={topbarRef}
+                aria-label="Topbar pages"
+                className="shell-topbar-pages"
+                aria-hidden={compactPages}
+                inert={compactPages}
+              >
+                <PageNavigation
+                  pages={topbarPages}
+                  selected={selectedHeader}
+                  currentPage={selected}
+                  onSelect={onSelect}
+                  placement="topbar"
+                />
+              </nav>
+            )}
+          </Panel>
+          <div ref={searchRef} className="shell-search-action shell-capsule">
+            <Panel as="div" shape="capsule">
+              <PageSearch
+                pages={pages}
+                onSelect={onSelect}
+                services={searchServices}
+              />
+            </Panel>
+          </div>
+        </div>
         <div
           className="shell-actions"
           data-tauri-drag-region={macDesktop ? undefined : true}
@@ -331,85 +418,33 @@ export function AppShell({
               />
             </nav>
           )}
-          {headerPages.length > 0 && (
-            <PopoverRoot
-              open={overflowOpen && compactPages}
-              onOpenChange={setOverflowOpen}
-            >
-              <PopoverTrigger
-                render={
-                  <IconButton
-                    ref={overflowTrigger}
-                    data-shell-pages-overflow=""
-                    aria-label="More pages"
-                    title="More pages"
-                    variant="ghost"
-                    icon={<DotsThreeIcon size={16} aria-hidden="true" />}
-                  />
-                }
-              />
-              <PopoverPopup
-                size="compact"
-                padding="list"
-                align="end"
-                aria-label="More pages"
-                finalFocus={() =>
-                  compactPages
-                    ? overflowTrigger.current
-                    : ((
-                        topbarRef.current ?? toolbarRef.current
-                      )?.querySelector<HTMLButtonElement>("button") ??
-                      document.getElementById("main-content"))
-                }
-              >
-                <nav
-                  ref={overflowPages}
-                  aria-label="Header pages"
-                  className="shell-pages"
-                >
-                  <PageNavigation
-                    pages={headerPages}
-                    selected={selectedHeader}
-                    currentPage={selected}
-                    onSelect={(key) => {
-                      setOverflowOpen(false);
-                      onSelect(key);
-                    }}
-                  />
-                </nav>
-              </PopoverPopup>
-            </PopoverRoot>
-          )}
           <div ref={actionsRef} className="shell-actions-fixed">
             {launchers}
-            <PageSearch
-              pages={pages}
-              onSelect={onSelect}
-              services={searchServices}
-            />
-            <ProfileButton
-              communities={communities}
-              accountActions={accountActions}
-              settingsSelected={selected === "settings"}
-              appearance={appearance}
-              onSettings={(section) =>
-                onSelect("settings", section ? { section } : undefined)
-              }
-            />
+            <div className="shell-community-switcher">
+              <CommunityRail
+                communities={communities}
+                invite={invite}
+                onInviteClose={onInviteClose}
+                settingsCards={settingsCards}
+                onSelect={onCommunitySelect}
+                onOpenTarget={onOpenTarget}
+              />
+              <ProfileButton
+                communities={communities}
+                accountActions={accountActions}
+                settingsSelected={selected === "settings"}
+                appearance={appearance}
+                onSettings={(section) =>
+                  onSelect("settings", section ? { section } : undefined)
+                }
+              />
+            </div>
             <WindowControls />
           </div>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <CommunityRail
-          communities={communities}
-          invite={invite}
-          onInviteClose={onInviteClose}
-          settingsCards={settingsCards}
-          onSelect={onCommunitySelect}
-          onOpenTarget={onOpenTarget}
-        />
         <div
           className={`shell-body ${selected === "settings" ? "shell-body-settings" : ""}`}
         >

@@ -30,26 +30,43 @@ semantic tokens, UI authoring rules and the local component reference.
   follow by displayed label with a full contribution-key tie-breaker. Sidebar
   navigation and page search share this ordering, independent of plugin
   activation/re-enable order. Primary pages choose `sidebar` (default), `topbar`
-  (centered text) or `toolbar` (top-right icon) placement. Me and Messages start
-  in the topbar; other primary bundled pages retain their sidebar rows. Me is an
-  optional, default-enabled personal-conversation workspace in the current
-  community. Its dedicated SidebarFrame reuses saved channel-sidebar width and
-  shows New conversation plus personal history, replacing Messages navigation.
-  Scoped Me page routes own sidebar/content selection. The initial implementation
-  reuses the existing session transcript and composer; see [Sessions](sessions/README.md)
-  for placement rules, remaining ingress differences and the relay privacy boundary.
-  Messages opens by default, from any channel row, its topbar button and search.
+  (header segments) or `toolbar` (top-right icon) placement for contributed pages.
+  Solo and Multiplayer instead share `PrimarySidebar`: All (the default), Solo,
+  and Team filter the left navigation without opening a destination or
+  changing the current conversation. The filter remains available above one
+  shared scrollport, including in the narrow navigation drawer. All shows Solo
+  projects and chats above Multiplayer channel sections. A capsule scope control sits at the top of the sidebar.
+  Inbox and Bestie remain in the sidebar; other built-in global page links live in the header capsule. The header plus opens the New
+  menu for chat, project, DM and channel creation. Both inventories stay mounted when filtered, retaining section state.
+  The old sidebar brand marks are omitted. Solo reuses the channel sidebar's
+  surface, resize owner, row treatment, section heading recipe and section gaps.
+  Me remains an optional, default-enabled workspace in the current community;
+  disabling it leaves Multiplayer navigation. Settings keeps its own sidebar.
+  Scoped Me routes still own content selection; see [Sessions](sessions/README.md)
+  for placement rules and the relay privacy boundary. Messages remains the default
+  destination and opens from channel rows and search.
   Page search lists every active page, including non-primary pages.
   Disabling an optional plugin removes its navigation entry.
   Channels is presented as Messages. Legacy tone props are retained for
   compatibility; all pages share the supplied gradient and repeating CSS dots.
   Presentation is keyed by full contribution identity, not plugin-local IDs.
-- `AppShell.tsx` owns the 48px header, vertical page navigation, contributed panel
-  launchers, Settings access, community rail, and page frames. Page navigation sits
-  above the channel list outside Settings, using its saved sidebar width
-  and resize behavior. Settings replaces that region with `SettingsSidebar.tsx`,
+- `AppShell.tsx` owns the header, contributed panel launchers, Settings access,
+  community switcher, and page frames. The header uses capsule Panel surfaces:
+  flat sidebar/history controls at the left, window-centered destinations flanked by
+  separate creation and Search capsules, and flat community/profile controls at the right. Outer content
+  padding uses the same panel-gap token as the space between panes.
+  Messages, Reminders, Projects, Agents and Workflows use header segments,
+  preserving contributed placement for other plugins. The community trigger opens
+  a shared Popover containing NavigationItem rows with their existing context menus;
+  this richer picker retains community actions as well as switching. Arrow keys,
+  Home and End move focus. Join and Create community appear at the bottom; creation
+  opens the registered Hosted communities settings flow. Dialogs return focus to
+  the surviving community trigger.
+  Switching pages preserves the desktop sidebar’s current visibility. The manual
+  collapse toggle remains available across destinations.
+  The conversation sidebar retains its saved width and resize behavior. Settings replaces that region with `SettingsSidebar.tsx`,
   preserving the same width (220px minimum) and returning to the previous view
-  with Back. `App.tsx` composes `features/channel-navigation/ChannelSidebar`
+  with Back. `App.tsx` composes `PrimarySidebar` around `features/channel-navigation/ChannelSidebar`
   through an ordinary render prop; there is no portal or plugin contract expansion.
   Sidebar session state resets on scope/connection generation without remounting
   unrelated pages. Its own error boundary keeps page navigation and Settings usable.
@@ -65,11 +82,11 @@ semantic tokens, UI authoring rules and the local component reference.
   width. Pages without a Channel or Me-specific label use generic "Hide sidebar" /
   "Show sidebar" labels. Reduced motion disables the transition. Non-primary
   desktop destinations retain the visible sidebar.
-  The same header keeps history and account/search actions, plus a centered
+  The same header keeps history and account/search actions, plus a segmented
   navigation strip and full-page toolbar icons. Real control widths, native insets
   and text scale determine whether header pages fit without overlap. Otherwise
   those entries move into a labelled More pages popover (always at <=650px).
-  Wide topbar pages use design-system chrome tabs with manual activation: arrow
+  Wide topbar pages use design-system segmented tabs with manual activation: arrow
   keys move focus, and Enter or Space selects the page while focus stays on its
   tab. Each opening carries focus intent: topbar activation suppresses destination
   autofocus, while explicit New conversation, sidebar and deep-link openings keep
@@ -118,7 +135,7 @@ motion with Tailwind's `motion-reduce` variant.
 ## Desktop chrome
 
 Tauri uses `titleBarStyle: Overlay` and `hiddenTitle` on macOS. Native traffic
-lights have a reserved 104px left area before the community switcher only in the
+lights have a reserved left area before the history controls only in the
 macOS desktop runtime. Web gets no inset or imitation window controls. Linux
 and Windows desktop use undecorated windows with app-owned minimize,
 maximize/restore and close buttons in the header, including during identity
@@ -187,7 +204,7 @@ avatar. Search, sidebar and history controls use unfilled ghost icon buttons wit
 Their hover fills remain translucent over the colored backdrop.
 Pressed fills are slightly stronger; icons keep full opacity. Plugin launchers
 use the shared glass style.
-Bestie is available from its sidebar page, without a top-bar shortcut.
+Bestie is available in the Messages sidebar when its plugin is enabled.
 `ProfileButton.tsx` uses the selected community's profile when connected and
 local defaults in Personal space. Its anchored account menu groups profile and
 status controls above Appearance, Plugins and Settings. The avatar inside the
