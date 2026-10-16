@@ -27,7 +27,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     () => agents.tools(),
   );
   const spawn = host.spawn?.bind(host);
-  const setup = new GooseSetup(spawn);
+  const setup = new GooseSetup(spawn, () => runtime.defaultsChanged());
   const {
     Create,
     CreateModel,

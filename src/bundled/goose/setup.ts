@@ -93,7 +93,10 @@ export class GooseSetup {
   private readonly listeners = new Set<() => void>();
   private checking: Promise<void> | undefined;
 
-  constructor(private readonly spawn: Spawn | undefined) {}
+  constructor(
+    private readonly spawn: Spawn | undefined,
+    private readonly defaultsChanged: () => void = () => {},
+  ) {}
 
   snapshot = () => this.state;
   subscribe = (listener: () => void) => {
@@ -150,6 +153,7 @@ export class GooseSetup {
           ...(choice.model.trim() ? { modelId: choice.model.trim() } : {}),
         }),
       );
+      this.defaultsChanged();
       await this.check();
     } finally {
       this.update({ ...this.state, blocking: false });

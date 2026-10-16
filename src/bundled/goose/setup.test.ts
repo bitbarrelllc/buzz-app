@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Spawn } from "./goose";
 import { fakeSpawn } from "./goose-testing";
 import { GooseSetup, keyLabel } from "./setup";
@@ -329,4 +329,19 @@ it("reports unavailable Goose as needing attention", async () => {
     goose.saveDefaults({ provider: "ollama", model: "qwen3" }),
   ).rejects.toThrow();
   expect(goose.snapshot().blocking).toBe(false);
+});
+
+it("invalidates runtime defaults only after a successful save", async () => {
+  const fake = fakeSpawn({ providers: PROVIDERS });
+  const changed = vi.fn();
+  const goose = new GooseSetup(fake.spawn, changed);
+  await goose.check();
+  expect(changed).not.toHaveBeenCalled();
+  await goose.saveDefaults({ provider: "ollama", model: "qwen3" });
+  expect(changed).toHaveBeenCalledTimes(1);
+  const unavailable = new GooseSetup(undefined, changed);
+  await expect(
+    unavailable.saveDefaults({ provider: "ollama", model: "" }),
+  ).rejects.toThrow();
+  expect(changed).toHaveBeenCalledTimes(1);
 });
