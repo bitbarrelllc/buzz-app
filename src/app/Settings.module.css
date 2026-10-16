@@ -685,6 +685,7 @@
 }
 
 .plugin[data-core] .pluginRow {
+  border-radius: inherit;
   grid-area: 1 / 1 / -1 / -1;
   align-self: stretch;
   flex-direction: column;
