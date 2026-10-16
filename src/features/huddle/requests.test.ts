@@ -38,12 +38,14 @@ function harness() {
     { ...channel, id: stream, channelType: "stream" as const },
   ];
   const views = new Set<object>();
+  const resolve = vi.fn(async () => {});
   const session = {
     ...store.session,
     viewer: self.pubkey,
     relayAuthor: authority.pubkey,
     channels: {
       ...store.session.channels,
+      resolve,
       list: () => ({ status: "ready" as const, channels }),
       subscribeList: (fn: () => void) => {
         listListeners.add(fn);
@@ -120,6 +122,7 @@ function harness() {
     () => requests.dispose(),
   );
   return {
+    resolve,
     requests,
     publish,
     get: () => latest,
@@ -203,7 +206,7 @@ it("does not interrupt calls and retires ended or inaccessible requests", () => 
   expect(h.get()).toBeDefined();
   h.revoke();
   expect(h.get()).toBeUndefined();
-  expect(h.views.size).toBe(0);
+  expect(h.views.size).toBe(1);
 });
 it("expires requests and disposes observers on connection replacement", () => {
   const h = harness();
@@ -324,4 +327,29 @@ it("bounds an outsider invitation when only the private parent receives the end"
   expect(h.get()).toBeUndefined();
   h.requests.refresh();
   expect(h.get()).toBeUndefined();
+});
+
+it("recovers an invitation with no classified lifecycle destinations", async () => {
+  const h = harness();
+  h.rooms([{ id: room, name: room, members: [self.pubkey] }]);
+  h.resolve.mockImplementation(async () => {
+    h.rooms([invitedRoom]);
+  });
+  h.publish(invitation());
+  await Promise.resolve();
+  expect(h.resolve).toHaveBeenCalledWith(
+    [room],
+    expect.objectContaining({ consistency: "strong" }),
+  );
+  expect(h.get()?.room).toBe(room);
+  expect(h.resolve).toHaveBeenCalledTimes(1);
+});
+
+it("rings a slightly future-dated start when the recipient clock catches up", () => {
+  const h = harness();
+  const start = event(48100);
+  h.publish(signed(peer, { ...start, created_at: start.created_at + 2 }));
+  expect(h.get()).toBeUndefined();
+  vi.advanceTimersByTime(2000);
+  expect(h.get()?.room).toBe(room);
 });

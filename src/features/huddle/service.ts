@@ -395,13 +395,6 @@ export function createHuddles(
         !closing &&
         ["idle", "error", "incoming"].includes(snapshot.phase),
       (request) => {
-        // An unrelated incoming request must not erase a failed call.
-        if (
-          request &&
-          snapshot.phase === "error" &&
-          snapshot.room !== request.room
-        )
-          return;
         if (request)
           update({
             ...idle,

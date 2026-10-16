@@ -745,6 +745,7 @@ pub fn run() {
                 webview.state::<pairing::Pairing>().cancel_all();
                 webview.state::<relay::Spools>().cancel_all(&webview.state::<relay::Uploads>());
                 // Processes belong to the page that started them.
+                webview.state::<Huddles>().stop_all();
                 webview.state::<HostProcesses>().stop_all();
                 webview.state::<HostMcpServers>().stop_all();
             }

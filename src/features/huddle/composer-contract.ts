@@ -4,6 +4,7 @@ import type { RelaySession } from "../relay/session";
 import type { UploadedAttachment } from "../relay/attachments";
 
 export type ComposerSnapshot = {
+  modelRevision: number;
   viewer: string | undefined;
   scope: string;
   room: string;
@@ -22,12 +23,17 @@ export type ComposerSnapshot = {
   completions: readonly string[];
 };
 export type ComposerOperations = {
+  models: {
+    args: readonly string[];
+    result: readonly import("../agents/react").MentionModelChoice[];
+  };
   gifSupport: { args: undefined; result: boolean };
   gifSearch: { args: string; result: import("../relay/gifs").KlipyGif[] };
   send: {
     args: {
       text: string;
       draft: string;
+      picks?: import("../relay/messages").MentionPicks;
       mentions: readonly string[];
       references: readonly string[];
       attachments: readonly UploadedAttachment[];

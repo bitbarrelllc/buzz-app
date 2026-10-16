@@ -92,6 +92,7 @@ export function createHuddleWindow(
   bridge = nativeHuddleWindow,
   extensions?: ComposerReader,
   openLink?: (target: string) => boolean,
+  agents?: import("../agents/service").Agents,
 ) {
   let disposed = false;
   let attempted: string | undefined;
@@ -349,6 +350,7 @@ export function createHuddleWindow(
                     relay.snapshot().session === session &&
                     huddles.snapshot().id === id,
                   roomDiscussion.available,
+                  agents,
                 );
               }
             } catch (error) {

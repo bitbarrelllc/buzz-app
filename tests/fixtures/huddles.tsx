@@ -111,6 +111,7 @@ let lifecycleReadFailed = false;
 let startedAt = Math.floor(Date.now() / 1000);
 const lifecycleListeners = new Set<() => void>();
 let endedAt: number | undefined;
+let lifecycleRoom = roomId;
 let lifecycleParent = destination.channelId;
 let lifecycleCreator = viewer;
 const lifecycleEvent = (kind: number, at: number) => ({
@@ -118,7 +119,7 @@ const lifecycleEvent = (kind: number, at: number) => ({
   pubkey: kind === 48101 ? viewer : lifecycleCreator,
   kind,
   created_at: at,
-  content: JSON.stringify({ ephemeral_channel_id: roomId }),
+  content: JSON.stringify({ ephemeral_channel_id: lifecycleRoom }),
   tags: [
     ["h", lifecycleParent],
     ["p", lifecycleCreator],
@@ -220,6 +221,8 @@ const session = {
   },
   attachments: {
     async upload(file: File, _room: string, signal: AbortSignal) {
+      stats.uploadWaiting += 1;
+      await uploadGate;
       signal.throwIfAborted();
       const text = await file.text();
       stats.uploads.push({ name: file.name, text });
@@ -291,8 +294,11 @@ const relay: RelayData = {
   disconnect() {},
   async clearCache() {},
 };
+let uploadGate: Promise<void> | undefined;
+let releaseUpload: (() => void) | undefined;
 let receive = (_: HuddleUpdate) => {};
 const stats = {
+  uploadWaiting: 0,
   layoutWaiting: 0,
   uploads: [] as { name: string; text: string }[],
   sent: [] as {
@@ -461,7 +467,9 @@ declare global {
     huddleFixture: {
       stats: typeof stats;
       connect(): void;
-      request(): void;
+      request(room?: string): void;
+      holdUpload(): void;
+      releaseUpload(): void;
       holdLayout(): void;
       releaseLayout(): void;
       fixedWindow(value: boolean): void;
@@ -473,9 +481,19 @@ declare global {
   }
 }
 window.huddleFixture = {
+  holdUpload() {
+    uploadGate = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
+  },
+  releaseUpload() {
+    releaseUpload?.();
+    uploadGate = undefined;
+  },
   stats,
   connect: () => connect(),
-  request: () => {
+  request: (room = roomId) => {
+    lifecycleRoom = room;
     // A newly simulated call starts now, after the request watcher activated.
     startedAt = Math.floor(Date.now() / 1000);
     lifecycleParent = dmId;

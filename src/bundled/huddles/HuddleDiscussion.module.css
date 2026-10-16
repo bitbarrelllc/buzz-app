@@ -4,15 +4,13 @@
   height: 100%;
   min-height: 0;
 }
-.discussion > :last-child {
+.discussion > [role="tabpanel"] {
   flex: 1;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 0;
-}
-.discussion [role="tabpanel"] {
-  min-height: 0;
   overflow: hidden;
+}
+.discussion > [role="tabpanel"][hidden] {
+  display: none;
 }
 .thread {
   display: flex;

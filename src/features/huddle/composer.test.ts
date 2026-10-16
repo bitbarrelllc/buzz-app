@@ -1,3 +1,4 @@
+import { useHuddleComposer } from "../../bundled/huddles/HuddleComposer";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { Blob as NodeBlob, File as NodeFile } from "node:buffer";
@@ -31,7 +32,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-function harness(legacy = false) {
+function harness(legacy = false, agents?: import("../agents/service").Agents) {
   const store = createRelaySession(null);
   const viewer = "ab".repeat(32),
     room = "room",
@@ -90,6 +91,7 @@ function harness(legacy = false) {
     },
     () => allowed,
     legacy ? () => verified : undefined,
+    agents,
   );
   cleanup.push(
     () => store.dispose(),
@@ -352,6 +354,7 @@ it.each([false, true])(
       [],
       undefined,
       [],
+      {},
     );
   },
 );
@@ -418,6 +421,7 @@ it("retains valid voice metadata and releases enriched upload identities", async
     [{ ...upload, voice }],
     undefined,
     [],
+    {},
   );
   for (let i = 0; i < 22; i++) {
     const next = await remote.attachments.upload(
@@ -440,4 +444,148 @@ it("retains valid voice metadata and releases enriched upload identities", async
       [{ ...invalid, voice: { ...voice, duration: Infinity } }],
     ),
   ).rejects.toThrow("Invalid voice");
+});
+
+it("projects owned model choices and carries validated picks through the companion transport", async () => {
+  const pubkey = "cd".repeat(32);
+  const agent = { pubkey, name: "Helper", type: "fixture" };
+  const models = vi.fn(async () => ({
+    current: "fast",
+    models: [
+      { id: "fast", label: "Fast", efforts: [{ id: "high", label: "High" }] },
+    ],
+  }));
+  const agents = {
+    subscribe: () => () => {},
+    snapshot: () => ({ agents: [agent] }),
+    types: () => [{ key: "fixture", models }],
+  } as unknown as import("../agents/service").Agents;
+  const h = harness(false, agents);
+  const { client, remote } = await h.connect();
+  expect(await client.models([pubkey])).toEqual([
+    expect.objectContaining({ pubkey, current: "fast" }),
+  ]);
+  const picks = { [pubkey]: { model: "fast", effort: "high" } };
+  await remote.messages.send(
+    "room",
+    "Hello",
+    [pubkey],
+    [],
+    undefined,
+    [],
+    picks,
+  );
+  expect(h.send).toHaveBeenLastCalledWith(
+    "room",
+    "Hello",
+    [pubkey],
+    [],
+    undefined,
+    [],
+    picks,
+  );
+  await expect(
+    remote.messages.send("room", "Hello", [], [], undefined, [], picks),
+  ).rejects.toThrow("choices changed");
+  await expect(
+    remote.messages.send("room", "Hello", [pubkey], [], undefined, [], {
+      [pubkey]: { model: "missing" },
+    }),
+  ).rejects.toThrow("choices changed");
+  expect(h.send).toHaveBeenCalledTimes(1);
+});
+
+it("does not send after the companion closes during model resolution", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const pubkey = "cd".repeat(32);
+  const agent = { pubkey, name: "Helper", type: "fixture" };
+  const models = vi.fn(async () => {
+    await gate;
+    return {
+      current: "fast",
+      models: [{ id: "fast", label: "Fast", efforts: [] }],
+    };
+  });
+  const agents = {
+    subscribe: () => () => {},
+    snapshot: () => ({ agents: [agent] }),
+    types: () => [{ key: "fixture", models }],
+  } as unknown as import("../agents/service").Agents;
+  const h = harness(false, agents);
+  const { client, remote } = await h.connect();
+  const sending = remote.messages.send(
+    "room",
+    "Hello",
+    [pubkey],
+    [],
+    undefined,
+    [],
+    { [pubkey]: { model: "fast" } },
+  );
+  const rejected = expect(sending).rejects.toThrow();
+  await vi.waitFor(() => expect(models).toHaveBeenCalled());
+  client.dispose();
+  await rejected;
+  // A replacement handshake is a transport barrier after the old client left.
+  const replacement = await h.connect();
+  release();
+  await replacement.client.models([pubkey]);
+  expect(h.send).not.toHaveBeenCalled();
+});
+
+it("shows and refreshes model defaults in the standalone companion composer", async () => {
+  const pubkey = "cd".repeat(32);
+  const agent = { pubkey, name: "Helper", type: "fixture" };
+  let current = "fast";
+  const listeners = new Set<() => void>();
+  const models = vi.fn(async () => ({
+    current,
+    sendDefaults: true,
+    models: [
+      { id: "fast", label: "Fast", efforts: [] },
+      { id: "slow", label: "Slow", efforts: [] },
+    ],
+  }));
+  const agents = {
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    snapshot: () => ({ agents: [agent] }),
+    types: () => [{ key: "fixture", models }],
+  } as unknown as import("../agents/service").Agents;
+  const h = harness(false, agents);
+  h.session.profiles = {
+    ...h.session.profiles,
+    snapshot: () => new Map([[pubkey, { ...agent, isAgent: true as const }]]),
+  };
+  h.session.channels.get().members.push(pubkey);
+  writeView(h.scope, "draft:room", followupDraft([agent]));
+  function Companion() {
+    return useHuddleComposer(h.owner.token);
+  }
+  render(createElement(Companion));
+  await screen.findByRole("button", {
+    name: "Model and effort for the next run",
+  });
+  await act(async () => {
+    current = "slow";
+    for (const fn of listeners) fn();
+  });
+  await waitFor(() => expect(models).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() =>
+    expect(h.send).toHaveBeenCalledWith(
+      "room",
+      expect.any(String),
+      [pubkey],
+      [],
+      undefined,
+      [],
+      { [pubkey]: { model: "slow" } },
+    ),
+  );
 });

@@ -27,10 +27,44 @@ export function createHuddleComposerOwner(
   extensions: ComposerReader | undefined,
   current: () => boolean,
   verified?: () => boolean,
+  agents?: import("../agents/service").Agents,
 ) {
+  async function modelChoices(pubkeys: readonly string[]) {
+    const revision = modelRevision;
+    if (
+      !Array.isArray(pubkeys) ||
+      pubkeys.length > 128 ||
+      pubkeys.some(
+        (key) => typeof key !== "string" || !/^[0-9a-f]{64}$/.test(key),
+      )
+    )
+      throw new Error("Invalid agent selection.");
+    const choices = await Promise.all(
+      [...new Set(pubkeys)].map(async (pubkey) => {
+        const agent = agents
+          ?.snapshot()
+          .agents.find((item) => item.pubkey === pubkey);
+        const type =
+          agent && agents?.types().find((item) => item.key === agent.type);
+        if (!agent || !type?.models) return [];
+        const models = await type.models(agent);
+        if (
+          agents?.snapshot().agents.find((item) => item.pubkey === pubkey) !==
+          agent
+        )
+          throw new Error("Agent settings changed. Choose again.");
+        return [{ ...models, pubkey, name: agent.name }];
+      }),
+    );
+    check();
+    if (revision !== modelRevision)
+      throw new Error("Agent settings changed. Choose again.");
+    return choices.flat();
+  }
   const token = crypto.randomUUID();
   const channel = new BroadcastChannel(`buzz.huddle.composer.${token}`);
   let closed = false;
+  let modelRevision = 0;
   let client = "";
   let highest = 0;
   let uploadBytes = 0;
@@ -92,6 +126,7 @@ export function createHuddleComposerOwner(
     const roomMetadata = metadata();
     return {
       room,
+      modelRevision,
       viewer: session.viewer,
       scope: session.scope,
       writable,
@@ -142,6 +177,8 @@ export function createHuddleComposerOwner(
           throw new Error("Invalid GIF search.");
         return relayGifRequests.search(community, request.args, signal);
       }
+      case "models":
+        return modelChoices(request.args);
       case "send": {
         check(true);
         const { text, draft, mentions, references, attachments } = request.args;
@@ -188,6 +225,33 @@ export function createHuddleComposerOwner(
               }
             : known.file;
         });
+        const picks = request.args.picks ?? {};
+        if (
+          typeof picks !== "object" ||
+          Array.isArray(picks) ||
+          Object.keys(picks).length > 128
+        )
+          throw new Error("Invalid agent model choices.");
+        const choices = await modelChoices(Object.keys(picks));
+        for (const [pubkey, pick] of Object.entries(picks)) {
+          const choice = choices.find((item) => item.pubkey === pubkey);
+          const model = choice?.models.find(
+            (item) => item.id === (pick?.model ?? choice.current),
+          );
+          if (
+            !mentions.includes(pubkey) ||
+            !model ||
+            !pick ||
+            Object.keys(pick).some(
+              (key) => key !== "model" && key !== "effort",
+            ) ||
+            (pick.effort !== undefined &&
+              !model.efforts.some((item) => item.id === pick.effort))
+          )
+            throw new Error("Agent model choices changed. Choose again.");
+        }
+        check(true);
+        signal.throwIfAborted();
         const id = session.messages.send(
           room,
           text,
@@ -195,6 +259,7 @@ export function createHuddleComposerOwner(
           files,
           undefined,
           references,
+          picks,
         );
         // Admission owns the persisted draft too: closing the child before its
         // acknowledgement must not restore a message already in the main outbox.
@@ -388,6 +453,10 @@ export function createHuddleComposerOwner(
     })();
   };
   const stops = [
+    agents?.subscribe(() => {
+      modelRevision += 1;
+      publish();
+    }),
     session.channels.subscribeList(publish),
     session.profiles.subscribe(publish),
     session.emoji.subscribe(publish),

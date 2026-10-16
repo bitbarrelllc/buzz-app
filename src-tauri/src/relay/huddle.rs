@@ -15,6 +15,15 @@ use tokio::sync::{mpsc, watch};
 #[derive(Clone, Default)]
 pub(crate) struct Huddles(Arc<Mutex<Option<Active>>>);
 impl Huddles {
+    /// Retire calls owned by the main document, including pending admission.
+    pub(crate) fn stop_all(&self) {
+        if let Ok(slot) = self.0.lock() {
+            if let Some(active) = slot.as_ref() {
+                let _ = active.stop.send(true);
+            }
+        }
+    }
+
     pub(crate) fn contains(&self, id: &str) -> bool {
         self.0
             .lock()
@@ -446,6 +455,25 @@ pub(crate) fn huddle_pcm(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn document_teardown_stops_the_owned_call() {
+        let (stop, cancelled) = watch::channel(false);
+        let (_done, done) = watch::channel(false);
+        let (pcm, _receiver) = mpsc::channel(1);
+        let huddles = Huddles(Arc::new(Mutex::new(Some(Active {
+            id: "active".into(),
+            stop,
+            done,
+            pcm,
+            touched: Arc::new(AtomicU64::new(lease_time())),
+        }))));
+        huddles.stop_all();
+        assert!(*cancelled.borrow());
+        // Keep the slot until asynchronous audio teardown finishes.
+        assert!(huddles.contains("active"));
+        huddles.stop_all();
+    }
+
     #[tokio::test]
     async fn cancellation_interrupts_initial_membership_read() {
         // Accept the TLS connection without answering: admission must be pending

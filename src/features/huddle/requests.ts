@@ -18,7 +18,7 @@ export function createHuddleRequests(
 ) {
   let connection: RelaySnapshot | undefined;
   let since = 0;
-  let channels = "";
+  let channels: string | undefined;
   let view: ReturnType<RelaySession["observe"]> | undefined;
   let stopView: (() => void) | undefined;
   let stopList: (() => void) | undefined;
@@ -26,6 +26,8 @@ export function createHuddleRequests(
   let selected: HuddleRequest | undefined;
   const dismissed = new Set<string>();
   let disposed = false;
+  let recovery = new AbortController();
+  const resolvedNotices = new Set<string>();
   function publish(next: HuddleRequest | undefined) {
     if (
       selected?.room === next?.room &&
@@ -86,6 +88,26 @@ export function createHuddleRequests(
         return [];
       try {
         const notice = JSON.parse(event.content);
+        if (
+          notice.type === "member_added" &&
+          typeof notice.channel_id === "string" &&
+          /^[0-9a-f-]{36}$/.test(notice.channel_id) &&
+          typeof notice.actor === "string" &&
+          /^[0-9a-f]{64}$/.test(notice.actor) &&
+          notice.actor !== connection?.viewer &&
+          event.tags.some(
+            ([key, value]) => key === "h" && value === notice.channel_id,
+          ) &&
+          !resolvedNotices.has(event.id)
+        ) {
+          resolvedNotices.add(event.id);
+          void session.channels
+            .resolve?.([notice.channel_id], {
+              signal: recovery.signal,
+              consistency: "strong",
+            })
+            .catch(() => {});
+        }
         const room = session.channels
           .list()
           .channels.find((c) => c.id === notice.channel_id);
@@ -147,13 +169,26 @@ export function createHuddleRequests(
           }
         : undefined,
     );
+    const future = snapshot.events
+      .filter(
+        (event) =>
+          (event.kind === 48100 ||
+            (event.kind === 44100 && event.pubkey === session.relayAuthor)) &&
+          event.created_at > now &&
+          event.created_at <= now + 30,
+      )
+      .map((event) => event.created_at);
+    let deadline = future.length ? Math.min(...future) : undefined;
     if (next) {
       // Outsiders cannot receive the private parent's end event. Bound their
       // invitation prompt instead of relying on stale discovery metadata.
       const lifetime = invitations.some((invite) => invite === next)
         ? 60
         : 3600;
-      timer = setTimeout(refresh, (next.startedAt + lifetime - now) * 1000);
+      deadline = Math.min(deadline ?? Infinity, next.startedAt + lifetime);
+    }
+    if (deadline !== undefined) {
+      timer = setTimeout(refresh, (deadline - now) * 1000);
     }
   }
 
@@ -187,10 +222,14 @@ export function createHuddleRequests(
     channels = key;
     retireView();
     publish(undefined);
-    if (!ids.length) return;
+
     view = session.observe([
-      { kinds: [48100], "#h": ids, since, limit: 100 },
-      { kinds: [48103], "#h": ids, since, limit: 100 },
+      ...(ids.length
+        ? [
+            { kinds: [48100], "#h": ids, since, limit: 100 },
+            { kinds: [48103], "#h": ids, since, limit: 100 },
+          ]
+        : []),
       ...(session.relayAuthor
         ? [
             {
@@ -220,7 +259,10 @@ export function createHuddleRequests(
       return;
     stopList?.();
     retireView();
-    channels = "";
+    channels = undefined;
+    recovery.abort();
+    recovery = new AbortController();
+    resolvedNotices.clear();
     dismissed.clear();
     connection = undefined;
     publish(undefined);
@@ -244,6 +286,7 @@ export function createHuddleRequests(
     },
     dispose() {
       disposed = true;
+      recovery.abort();
       stop();
       stopList?.();
       retireView();

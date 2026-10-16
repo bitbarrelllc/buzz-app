@@ -227,11 +227,13 @@ export function createHuddleComposerClient(token: string) {
           attachments = [],
           _tags,
           references = [],
+          picks = {},
         ) => {
           if (room !== initial.room)
             return Promise.reject(new Error("Huddle destination changed."));
           return request("send", {
             text,
+            picks,
             mentions,
             attachments,
             references,
@@ -284,6 +286,7 @@ export function createHuddleComposerClient(token: string) {
   );
   post({ kind: "hello", client });
   return {
+    models: (pubkeys: readonly string[]) => request("models", pubkeys),
     gifs: {
       supports: (_community, signal?: AbortSignal) =>
         request("gifSupport", undefined, signal),

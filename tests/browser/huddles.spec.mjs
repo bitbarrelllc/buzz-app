@@ -1716,3 +1716,70 @@ test("long caller names keep compact request controls inside the shell", async (
     }
   }
 });
+
+test("pending companion attachment send survives a transcript tab switch", async ({
+  page,
+}) => {
+  await page.goto(`${origin}/tests/fixtures/huddles.html?chrome`);
+  await page
+    .getByRole("button", { name: /Start or join a huddle|Join active huddle/ })
+    .click();
+  const companion = page.getByRole("complementary", {
+    name: "Huddle window preview",
+    exact: true,
+  });
+  await companion
+    .getByRole("button", { name: "Huddle chat", exact: true })
+    .click();
+  const editor = companion.getByRole("textbox", {
+    name: "Message this Huddle",
+  });
+  await page.evaluate(() => window.huddleFixture.holdUpload());
+  try {
+    await editor.fill("Pending upload");
+    await companion.getByLabel("Choose attachments").setInputFiles({
+      name: "held.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("held bytes"),
+    });
+    await expect
+      .poll(() => page.evaluate(() => window.huddleFixture.stats.uploadWaiting))
+      .toBe(1);
+    await editor.press("Enter");
+    await companion
+      .getByRole("tab", { name: "Live transcript", exact: true })
+      .click();
+    await expect(editor).toBeHidden();
+    await companion.getByRole("tab", { name: "Thread", exact: true }).click();
+  } finally {
+    await page.evaluate(() => window.huddleFixture.releaseUpload());
+  }
+  await expect
+    .poll(() => page.evaluate(() => window.huddleFixture.stats.sent.length))
+    .toBe(1);
+  await expect(editor).toBeEmpty();
+});
+
+test("an inactive call error does not suppress the next incoming call", async ({
+  page,
+}) => {
+  await page.goto(`${origin}/tests/fixtures/huddles.html?chrome`);
+  await page
+    .getByRole("button", { name: /Start or join a huddle|Join active huddle/ })
+    .click();
+  await page.evaluate(() =>
+    window.huddleFixture.disconnect("Previous call failed"),
+  );
+  await expect(
+    page.getByRole("region", { name: "App notifications" }),
+  ).toContainText("Previous call failed");
+  await page.evaluate(() =>
+    window.huddleFixture.request("00000000-0000-4000-8000-000000000099"),
+  );
+  await expect(
+    page.getByRole("button", { name: "Join", exact: true }).first(),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.huddleFixture.stats.ringPlays))
+    .toBe(1);
+});

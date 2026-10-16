@@ -10,7 +10,13 @@ import { HuddleLauncher } from "./HuddleLauncher";
 import { HuddleCard, huddleTarget, parseHuddleTarget } from "./HuddleCard";
 import { HuddlePanel } from "./HuddlePanel";
 
-export const inject = ["panels", "relay", "conversation", "navigation"];
+export const inject = [
+  "panels",
+  "relay",
+  "conversation",
+  "navigation",
+  "agents",
+];
 export const apply: PluginModule["apply"] = (ctx) => {
   if (!nativeHuddles.available) return;
   const huddles = createHuddles(ctx.relay, nativeHuddles, openHuddleAudio);
@@ -32,6 +38,7 @@ export const apply: PluginModule["apply"] = (ctx) => {
     undefined,
     ctx.conversation,
     openLink,
+    ctx.agents,
   );
   ctx.conversation.registerMessage({
     id: "huddle",

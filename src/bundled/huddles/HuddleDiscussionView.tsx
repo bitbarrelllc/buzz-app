@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { HuddleDiscussion } from "../../features/huddle/discussion";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { ImageReviewStage } from "../../features/messages/ImageReviewStage";
@@ -25,6 +25,7 @@ export function HuddleDiscussionView({
   retry(): void;
   recover(id: string, dismiss?: boolean): void;
 }) {
+  const panelId = useId();
   const [image, setImage] = useState<{ rowId: string; url: string }>();
   const imageRow = discussion.rows.find((row) => row.id === image?.rowId);
   const selectedImage = imageRow?.attachments.find(
@@ -54,171 +55,177 @@ export function HuddleDiscussionView({
         value={tab}
         onValueChange={setTab}
         items={[
-          { value: "thread", label: "Thread" },
-          { value: "transcript", label: "Live transcript" },
+          { value: "thread", label: "Thread", panelId: `${panelId}-thread` },
+          {
+            value: "transcript",
+            label: "Live transcript",
+            panelId: `${panelId}-transcript`,
+          },
         ]}
-        renderPanel={(selected) =>
-          selected === "transcript" ? (
-            <div className={styles.empty}>
-              <p>Live transcript</p>
-              <p className="text-secondary">
-                Speech transcription isn’t connected in this version yet.
-              </p>
-            </div>
-          ) : (
-            <div className={styles.thread}>
-              <div
-                ref={log}
-                tabIndex={-1}
-                className={styles.messages}
-                role="log"
-                aria-label="Huddle messages"
-                onScroll={(e) => {
-                  const el = e.currentTarget;
-                  following.current =
-                    el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+      />
+      <div
+        role="tabpanel"
+        id={`${panelId}-transcript`}
+        aria-labelledby={`${panelId}-transcript-tab`}
+        hidden={tab !== "transcript"}
+        className={styles.empty}
+      >
+        <p>Live transcript</p>
+        <p className="text-secondary">
+          Speech transcription isn’t connected in this version yet.
+        </p>
+      </div>
+      <div
+        role="tabpanel"
+        id={`${panelId}-thread`}
+        aria-labelledby={`${panelId}-thread-tab`}
+        hidden={tab !== "thread"}
+        className={styles.thread}
+      >
+        <div
+          ref={log}
+          tabIndex={-1}
+          className={styles.messages}
+          role="log"
+          aria-label="Huddle messages"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            following.current =
+              el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+          }}
+        >
+          {discussion.historyLimited && (
+            <p className={styles.notice}>Showing the latest 200 messages.</p>
+          )}
+          {discussion.hasMore && (
+            <Button size="sm" onClick={older}>
+              Load earlier messages
+            </Button>
+          )}
+          {!discussion.rows.length && (
+            <p className={styles.empty}>
+              {discussion.status === "loading"
+                ? "Loading conversation…"
+                : "Start the conversation."}
+            </p>
+          )}
+          {discussion.rows.map((row) => (
+            <div key={row.id}>
+              <MessageRow
+                staticMentions
+                row={{
+                  id: row.id,
+                  channelId: row.channelId,
+                  authorId: row.authorId,
+                  createdAt: row.time,
+                  content: row.text,
+                  attachments: row.attachments,
+                  mentions: row.mentions ?? [],
+                  ...(row.edited ? { edited: true as const } : {}),
+                  attachmentSeams: row.attachmentSeams ?? [],
+                  mentionReferences: row.mentionReferences ?? [],
+                  reactions: [],
+                  replyCount: 0,
+                  participants: [],
                 }}
-              >
-                {discussion.historyLimited && (
-                  <p className={styles.notice}>
-                    Showing the latest 200 messages.
-                  </p>
-                )}
-                {discussion.hasMore && (
-                  <Button size="sm" onClick={older}>
-                    Load earlier messages
-                  </Button>
-                )}
-                {!discussion.rows.length && (
-                  <p className={styles.empty}>
-                    {discussion.status === "loading"
-                      ? "Loading conversation…"
-                      : "Start the conversation."}
-                  </p>
-                )}
-                {discussion.rows.map((row) => (
-                  <div key={row.id}>
-                    <MessageRow
-                      staticMentions
-                      row={{
-                        id: row.id,
-                        channelId: row.channelId,
-                        authorId: row.authorId,
-                        createdAt: row.time,
-                        content: row.text,
-                        attachments: row.attachments,
-                        mentions: row.mentions ?? [],
-                        ...(row.edited ? { edited: true as const } : {}),
-                        attachmentSeams: row.attachmentSeams ?? [],
-                        mentionReferences: row.mentionReferences ?? [],
-                        reactions: [],
-                        replyCount: 0,
-                        participants: [],
-                      }}
-                      participantProfiles={
-                        new Map(
-                          Object.entries(row.mentionNames ?? {}).map(
-                            ([key, name]) => [key, { name }],
-                          ),
-                        )
-                      }
-                      profile={{
-                        name: row.author,
-                        ...(row.pictureUrl ? { picture: row.pictureUrl } : {}),
-                      }}
-                      media={(url) => {
-                        if (url === row.pictureUrl)
-                          return row.picture ?? undefined;
-                        for (const attachment of row.attachments) {
-                          if (url === attachment.url)
-                            return attachment.source ?? undefined;
-                          if (url === attachment.previewUrl)
-                            return attachment.previewSource ?? undefined;
-                        }
-                        return undefined;
-                      }}
-                      canOpenLink={(url) =>
-                        row.attachments.some(
-                          (attachment) =>
-                            attachment.kind === "image" &&
-                            attachment.url === url,
-                        )
-                      }
-                      onOpenLink={(url) => {
-                        if (
-                          !row.attachments.some(
-                            (attachment) =>
-                              attachment.kind === "image" &&
-                              attachment.url === url,
-                          )
-                        )
-                          return openLink?.(url) ?? false;
-                        setImage({ rowId: row.id, url });
-                        return true;
-                      }}
-                      day={false}
-                      retry={undefined}
-                      layout="thread"
-                    />
-                    {["failed", "unknown"].includes(row.delivery) && (
-                      <p role="status" className="text-secondary">
-                        {row.delivery === "unknown"
-                          ? "Delivery hasn’t been confirmed. Retry sends the same message."
-                          : "Message wasn’t delivered."}{" "}
-                        <Button
-                          size="sm"
-                          disabled={!discussion.writable}
-                          onClick={() => {
-                            focusConversation();
-                            recover(row.id);
-                          }}
-                        >
-                          Retry
-                        </Button>{" "}
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            focusConversation();
-                            recover(row.id, true);
-                          }}
-                        >
-                          Discard
-                        </Button>
-                      </p>
-                    )}
-                  </div>
-                ))}
-                <div ref={tail} />
-              </div>
-              {discussion.error && (
-                <div role="alert" className={styles.notice}>
-                  {discussion.error}{" "}
+                participantProfiles={
+                  new Map(
+                    Object.entries(row.mentionNames ?? {}).map(
+                      ([key, name]) => [key, { name }],
+                    ),
+                  )
+                }
+                profile={{
+                  name: row.author,
+                  ...(row.pictureUrl ? { picture: row.pictureUrl } : {}),
+                }}
+                media={(url) => {
+                  if (url === row.pictureUrl) return row.picture ?? undefined;
+                  for (const attachment of row.attachments) {
+                    if (url === attachment.url)
+                      return attachment.source ?? undefined;
+                    if (url === attachment.previewUrl)
+                      return attachment.previewSource ?? undefined;
+                  }
+                  return undefined;
+                }}
+                canOpenLink={(url) =>
+                  row.attachments.some(
+                    (attachment) =>
+                      attachment.kind === "image" && attachment.url === url,
+                  )
+                }
+                onOpenLink={(url) => {
+                  if (
+                    !row.attachments.some(
+                      (attachment) =>
+                        attachment.kind === "image" && attachment.url === url,
+                    )
+                  )
+                    return openLink?.(url) ?? false;
+                  setImage({ rowId: row.id, url });
+                  return true;
+                }}
+                day={false}
+                retry={undefined}
+                layout="thread"
+              />
+              {["failed", "unknown"].includes(row.delivery) && (
+                <p role="status" className="text-secondary">
+                  {row.delivery === "unknown"
+                    ? "Delivery hasn’t been confirmed. Retry sends the same message."
+                    : "Message wasn’t delivered."}{" "}
                   <Button
                     size="sm"
+                    disabled={!discussion.writable}
                     onClick={() => {
-                      log.current?.focus({ preventScroll: true });
-                      retry();
+                      focusConversation();
+                      recover(row.id);
                     }}
                   >
                     Retry
+                  </Button>{" "}
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      focusConversation();
+                      recover(row.id, true);
+                    }}
+                  >
+                    Discard
                   </Button>
-                </div>
-              )}
-              {discussion.writable ? (
-                <div ref={composerHost} className={styles.composer}>
-                  {composer}
-                </div>
-              ) : (
-                discussion.status === "ready" && (
-                  <p className={styles.notice}>
-                    This Huddle conversation is read-only.
-                  </p>
-                )
+                </p>
               )}
             </div>
+          ))}
+          <div ref={tail} />
+        </div>
+        {discussion.error && (
+          <div role="alert" className={styles.notice}>
+            {discussion.error}{" "}
+            <Button
+              size="sm"
+              onClick={() => {
+                log.current?.focus({ preventScroll: true });
+                retry();
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+        {discussion.writable ? (
+          <div ref={composerHost} className={styles.composer}>
+            {composer}
+          </div>
+        ) : (
+          discussion.status === "ready" && (
+            <p className={styles.notice}>
+              This Huddle conversation is read-only.
+            </p>
           )
-        }
-      />
+        )}
+      </div>
       <Dialog
         open={!!selectedImage}
         onOpenChange={(open) => {
