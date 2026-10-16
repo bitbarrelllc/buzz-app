@@ -174,7 +174,7 @@ export function createHuddleComposerOwner(
               voice.waveform.length > 100 ||
               voice.waveform.some(
                 (value: number) =>
-                  !Number.isFinite(value) || value < 0 || value > 1,
+                  !Number.isInteger(value) || value < 0 || value > 100,
               ))
           )
             throw new Error("Invalid voice note metadata.");

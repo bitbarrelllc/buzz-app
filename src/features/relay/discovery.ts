@@ -1,4 +1,4 @@
-import { channelVisibility } from "./channel-details-protocol";
+import { channelTtl, channelVisibility } from "./channel-details-protocol";
 import { sessionMetadata } from "../sessions/metadata";
 import { huddleParent } from "../huddle/lifecycle";
 import { objectBody } from "./body";
@@ -116,6 +116,8 @@ export class DiscoveryState {
     let changed = !this.complete;
     this.complete = true;
     // Keep the last signed version: an old replay cannot undo authoritative loss.
+    // A NIP-CL pass reads system channels through their own opt-in filter
+    // into the same complete set, so one absence rule covers them too.
     for (const [id, roster] of this.rosters)
       if (
         hasTag(roster, "p", this.viewer) &&
@@ -202,15 +204,24 @@ export class DiscoveryState {
   get(id: string): ChannelSummary | undefined {
     if (!this.canAccess(id) || (!this.authorized(id) && !this.open(id))) return;
     const event = this.metadata.get(id);
-    const type = this.isSession(id) ? "session" : event && tag(event, "t");
+    // The relay tags a system roster too, so a roster that arrives before its
+    // metadata (the full pass reads names later) never lists as a channel.
+    const roster = this.rosters.get(id);
+    const type = this.isSession(id)
+      ? "session"
+      : event
+        ? tag(event, "t")
+        : roster && hasTag(roster, "t", "system")
+          ? "system"
+          : undefined;
     const channelType =
       type === "stream" ||
       type === "forum" ||
       type === "dm" ||
+      type === "system" ||
       (type === "session" && this.isSession(id))
         ? type
         : undefined;
-    const roster = this.rosters.get(id);
     const parentId = event && sessionMetadata(tag(event, "about"))?.parentId;
     const huddle =
       event && this.isPrivate(id) && huddleParent(tag(event, "about"));
@@ -226,6 +237,7 @@ export class DiscoveryState {
       (this.name(id) === "Huddle" ||
         this.name(id) === `huddle-${id.slice(0, 8)}`);
     const identity = event && channelIdentity(event);
+    const ttlSeconds = event && channelTtl(event);
     return {
       id,
       ...(huddle || legacyHuddle ? { huddle: true as const } : {}),
@@ -268,6 +280,7 @@ export class DiscoveryState {
           }
         : {}),
       ...(event && hasTag(event, "archived", "true") ? { archived: true } : {}),
+      ...(ttlSeconds !== undefined ? { ttlSeconds } : {}),
       ...(identity?.labels.length ? { labels: identity.labels } : {}),
       ...(identity?.creator ? { creator: identity.creator } : {}),
       ...(identity?.createdAt !== undefined
@@ -307,13 +320,21 @@ export class DiscoveryState {
       return metadata ? [roster, metadata] : [roster];
     });
   }
-  channels(): ChannelSummary[] {
+  /** Every roster channel get() serves, system channels included. Membership,
+   * not listing, decides what the device may keep. */
+  readable(): ChannelSummary[] {
     return [...this.rosters.keys()]
       .filter((id) => this.authorized(id))
       .flatMap((id) => {
         const channel = this.get(id);
         return channel ? [channel] : [];
-      })
+      });
+  }
+  /** The channel list. System channels (NIP-CL) hold app data, not
+   * conversation: they stay readable through get() but never list here. */
+  channels(): ChannelSummary[] {
+    return this.readable()
+      .filter((channel) => channel.channelType !== "system")
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   }
 }

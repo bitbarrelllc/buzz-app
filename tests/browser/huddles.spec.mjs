@@ -1139,6 +1139,13 @@ test("detached regular composer keeps failed drafts, uploads real file bytes and
   await page
     .getByRole("button", { name: `Alex ${"cd".repeat(32)}`, exact: true })
     .click();
+  // The host picker delivers the selection to the companion asynchronously.
+  await expect(
+    companion.getByRole("button", {
+      name: `Remove mention Alex ${"cd".repeat(32)}`,
+      exact: true,
+    }),
+  ).toBeVisible();
   await editor.press("End");
   await editor.pressSequentially(" hello");
   await editor.press("Enter");

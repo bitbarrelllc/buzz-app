@@ -393,7 +393,17 @@ it("retains valid voice metadata and releases enriched upload identities", async
     "room",
     new AbortController().signal,
   );
-  const voice = { duration: 1, waveform: [0.2, 0.8] };
+  const voice = { duration: 1, waveform: [0, 20, 80, 100] };
+  for (const waveform of [[-1], [101], [0.5], [NaN], [Infinity], []]) {
+    await expect(
+      remote.messages.send(
+        "room",
+        "",
+        [],
+        [{ ...upload, voice: { ...voice, waveform } }],
+      ),
+    ).rejects.toThrow("Invalid voice");
+  }
   await expect(
     remote.messages.send("room", "", [], [{ ...upload, voice }]),
   ).resolves.toBe("accepted-id");
