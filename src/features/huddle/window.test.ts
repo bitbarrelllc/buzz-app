@@ -46,6 +46,7 @@ function harness() {
   const session = {
     ...store.session,
     media: (url: string) => url,
+    channels: { ...store.session.channels },
     profiles: { ...store.session.profiles, snapshot: () => profiles },
   };
   const connection = {
@@ -619,4 +620,36 @@ it("retries failed profile reads and scopes successes to the relay session", asy
   h.set({ ...h.call.snapshot() });
   await vi.waitFor(() => expect(other).toHaveBeenCalledTimes(1));
   await h.dispose();
+});
+
+it("releases discussion subscriptions when reopening the companion fails", async () => {
+  const h = harness();
+  const stopWindow = vi.fn();
+  vi.spyOn(h.connection.session.channels, "subscribeWindow").mockReturnValue(
+    stopWindow,
+  );
+  try {
+    h.release();
+    h.set({ ...h.call.snapshot(), room: "room" });
+    await h.companion.open();
+    h.action(h.call.snapshot().id ?? "", "thread");
+    expect(h.connection.session.channels.subscribeWindow).toHaveBeenCalledWith(
+      "room",
+      expect.any(Function),
+    );
+    vi.mocked(h.bridge.open).mockRejectedValueOnce(new Error("Focus failed"));
+    await expect(h.companion.open()).rejects.toThrow("Focus failed");
+    expect(stopWindow).toHaveBeenCalledOnce();
+    expect(h.companion.snapshot()).toMatchObject({
+      visible: false,
+      failed: true,
+    });
+    await h.companion.open();
+    h.action(h.call.snapshot().id ?? "", "thread");
+    expect(h.connection.session.channels.subscribeWindow).toHaveBeenCalledTimes(
+      2,
+    );
+  } finally {
+    await h.dispose();
+  }
 });

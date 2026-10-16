@@ -149,6 +149,7 @@ export function HuddleCard({
               (busy ||
                 !parent ||
                 parent.readOnly ||
+                parent.archived ||
                 !connection.viewer ||
                 !connection.scope ||
                 !huddles.canJoin(connection.scope, room))

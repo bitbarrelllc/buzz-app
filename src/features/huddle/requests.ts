@@ -235,6 +235,9 @@ export function createHuddleRequests(
   connect();
   return {
     refresh,
+    resetSelection() {
+      selected = undefined;
+    },
     dismiss(room: string) {
       dismissed.add(room);
       refresh();

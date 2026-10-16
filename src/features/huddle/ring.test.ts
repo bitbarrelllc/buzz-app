@@ -33,8 +33,12 @@ function harness() {
     () => audio,
   );
   disposers.push(dispose);
-  const update = (phase: HuddleSnapshot["phase"], id = "request") => {
-    snapshot = { ...snapshot, phase, id };
+  const update = (
+    phase: HuddleSnapshot["phase"],
+    id = "request",
+    room = "request",
+  ) => {
+    snapshot = { ...snapshot, phase, id, room };
     for (const fn of listeners) fn();
   };
   return { audio, play, pause, update, dispose };
@@ -122,5 +126,14 @@ it("keeps an answered request silent through retry recovery but rings for a new 
   expect(h.play).toHaveBeenCalledTimes(1);
   expect(h.pause).toHaveBeenCalledTimes(1);
   h.update("incoming", "new-request");
+  expect(h.play).toHaveBeenCalledTimes(2);
+});
+
+it("does not silence an invitation when an unrelated call fails", () => {
+  const h = harness();
+  h.update("incoming");
+  h.update("connecting", "attempt-b", "room-b");
+  h.update("error", "attempt-b", "room-b");
+  h.update("incoming");
   expect(h.play).toHaveBeenCalledTimes(2);
 });

@@ -8,8 +8,8 @@ import { createHuddles } from "../../features/huddle/service";
 import { HuddleCard, huddleTarget } from "./HuddleCard";
 
 afterEach(cleanup);
-it.each([-3601, 86400, -30])(
-  "keeps View without Join for expired, future, or retained ended starts (%s) after the lifecycle read fails",
+it.each([-3601, 86400, -30, 0])(
+  "preserves View and prevents joining expired, future, ended, or archived starts (%s)",
   async (offset) => {
     const parent = "00000000-0000-4000-8000-000000000001";
     const room = "00000000-0000-4000-8000-000000000002";
@@ -20,6 +20,19 @@ it.each([-3601, 86400, -30])(
     const dispose = vi.fn();
     const session = {
       ...store.session,
+      channels: {
+        ...store.session.channels,
+        list: () => ({
+          status: "ready" as const,
+          channels: [
+            {
+              id: parent,
+              name: "Parent",
+              ...(offset === 0 ? { archived: true as const } : {}),
+            },
+          ],
+        }),
+      },
       observe: () => ({
         snapshot: () => ({ status, events: [] }),
         subscribe: (listener: () => void) => {
@@ -95,9 +108,16 @@ it.each([-3601, 86400, -30])(
         showWindow={async () => {}}
       />,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "View" }));
-    expect(screen.queryByRole("button", { name: "Join" })).toBeNull();
-    expect(open).toHaveBeenCalledWith(huddleTarget(parent, room));
+    if (offset === 0) {
+      const join = screen.getByRole("button", {
+        name: "Join",
+      }) as HTMLButtonElement;
+      expect(join.disabled).toBe(true);
+    } else {
+      fireEvent.click(await screen.findByRole("button", { name: "View" }));
+      expect(screen.queryByRole("button", { name: "Join" })).toBeNull();
+      expect(open).toHaveBeenCalledWith(huddleTarget(parent, room));
+    }
     view.unmount();
     expect(dispose).toHaveBeenCalledOnce();
     huddles.dispose();

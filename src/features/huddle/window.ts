@@ -389,6 +389,7 @@ export function createHuddleWindow(
         try {
           await bridge.update(next.id, null);
         } finally {
+          closeDiscussion();
           opened = undefined;
           stopProfiles?.();
           stopProfiles = undefined;

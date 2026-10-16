@@ -12,7 +12,11 @@ export function createHuddleRing(
   let stopRing: (() => void) | undefined;
   function sync() {
     const call = huddles.snapshot();
-    if (call.phase === "connecting" && key) answered = key;
+    if (
+      call.phase === "connecting" &&
+      key === `${call.destination?.scope}:${call.room}`
+    )
+      answered = key;
     const request =
       call.phase === "incoming"
         ? `${call.destination?.scope}:${call.id}`

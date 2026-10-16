@@ -504,7 +504,7 @@ function MessageRowContent({
     </span>
   );
   return (
-    <div data-message-id={row.id}>
+    <div data-message-id={row.id} data-huddle-row={row.huddle ? "" : undefined}>
       {day && <DayDivider createdAt={row.createdAt} />}
       <div
         ref={rowRef}

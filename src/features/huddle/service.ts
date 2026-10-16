@@ -54,6 +54,7 @@ export function createHuddles(
   const unavailable = new Set<string>();
   const update = (next: HuddleSnapshot) => {
     snapshot = next;
+    if (next.phase !== "incoming") requests?.resetSelection();
     for (const listener of listeners) listener();
     requests?.refresh();
   };
@@ -394,6 +395,13 @@ export function createHuddles(
         !closing &&
         ["idle", "error", "incoming"].includes(snapshot.phase),
       (request) => {
+        // An unrelated incoming request must not erase a failed call.
+        if (
+          request &&
+          snapshot.phase === "error" &&
+          snapshot.room !== request.room
+        )
+          return;
         if (request)
           update({
             ...idle,

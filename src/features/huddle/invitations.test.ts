@@ -156,6 +156,19 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
     await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
     const destination = calls.snapshot().destination;
     assert(destination);
+    // A precheck failure must remain visible; dismissal reoffers the invitation.
+    await calls.start({ ...destination, scope: "stale" });
+    expect(calls.snapshot().phase).toBe("error");
+    await calls.leave();
+    expect(calls.snapshot().phase).toBe("incoming");
+    openAudio.mockRejectedValueOnce(new Error("Unrelated microphone failure"));
+    await calls.join({ ...destination, channelId: room });
+    expect(calls.snapshot()).toMatchObject({
+      phase: "error",
+      error: "Unrelated microphone failure",
+    });
+    await calls.leave();
+    expect(calls.snapshot().phase).toBe("incoming");
     openAudio.mockRejectedValueOnce(new Error("Microphone denied"));
     await calls.join(destination, room);
     await vi.waitFor(() => expect(calls?.snapshot().phase).toBe("incoming"));
