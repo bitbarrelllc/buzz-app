@@ -657,9 +657,16 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
     "font-family",
     /monospace/,
   );
-  await dialog.getByText("Folders skipped (1)", { exact: true }).click();
+  const skippedFolders = dialog.getByRole("region", {
+    name: "Skipped folders",
+  });
+  await expect(skippedFolders.getByRole("list")).toHaveCSS(
+    "list-style-type",
+    "disc",
+  );
+  await expect(skippedFolders.getByRole("button")).toHaveCount(0);
   await expect(
-    dialog.getByText("Selected folder: Missing file: plugin.js", {
+    skippedFolders.getByText("Selected folder: Missing file: plugin.js", {
       exact: true,
     }),
   ).toBeVisible();
@@ -703,7 +710,6 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
       path: info.outputPath(`plugin-technical-details-${mode}.png`),
     });
   }
-  await dialog.getByText("Folders skipped (1)", { exact: true }).click();
   await details.press("Enter");
   await expect(details).toHaveAttribute("aria-expanded", "false");
   for (const [width, mode] of [

@@ -488,20 +488,23 @@ export function PluginImport({
                   </Field>
                 ) : null}
                 {preview.warnings.length > 0 && (
-                  <details className="text-body-sm text-muted">
-                    <summary>
+                  <section
+                    aria-label="Skipped folders"
+                    className="text-body-sm"
+                  >
+                    <p className="m-0 text-label">
                       Folders skipped ({preview.warnings.length})
-                    </summary>
-                    <p className="mb-0">
+                    </p>
+                    <p className="mb-0 mt-1 text-muted">
                       These folders couldn’t be loaded as plugins. Other listed
                       plugins can still be installed.
                     </p>
-                    <ul className="break-words">
+                    <ul className="mb-0 mt-2 list-disc space-y-1 break-words pl-4">
                       {preview.warnings.map((warning) => (
                         <li key={warning}>{warning}</li>
                       ))}
                     </ul>
-                  </details>
+                  </section>
                 )}
                 {packageContent.length > 0 && (
                   <section

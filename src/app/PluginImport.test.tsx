@@ -599,9 +599,6 @@ it("shows a rejected dropped candidate's warning beside a usable sibling preview
     dataTransfer: { items: [{ webkitGetAsEntry: () => root }] },
   });
   const warning = await screen.findByText(/bad:.*limit/);
-  fireEvent.click(
-    warning.closest("details")?.querySelector("summary") as HTMLElement,
-  );
   expect(warning).toBeVisible();
   expect(screen.getByRole("button", { name: "Install plugin" })).toBeEnabled();
   expect(files).toHaveBeenCalledWith("plugins", [
