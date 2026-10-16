@@ -96,7 +96,12 @@ impl PreparedImport {
             }
             Err(reason) => {
                 if self.preview.warnings.len() < MAX_PLUGINS {
-                    self.preview.warnings.push(format!("{path}: {reason}"));
+                    let folder = if path == "." {
+                        "Selected folder"
+                    } else {
+                        &path
+                    };
+                    self.preview.warnings.push(format!("{folder}: {reason}"));
                 }
             }
         }
@@ -394,9 +399,16 @@ fn read_optional_source_bytes(
 }
 
 fn read_source_bytes(directory: &cap_std::fs::Dir, path: &Path, limit: usize) -> Result<Vec<u8>> {
+    let read_error = |error: std::io::Error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("Missing file: {}", path.display())
+        } else {
+            format!("Could not read {}: {error}", path.display())
+        }
+    };
     if !directory
         .symlink_metadata(path)
-        .map_err(err)?
+        .map_err(read_error)?
         .file_type()
         .is_file()
     {
@@ -409,15 +421,15 @@ fn read_source_bytes(directory: &cap_std::fs::Dir, path: &Path, limit: usize) ->
         use cap_std::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    let file = directory.open_with(path, &options).map_err(err)?;
-    if !file.metadata().map_err(err)?.is_file() {
+    let file = directory.open_with(path, &options).map_err(read_error)?;
+    if !file.metadata().map_err(read_error)?.is_file() {
         return Err("Plugin files must be regular files".into());
     }
     let mut bytes = Vec::new();
     file.into_std()
         .take(limit as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(err)?;
+        .map_err(read_error)?;
     if bytes.len() > limit {
         return Err(format!("{} exceeds its size limit", path.display()));
     }
@@ -1043,7 +1055,10 @@ mod tests {
         assert_eq!(prepared.preview.candidates[0].path, "pages/one/dist");
         assert!(prepared.preview.candidates[0].readme_revision.is_some());
         assert!(prepared.preview.candidates[0].icon_png_revision.is_some());
-        assert_eq!(prepared.preview.warnings.len(), 1);
+        assert_eq!(
+            prepared.preview.warnings,
+            ["Selected folder: Missing file: plugin.js"]
+        );
         let home = tempfile::tempdir().unwrap();
         let manager = Manager::open(Some(home.path().into()), "test", false).unwrap();
         assert!(prepared

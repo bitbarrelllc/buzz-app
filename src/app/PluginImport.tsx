@@ -473,6 +473,10 @@ export function PluginImport({
                     <summary>
                       Folders skipped ({preview.warnings.length})
                     </summary>
+                    <p className="mb-0">
+                      These folders couldn’t be loaded as plugins. Other listed
+                      plugins can still be installed.
+                    </p>
                     <ul className="break-words">
                       {preview.warnings.map((warning) => (
                         <li key={warning}>{warning}</li>
@@ -565,7 +569,7 @@ export function PluginImport({
                                   <ul className="m-0 break-all">
                                     {declaredGrants.map((grant) => (
                                       <li key={grant}>
-                                        {grant}
+                                        <code>{grant}</code>
                                         {existing &&
                                         !previousGrants.includes(grant)
                                           ? " (new or changed)"
@@ -580,12 +584,14 @@ export function PluginImport({
                                   ).length > 0 && (
                                     <p className="m-0 break-all">
                                       Removed:{" "}
-                                      {previousGrants
-                                        .filter(
-                                          (grant) =>
-                                            !declaredGrants.includes(grant),
-                                        )
-                                        .join(", ")}
+                                      <code>
+                                        {previousGrants
+                                          .filter(
+                                            (grant) =>
+                                              !declaredGrants.includes(grant),
+                                          )
+                                          .join(", ")}
+                                      </code>
                                     </p>
                                   )}
                               </>

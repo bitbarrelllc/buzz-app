@@ -44,7 +44,7 @@ async function nativeImports(page, samples = []) {
       token: "preview-one",
       source: "https://github.com/example/plugins",
       commit: "a".repeat(40),
-      warnings: ["source-only: No built plugin.js"],
+      warnings: ["Selected folder: Missing file: plugin.js"],
       candidates: samples.length
         ? samples
         : ["one", "two"].map((name) => ({
@@ -635,6 +635,17 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(access.getByText(/^Command status:/)).toContainText(
     "plugin status",
   );
+  await expect(access.locator("code")).toHaveCSS("font-family", /monospace/);
+  await dialog.getByText("Folders skipped (1)", { exact: true }).click();
+  await expect(
+    dialog.getByText("Selected folder: Missing file: plugin.js", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await dialog.screenshot({
+    path: info.outputPath("plugin-technical-details.png"),
+  });
+  await dialog.getByText("Folders skipped (1)", { exact: true }).click();
   await details.press("Enter");
   await expect(details).toHaveAttribute("aria-expanded", "false");
   for (const [width, mode] of [

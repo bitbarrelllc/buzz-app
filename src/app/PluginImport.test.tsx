@@ -236,19 +236,19 @@ it("shows exact declared access and changes before an enabled update", async () 
     "prominent",
   );
   fireEvent.click(screen.getByRole("button", { name: "Technical details" }));
-  await waitFor(() =>
-    expect(
-      screen.getByText(
-        /Command check:.*example-cli.*status.*--json.*new or changed/,
-      ),
-    ).toBeVisible(),
+  const command = screen
+    .getByText(/^Command check:/, { selector: "li code" })
+    .closest("li");
+  expect(command).toBeVisible();
+  expect(command).toHaveTextContent(
+    /example-cli.*status.*--json.*new or changed/,
   );
-  expect(
-    screen.getByText(/HTTPS origin: https:\/\/api.example.com.*new or changed/),
-  ).toBeVisible();
-  expect(
-    screen.getByText(/Removed:.*--brief.*https:\/\/old.example.com/),
-  ).toBeVisible();
+  expect(screen.getByText(/^HTTPS origin:/).closest("li")).toHaveTextContent(
+    /https:\/\/api.example.com.*new or changed/,
+  );
+  expect(screen.getByText(/^Removed:/)).toHaveTextContent(
+    /--brief.*https:\/\/old.example.com/,
+  );
   expect(screen.getByText("README.md included (changed)")).toBeVisible();
   expect(screen.getByText("icon.png removed")).toBeVisible();
   expect(screen.getByText("icon.jpg included (new)")).toBeVisible();
@@ -367,7 +367,9 @@ it.each([
       await screen.findByRole("region", { name: "Computer access" }),
     );
     fireEvent.click(access.getByRole("button", { name: "Technical details" }));
-    const grant = access.getByText(/^Command /);
+    const grant = access
+      .getByText(/^Command /, { selector: "li code" })
+      .closest("li");
     expect(
       screen.queryByRole("region", { name: "Package content" }),
     ).not.toBeInTheDocument();
