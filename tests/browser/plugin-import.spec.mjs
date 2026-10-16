@@ -593,7 +593,20 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
     {
       path: "dist",
       revision: "one",
-      manifest: { id: "example.retry", name: "Retry plugin", apiVersion: 1 },
+      manifest: {
+        id: "example.retry",
+        name: "Retry plugin",
+        apiVersion: 1,
+        host: {
+          commands: [
+            {
+              id: "status",
+              program: "python3",
+              args: ["-c", "print('plugin status')\n".repeat(80)],
+            },
+          ],
+        },
+      },
     },
   ]);
   await openPlugins(page, app.origin);
@@ -610,6 +623,20 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   await expect(
     dialog.getByRole("button", { name: "Back", exact: true }),
   ).toBeFocused();
+  await expect(
+    dialog.getByRole("button", { name: "Install plugin", exact: true }),
+  ).toHaveAttribute("data-variant", "prominent");
+  const access = dialog.getByRole("region", { name: "Computer access" });
+  await expect(access.getByText("Run python3 on your computer.")).toBeVisible();
+  await expect(access.getByText(/^Command status:/)).toHaveCount(0);
+  const details = access.getByRole("button", { name: "Technical details" });
+  await details.focus();
+  await details.press("Enter");
+  await expect(access.getByText(/^Command status:/)).toContainText(
+    "plugin status",
+  );
+  await details.press("Enter");
+  await expect(details).toHaveAttribute("aria-expanded", "false");
   for (const [width, mode] of [
     [900, "light"],
     [480, "dark"],

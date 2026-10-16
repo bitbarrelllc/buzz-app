@@ -3,6 +3,7 @@ import { Field } from "../shared/design-system/ui/Field";
 import { Input } from "../shared/design-system/ui/Input";
 import { Radio, RadioGroup } from "../shared/design-system/ui/RadioGroup";
 import { Button } from "../shared/design-system/ui/Button";
+import { Accordion } from "../shared/design-system/ui/Accordion";
 import { Dialog } from "../shared/design-system/ui/Dialog";
 import { readPluginFolder } from "./plugin-folder-drop";
 import styles from "./PluginImport.module.css";
@@ -270,6 +271,7 @@ export function PluginImport({
               {candidate && (
                 <Button
                   ref={installButton}
+                  variant="prominent"
                   type="button"
                   disabled={blocked}
                   onClick={async () => {
@@ -497,37 +499,101 @@ export function PluginImport({
                 )}
                 {candidate && (
                   <section
-                    aria-label="Declared host access"
+                    aria-label="Computer access"
                     className="text-body-sm"
                   >
-                    <p className="m-0 font-medium">Declared host access</p>
+                    <p className="m-0 font-medium">Computer access</p>
                     {declaredGrants.length ? (
-                      <ul className="m-0 break-all">
-                        {declaredGrants.map((grant) => (
-                          <li key={grant}>
-                            {grant}
-                            {existing && !previousGrants.includes(grant)
-                              ? " (new or changed)"
-                              : ""}
-                          </li>
-                        ))}
-                      </ul>
+                      <>
+                        <p className="m-0">This plugin asks Buzz to:</p>
+                        <ul className="m-0 break-words">
+                          {candidate.manifest.host?.commands?.map((command) => (
+                            <li key={command.id}>
+                              Run {command.program} on your computer.
+                            </li>
+                          ))}
+                          {candidate.manifest.host?.processes?.map(
+                            (process) => (
+                              <li key={process.id}>
+                                Start {process.program} with additional
+                                arguments, using your account’s full access.
+                              </li>
+                            ),
+                          )}
+                          {candidate.manifest.host?.networkOrigins?.map(
+                            (origin) => (
+                              <li key={origin}>
+                                Make web requests to {origin}.
+                              </li>
+                            ),
+                          )}
+                          {candidate.manifest.host?.mcp && (
+                            <li>Provide tools to local agents.</li>
+                          )}
+                        </ul>
+                      </>
                     ) : (
-                      <p className="m-0">
-                        No commands or HTTPS origins declared.
-                      </p>
+                      <p className="m-0">No computer access declared.</p>
                     )}
+                    <p className="m-0 text-caption text-muted">
+                      Plugins aren’t sandboxed. This list doesn’t describe
+                      everything they may access.
+                    </p>
                     {existing &&
-                      previousGrants.filter(
-                        (grant) => !declaredGrants.includes(grant),
-                      ).length > 0 && (
-                        <p className="m-0 break-all">
-                          Removed:{" "}
-                          {previousGrants
-                            .filter((grant) => !declaredGrants.includes(grant))
-                            .join(", ")}
+                      (declaredGrants.some(
+                        (grant) => !previousGrants.includes(grant),
+                      ) ||
+                        previousGrants.some(
+                          (grant) => !declaredGrants.includes(grant),
+                        )) && (
+                        <p className="m-0">
+                          Computer access changes with this update. Review the
+                          technical details below.
                         </p>
                       )}
+                    {(declaredGrants.length > 0 ||
+                      previousGrants.length > 0) && (
+                      <Accordion
+                        key={selected}
+                        items={[
+                          {
+                            value: "host-access",
+                            title: "Technical details",
+                            content: (
+                              <>
+                                {declaredGrants.length > 0 && (
+                                  <ul className="m-0 break-all">
+                                    {declaredGrants.map((grant) => (
+                                      <li key={grant}>
+                                        {grant}
+                                        {existing &&
+                                        !previousGrants.includes(grant)
+                                          ? " (new or changed)"
+                                          : ""}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                                {existing &&
+                                  previousGrants.filter(
+                                    (grant) => !declaredGrants.includes(grant),
+                                  ).length > 0 && (
+                                    <p className="m-0 break-all">
+                                      Removed:{" "}
+                                      {previousGrants
+                                        .filter(
+                                          (grant) =>
+                                            !declaredGrants.includes(grant),
+                                        )
+                                        .join(", ")}
+                                    </p>
+                                  )}
+                              </>
+                            ),
+                          },
+                        ]}
+                      />
+                    )}
                   </section>
                 )}
                 {candidate && (

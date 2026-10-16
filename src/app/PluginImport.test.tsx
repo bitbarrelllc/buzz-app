@@ -168,6 +168,8 @@ it("shows exact declared access and changes before an enabled update", async () 
               },
             ],
             networkOrigins: ["https://api.example.com"],
+            processes: [{ id: "worker", program: "example-worker" }],
+            mcp: true,
           },
         },
       },
@@ -216,6 +218,24 @@ it("shows exact declared access and changes before an enabled update", async () 
   render(<PluginImport plugins={manager} catalog={catalog} busy={false} />);
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   fireEvent.click(screen.getByRole("button", { name: "Browse plugin folder" }));
+  await screen.findByRole("region", { name: "Computer access" });
+  expect(screen.getByText("Run example-cli on your computer.")).toBeVisible();
+  expect(
+    screen.getByText(/Start example-worker with additional arguments/),
+  ).toBeVisible();
+  expect(screen.getByText("Provide tools to local agents.")).toBeVisible();
+  expect(
+    screen.getByText(/This list doesn’t describe everything/),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/Computer access changes with this update/),
+  ).toBeVisible();
+  expect(screen.queryByText(/Command check:/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Update plugin" })).toHaveAttribute(
+    "data-variant",
+    "prominent",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Technical details" }));
   await waitFor(() =>
     expect(
       screen.getByText(
@@ -344,9 +364,10 @@ it.each([
       screen.getByRole("button", { name: "Browse plugin folder" }),
     );
     const access = within(
-      await screen.findByRole("region", { name: "Declared host access" }),
+      await screen.findByRole("region", { name: "Computer access" }),
     );
-    const grant = access.getByRole("listitem");
+    fireEvent.click(access.getByRole("button", { name: "Technical details" }));
+    const grant = access.getByText(/^Command /);
     expect(
       screen.queryByRole("region", { name: "Package content" }),
     ).not.toBeInTheDocument();
@@ -471,6 +492,7 @@ it("replaces Add with an error view and returns to the retained preview for retr
   const install = await within(dialog).findByRole("button", {
     name: "Install plugin",
   });
+  expect(install).toHaveAttribute("data-variant", "prominent");
   install.focus();
   fireEvent.click(install);
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(
