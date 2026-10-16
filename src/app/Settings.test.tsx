@@ -296,6 +296,9 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   );
   expect(within(content).getAllByRole("article")).toHaveLength(5);
   expect(
+    within(content).getByText("Channels", { exact: true }),
+  ).toHaveTextContent(/^Channels$/);
+  expect(
     within(content).queryAllByRole("img", { name: "Essential" }),
   ).toHaveLength(essentials ? 3 : 0);
   expect(
@@ -464,8 +467,8 @@ it("opens each plugin's existing metadata and controls in a detail aside", () =>
   expect(bundledCard.querySelectorAll("svg")).toHaveLength(3);
   expect(within(bundledCard).queryByText("Buzz")).toBeNull();
   expect(
-    within(bundledCard).getByText("Channels").querySelector("svg"),
-  ).not.toBeNull();
+    within(bundledCard).getByText("Channels").nextElementSibling,
+  ).toHaveAttribute("aria-hidden", "true");
   expect(screen.queryByRole("button", { name: "Disable Channels" })).toBeNull();
   const rowRequired = screen.getByRole("button", { name: "Required" });
   expect(rowRequired).toBeDisabled();

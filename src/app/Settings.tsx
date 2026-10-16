@@ -609,7 +609,7 @@ export function Settings({
                 (running?.revision === plugin.revision ? running.error : null);
               const name = (
                 <span className={styles.pluginName}>
-                  {plugin.manifest.name}
+                  <span>{plugin.manifest.name}</span>
                   {plugin.source === "bundled" && (
                     <CheckCircleIcon
                       size={14}
