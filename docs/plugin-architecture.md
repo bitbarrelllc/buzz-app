@@ -747,6 +747,16 @@ reloading reads the recorded candidate folder and requires the manifest ID to st
 same. Reload rejects changed host declarations; use Load from folder to review and
 install that revision. Enabled plugins must be disabled before reload so memory-only
 plugin state, such as credentials, is not discarded by replacing the running module.
+For development, `buzzodz plugin reload ID` explicitly allows replacing an enabled
+folder plugin while preserving its enabled state. The running desktop observes the
+shared profile catalog every second and disposes the previous revision before
+activating the new one. Use the same `--home` and `--profile` as the app. Reloading
+identical build bytes does not restart the plugin. CLI reload applies the same
+manifest ID and publisher checks as Settings. CLI reload accepts changed host
+access and reports the previous and updated declarations. Rejected builds leave
+the installed revision unchanged. Replacing an active plugin ends its in-memory
+work, including a voice call. This is a host-management capability, since an
+external plugin cannot manage other installations or add CLI commands.
 Git installs and older installs without saved folder metadata must be imported again.
 
 The Rust manager owns acquisition and immutable preview artifacts, with a bounded
@@ -978,7 +988,7 @@ unambiguous signed person/agent mentions share the inline hover styling. Names i
 ordinary prose never create notification intent or establish an identity.
 
 The conversation preview exposes top-level `registerTool`, `registerCompletion` and `registerInline`
-methods and stable `conversation.ui.Composer` / `.Message` / `.Thread` / `.Tabs` components. Generated
+methods and stable `conversation.ui.Composer` / `.Message` / `.Thread` components, plus `.Tabs` while a plugin provides it. Generated
 type-only `@buzz/author` declarations are exercised by a source-only external consumer
 fixture in `tests/fixtures/conversation-consumer`; it is built and installed only in
 the browser test's temporary profile.
@@ -1019,6 +1029,10 @@ the page stays in view; any thread can then move to the main pane. A plain open
 replaces the tab the previous one added, and `keep: true` adds a tab beside it;
 an already-open conversation's tab is selected wherever it is. `close(target)` closes that conversation's tab and returns false when none is open. `id` keys the page's tabs, which last for its community session as
 Channels tabs do; they keep no Back/Forward visits.
+The tab workspace belongs to Channels, which supplies it with
+`conversation.registerTabs(component)`; the conversation service only holds that
+slot. `ui.Tabs` is undefined while no enabled plugin provides it, so a page reads
+it at render and falls back to its own layout.
 
 ### Composer ownership and mention tools
 

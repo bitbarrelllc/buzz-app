@@ -253,11 +253,7 @@ export function createTabs({
           models={models.value ?? []}
           loading={models.status === "loading"}
           value={value.model}
-          defaultLabel={
-            modelDefault
-              ? `Provider default (${modelDefault})`
-              : "Provider default"
-          }
+          defaultLabel={modelDefault || "Provider model"}
           {...(models.status === "error"
             ? { description: `Could not list models: ${models.error}` }
             : {})}

@@ -619,7 +619,10 @@ is called complete; token math alone cannot validate the CSS cascade.
 
 Button and IconButton share prominent, subtle, ghost, inverted, destructive,
 outline and link emphasis. Inverted is for an inverse surface; link keeps its
-background clear and underlines on interaction. Their 32 / 40 / 52px sizes are sm / md /
+background clear and underlines on interaction. Button’s plain variant keeps the background clear
+without underlining, for text disclosures whose label and chevron communicate
+expansion. It retains shared disabled, loading, and keyboard-focus behavior;
+pair it with `size="inline"` for quiet history labels. Their 32 / 40 / 52px sizes are sm / md /
 lg at the default scale, with minimum
 heights that accommodate larger text. Text buttons use `--radius-capsule`
 (1.625rem / 26px): capsule-shaped through the default 52px large size,
@@ -710,7 +713,10 @@ boundary and a visually hidden accessible
 label, bounded single-line value, and full choice text in the popup and value hint.
 Its popup has an 11.25rem minimum (bounded by the viewport) and reserves the
 selection-mark slot in every option so selecting the widest label cannot resize it.
-The caller owns its column width. `align="end"` anchors a trailing choice popup
+Compact choices can pass `valueSuffix` for short metadata that must stay visible,
+such as an agent card's Default source. It sits directly after the value on the
+same line; only the value truncates. Keep the full choice in the popup and value
+hint. The caller owns its column width. `align="end"` anchors a trailing choice popup
 to the trigger’s right edge; the default remains `start`. Pass `disabled` explicitly
 when the choice is unavailable. An option may include one concise supporting
 description; Select shows it as a byline in the popup while the closed trigger

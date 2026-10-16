@@ -49,7 +49,6 @@ it("registers both surfaces under the injecting plugin scope, removes and replac
       expect(conversation.ui.Composer).toBe(conversation.ui.Composer);
       expect(conversation.ui.Message).toBe(conversation.ui.Message);
       expect(conversation.ui.Thread).toBe(conversation.ui.Thread);
-      expect(conversation.ui.Tabs).toBe(conversation.ui.Tabs);
       // Plugins get the host's own labels; their output is tested at the owner.
       expect(conversation.format).toEqual({
         itemTimestamp: formatItemTimestamp,
@@ -81,6 +80,21 @@ it("registers both surfaces under the injecting plugin scope, removes and replac
   h.runtime.reconcile([h.plugin]);
   await vi.waitFor(() => expect(h.service.tools.snapshot()).toHaveLength(1));
   expect(h.service.tools.snapshot()[0]).not.toBe(first);
+});
+it("provides ui.Tabs only while a plugin supplies the tab workspace", async () => {
+  const Tabs = () => null;
+  const h = harness({
+    inject: ["conversation"],
+    apply(ctx) {
+      ctx.conversation.registerTabs(Tabs);
+    },
+  });
+  expect(h.service.ui.Tabs).toBeUndefined();
+  h.runtime.reconcile([h.plugin]);
+  await vi.waitFor(() => expect(h.service.ui.Tabs).toBeDefined());
+  expect(h.service.ui.Tabs).toBe(h.service.ui.Tabs);
+  h.runtime.reconcile([]);
+  await vi.waitFor(() => expect(h.service.ui.Tabs).toBeUndefined());
 });
 it("bundled Emoji really registers a picker and a renderer, including reaction metadata", async () => {
   const h = harness(emoji);
