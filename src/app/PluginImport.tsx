@@ -545,7 +545,7 @@ export function PluginImport({
                           variant="card"
                           label={item.manifest.name}
                           description={
-                            <span className="break-all">
+                            <span className="block break-all text-caption text-muted">
                               {importLocation(preview, item.path)} ·{" "}
                               {item.manifest.id}
                             </span>
