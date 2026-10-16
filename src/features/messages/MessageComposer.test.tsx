@@ -4276,10 +4276,13 @@ it("keeps retry submission available while a new-session draft is locked", () =>
   const send = screen.getByRole("button", { name: "Send message" });
   expect(send).toBeEnabled();
   fireEvent.click(send);
-  expect(submit).toHaveBeenCalledWith({
-    text: "Keep this operation",
-    recipients: [],
-  });
+  expect(submit).toHaveBeenCalledWith(
+    {
+      text: "Keep this operation",
+      recipients: [],
+    },
+    expect.objectContaining({ prepareForSend: expect.any(Function) }),
+  );
   expect(h.messages.send).not.toHaveBeenCalled();
 });
 
@@ -6969,10 +6972,13 @@ it("does not apply ordinary draft reconciliation to submission-owned recovery", 
   act(() => writeView("scope", "session-retry", "Disposable view state"));
   expect(h.input()).toHaveValue("Durable operation");
   fireEvent.click(screen.getByRole("button", { name: "Send message" }));
-  expect(submit).toHaveBeenCalledExactlyOnceWith({
-    text: "Durable operation",
-    recipients: [],
-  });
+  expect(submit).toHaveBeenCalledExactlyOnceWith(
+    {
+      text: "Durable operation",
+      recipients: [],
+    },
+    expect.objectContaining({ prepareForSend: expect.any(Function) }),
+  );
   expect(
     screen.queryByRole("button", { name: "Load saved draft" }),
   ).not.toBeInTheDocument();

@@ -535,3 +535,19 @@ it("rejects eager upload errors until explicit Retry, including after Send hando
   h.calls[1]?.result.resolve(uploaded());
   await expect(work).resolves.toEqual([uploaded()]);
 });
+
+it("a deferred draft holds files until send names the created conversation", async () => {
+  const h = fixture();
+  const store = attachmentDraft(h.session, "deferred", "draft-id", true);
+  store.add([file()]);
+  store.resume();
+  await Promise.resolve();
+  expect(h.upload).not.toHaveBeenCalled();
+  expect(store.snapshot()[0]?.status).toBe("queued");
+
+  const sent = store.prepareForSend(new AbortController().signal, "created");
+  await waitFor(() => expect(h.upload).toHaveBeenCalledOnce());
+  expect(h.calls[0]?.channel).toBe("created");
+  h.calls[0]?.result.resolve(uploaded());
+  await expect(sent).resolves.toEqual([uploaded()]);
+});

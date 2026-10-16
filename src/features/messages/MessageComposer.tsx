@@ -48,7 +48,11 @@ import {
 } from "../../shared/design-system/icons/index";
 import { useVoiceCapture } from "./useVoiceCapture";
 import { ComposerAttachments } from "./ComposerAttachments";
-import { attachmentDraft, useAttachmentDraft } from "./attachment-draft";
+import {
+  attachmentDraft,
+  useAttachmentDraft,
+  type AttachmentDraft,
+} from "./attachment-draft";
 import {
   sendInBackground,
   useBackgroundSendPending,
@@ -241,7 +245,9 @@ export type MessageComposerProps = {
     receiptOnly?: boolean;
     locked: boolean;
     disabled: boolean;
-    submit: (draft: MentionDraft) => void;
+    /** Hold files locally; submit uploads them once the conversation exists. */
+    attachments?: boolean;
+    submit: (draft: MentionDraft, attachments: AttachmentDraft) => void;
   };
 };
 
@@ -587,10 +593,12 @@ function Composer({
     session,
     `${scope}:${draftKey}`,
     channelId,
+    !!submission,
   );
   const picker = useRef<HTMLInputElement>(null);
   const form = useRef<HTMLFormElement>(null);
-  const canAttach = !submission && !!session.attachments;
+  const canAttach =
+    (!submission || !!submission.attachments) && !!session.attachments;
   const voice = useVoiceCapture(
     attachments.store,
     !active || editingDisabled || !!editing.target || !canAttach,
@@ -1258,7 +1266,7 @@ function Composer({
     const capturedRunPicks = { ...picks, ...resolvedPicks.current };
     try {
       if (submission?.receiptOnly) {
-        submission.submit(captured);
+        submission.submit(captured, attachments.store);
         return;
       }
       if (captured.recipients.some((p) => archivedMention(session, p.pubkey)))
@@ -1278,7 +1286,7 @@ function Composer({
           "Only your available agents can be mentioned in Solo chats. Remove the unavailable recipient and retry.",
         );
       if (submission) {
-        submission.submit(captured);
+        submission.submit(captured, attachments.store);
         return;
       }
       requireCompletedSessionStart();

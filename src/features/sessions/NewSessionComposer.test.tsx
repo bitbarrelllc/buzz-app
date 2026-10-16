@@ -2424,3 +2424,83 @@ it.each(["remember", "off", "unavailable", "existing"])(
     }
   },
 );
+
+it("uploads files attached before a new chat exists into the created chat", async () => {
+  const test = setup(),
+    onStarted = vi.fn(),
+    user = userEvent.setup();
+  const attachment = {
+    name: "notes.txt",
+    url: `https://relay.test/media/${"f".repeat(64)}.txt`,
+    type: "text/plain",
+    size: 5,
+    sha256: "f".repeat(64),
+  };
+  const created: unknown[] = [];
+  const upload = vi.fn(async (_file: File, _channelId: string) => {
+    // Files wait for the chat: nothing uploads before it is created.
+    created.push(test.workSessions.create.mock.calls[0]?.[0]);
+    return attachment;
+  });
+  Object.assign(test.session, { attachments: { upload } });
+  render(
+    <NewSessionComposer
+      session={test.session}
+      scope="test"
+      onStarted={onStarted}
+    />,
+  );
+  await user.type(screen.getByRole("textbox"), "See attached");
+  await user.upload(
+    screen.getByLabelText("Choose attachments"),
+    new File(["notes"], "notes.txt", { type: "text/plain" }),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(upload).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
+  const id = test.workSessions.create.mock.calls[0]?.[0];
+  expect(upload).toHaveBeenCalledOnce();
+  expect(created).toEqual([id]);
+  expect(upload.mock.calls[0]?.[1]).toBe(id);
+  expect(test.messages.send).toHaveBeenCalledWith(
+    id,
+    "See attached",
+    ["a".repeat(64)],
+    [attachment],
+  );
+});
+
+it("a recovered start says when its attached files were lost, then sends without them", async () => {
+  const test = setup(),
+    onStarted = vi.fn(),
+    user = userEvent.setup();
+  Object.assign(test.session, {
+    attachments: { upload: vi.fn(async () => ({})) },
+  });
+  writeView("test", "sessions:pending", {
+    id: "22222222-2222-4222-8222-222222222222",
+    text: "See attached",
+    name: "See attached",
+    attachmentCount: 1,
+  });
+  render(
+    <NewSessionComposer
+      session={test.session}
+      scope="test"
+      onStarted={onStarted}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "The files attached to this message are no longer here.",
+  );
+  expect(test.workSessions.create).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
+  expect(test.messages.send).toHaveBeenCalledWith(
+    "22222222-2222-4222-8222-222222222222",
+    "See attached",
+    ["a".repeat(64)],
+  );
+});

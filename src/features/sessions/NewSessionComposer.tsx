@@ -33,6 +33,7 @@ import { rememberedMentions } from "../messages/remembered-mentions";
 import { composerMarkdown } from "../messages/composer-markdown";
 import { mentionDraft, type MentionDraft } from "../messages/mention-draft";
 import type { ConversationExtensions } from "../conversation/contracts";
+import type { AttachmentDraft } from "../messages/attachment-draft";
 import { sessionRecipients } from "./recipients";
 import styles from "./Sessions.module.css";
 
@@ -197,10 +198,11 @@ export function NewSessionComposer({
       );
     setPending(next);
   };
-  async function start(draft: MentionDraft) {
+  async function start(draft: MentionDraft, files: AttachmentDraft) {
+    const selected = files.snapshot().length;
     if (
       submitting.current ||
-      !(pending?.text ?? composerMarkdown(draft)).trim() ||
+      (!(pending?.text ?? composerMarkdown(draft)).trim() && !selected) ||
       !available
     )
       return;
@@ -263,6 +265,17 @@ export function NewSessionComposer({
         throw new Error(
           lifetimeError ?? "Parent-linked sessions cannot set a lifetime.",
         );
+      if (!current.messageId) {
+        // Files are tab-local; a recovered start must not silently drop them.
+        if (current.attachmentCount && !selected) {
+          delete current.attachmentCount;
+          save(current);
+          throw new Error(
+            "The files attached to this message are no longer here. Attach them again, or send to continue without them.",
+          );
+        }
+        current.attachmentCount = selected || undefined;
+      }
       save(current); // Freeze validated name and lifetime before the first asynchronous start operation.
       if (current.setup !== undefined) {
         current.setup = parseSessionSetup(current.setup);
@@ -441,10 +454,17 @@ export function NewSessionComposer({
               "This conversation is no longer in Solo. Open it in Multiplayer.",
             );
         }
+        // Uploads finish even if this view unmounts, so a retry reuses them.
+        const uploaded = await files.prepareForSend(
+          new AbortController().signal,
+          current.id,
+        );
+        if (!mounted.current) return;
         current.messageId = session.messages.send(
           current.id,
           current.text,
           recipients,
+          ...(uploaded.length ? [uploaded] : []),
         );
         save({ ...current });
       }
@@ -470,6 +490,7 @@ export function NewSessionComposer({
       writeView(scope, `${draftKey}:settings`, null);
       writeView(scope, `${draftKey}:new-draft`, "");
       writeView(scope, `${draftKey}:new-project`, null);
+      files.clear();
       setPending(undefined);
       onStarted(current.id);
     } catch (reason) {
@@ -551,8 +572,9 @@ export function NewSessionComposer({
           receiptOnly: !!pending?.messageId,
           locked: busy || (!!pending && !editing),
           disabled: busy || !available,
-          submit: (draft) => {
-            void start(draft);
+          attachments: true,
+          submit: (draft, files) => {
+            void start(draft, files);
           },
         }}
       />

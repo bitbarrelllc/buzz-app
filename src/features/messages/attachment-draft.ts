@@ -24,7 +24,11 @@ export type AttachmentDraft = {
   add(files: readonly File[], recording?: VoiceRecording): void;
   addUploaded(attachment: UploadedAttachment): void;
   adopt(files: readonly DraftAttachment[]): boolean;
-  prepareForSend(signal: AbortSignal): Promise<readonly UploadedAttachment[]>;
+  /** A deferred draft names its destination here, once that conversation exists. */
+  prepareForSend(
+    signal: AbortSignal,
+    channelId?: string,
+  ): Promise<readonly UploadedAttachment[]>;
   remove(id: string): void;
   retry(id: string): void;
   cancel(): void;
@@ -72,11 +76,13 @@ const drafts = new WeakMap<RelaySession, Map<string, AttachmentDraft>>();
 export const MAX_ATTACHMENT_FILES = 10;
 const MAX_RETAINED_BYTES = 2 * UPLOAD_MAX_BYTES;
 
-/** Tab-local files survive navigation, not reload. Delivery remains outbox-owned. */
+/** Tab-local files survive navigation, not reload. Delivery remains outbox-owned.
+ * A deferred draft holds files without uploading until send names the conversation. */
 export function attachmentDraft(
   session: RelaySession,
   key: string,
   channelId: string,
+  deferred = false,
 ): AttachmentDraft {
   let partition = drafts.get(session);
   if (!partition) {
@@ -89,6 +95,7 @@ export function attachmentDraft(
   let items: readonly DraftAttachment[] = [];
   const listeners = new Set<() => void>();
   let paused = false;
+  let destination = channelId;
   let active = new Map<string, UploadTask>();
   let pending = new Map<string, Promise<UploadedAttachment>>();
   const emit = () => {
@@ -174,7 +181,7 @@ export function attachmentDraft(
       combined.throwIfAborted();
       task.update(item.id, { status: "uploading" });
       const result = await abortable(
-        attachments.upload(prepared, channelId, combined, (sent, total) => {
+        attachments.upload(prepared, destination, combined, (sent, total) => {
           if (
             !combined.aborted &&
             owner.get(item.id) === task &&
@@ -216,7 +223,7 @@ export function attachmentDraft(
     }
   }
   function pump() {
-    if (paused || active.size) return;
+    if (paused || deferred || active.size) return;
     const next = items.find((item) => item.status === "queued");
     if (next) start(next);
   }
@@ -329,8 +336,9 @@ export function attachmentDraft(
       emit();
       return true;
     },
-    async prepareForSend(signal: AbortSignal) {
+    async prepareForSend(signal: AbortSignal, channel = channelId) {
       paused = false;
+      destination = channel;
       if (!items.length) return [];
       const uploaded: UploadedAttachment[] = [];
       try {
@@ -414,9 +422,12 @@ export function useAttachmentDraft(
   session: RelaySession,
   key: string,
   channelId: string,
+  deferred = false,
 ) {
   // Composer's destination key remounts this hook on a session/channel/thread change.
-  const [store] = useState(() => attachmentDraft(session, key, channelId));
+  const [store] = useState(() =>
+    attachmentDraft(session, key, channelId, deferred),
+  );
   const items = useSyncExternalStore(
     store.subscribe,
     store.snapshot,
