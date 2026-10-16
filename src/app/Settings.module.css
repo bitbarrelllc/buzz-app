@@ -661,7 +661,10 @@
 
 .pluginCoreGrid {
   position: relative;
-  display: grid;
+}
+
+.pluginCoreGrid > [data-layout="cards"] {
+  --settings-group-inset: 0;
   grid-template-columns: repeat(
       auto-fill,
       minmax(min(100%, max(12rem, calc((100% - 2 * var(--space-4)) / 3))), 1fr)
@@ -670,7 +673,7 @@
   grid-auto-rows: 1fr;
 }
 
-.pluginCoreGrid > * {
+.pluginCoreGrid > [data-layout="cards"] > * {
   display: grid;
   grid-template-rows: 1fr auto;
 }
@@ -679,8 +682,8 @@
   display: grid;
   grid-template-rows: 1fr auto;
   margin: 0;
-  border-color: var(--border-standard);
-  border-radius: var(--radius-container);
+  border: 0;
+  border-radius: inherit;
   overflow: hidden;
 }
 

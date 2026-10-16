@@ -82,7 +82,11 @@ const PluginListEntry = forwardRef<HTMLDivElement, HTMLMotionProps<"div">>(
 );
 
 function CorePluginGroup({ children }: { children: ReactNode }) {
-  return <div className={styles.pluginCoreGrid}>{children}</div>;
+  return (
+    <div className={styles.pluginCoreGrid}>
+      <SettingsGroup layout="cards">{children}</SettingsGroup>
+    </div>
+  );
 }
 
 function isCorePlugin(plugin: PluginInfo) {
