@@ -866,13 +866,18 @@ it("keeps external Essentials tags from granting curated markers or priority", (
   ).toHaveTextContent("Tags");
 });
 
-it("announces catalog and current activation failures directly in the list", () => {
+it("shows persistent failures without announcing them again when filtering", () => {
   const fixture = reviewPluginFixture();
   act(() => {
     fixture.external.error = "Could not load plugin";
     fixture.publish();
   });
-  expect(screen.getByRole("alert")).toHaveTextContent("Could not load plugin");
+  expect(screen.getByText("Could not load plugin")).toBeVisible();
+  const search = screen.getByRole("searchbox", { name: "Search plugins" });
+  fireEvent.change(search, { target: { value: "Alphabet" } });
+  fireEvent.change(search, { target: { value: "Zebra" } });
+  expect(screen.getByText("Could not load plugin")).toBeVisible();
+  expect(screen.queryByRole("alert")).toBeNull();
   act(() => {
     fixture.external.error = null;
     fixture.snapshot.activation[fixture.external.manifest.id] = {
@@ -881,12 +886,12 @@ it("announces catalog and current activation failures directly in the list", () 
     };
     fixture.publish();
   });
-  expect(screen.getByRole("alert")).toHaveTextContent("Activation failed");
+  expect(screen.getByText("Activation failed")).toBeVisible();
   act(() => {
     fixture.external.revision = "next";
     fixture.publish();
   });
-  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText("Activation failed")).toBeNull();
 });
 
 it("returns focus to the Plugins section when the selected plugin is deleted", async () => {

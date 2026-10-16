@@ -702,7 +702,6 @@ export function Settings({
                   </article>
                   {failure && (
                     <p
-                      role="alert"
                       className={`${styles.pluginRowError} error text-body-sm`}
                     >
                       {failure}
