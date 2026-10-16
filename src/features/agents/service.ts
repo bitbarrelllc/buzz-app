@@ -396,6 +396,8 @@ export type AgentProvider = Readonly<{
   attentionAction?: (() => void) | undefined;
   /** Provider-owned recovery/progress controls and optional saved defaults. */
   DialogBody: ComponentType<{ onClose(): void }>;
+  /** Compact device default picker; persistence remains provider-owned. */
+  DefaultControl?: ComponentType<{ onConfigure(): void }>;
 }>;
 export type AgentType<Config = unknown> = {
   id: string;

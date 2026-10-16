@@ -478,3 +478,8 @@ export const BrainIcon = defineIcon("tabler", TablerBrainIcon);
 
 import TablerThinkingHighIcon from "@tabler/icons-react/dist/esm/icons/IconThinkingHigh.mjs";
 export const ThinkingHighIcon = defineIcon("tabler", TablerThinkingHighIcon);
+
+import TablerGoogleLogoIcon from "@tabler/icons-react/dist/esm/icons/IconBrandGoogle.mjs";
+export const GoogleLogoIcon = defineIcon("tabler", TablerGoogleLogoIcon);
+import TablerMetaLogoIcon from "@tabler/icons-react/dist/esm/icons/IconBrandMeta.mjs";
+export const MetaLogoIcon = defineIcon("tabler", TablerMetaLogoIcon);

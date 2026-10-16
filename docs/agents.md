@@ -97,6 +97,13 @@ error boundary. The plugin owns connection actions and optional defaults inside
 the dialog; blocking install or sign-in work must expose cancellation before the
 dialog can close. Disabled or unloaded types remain in Settings → Plugins.
 
+Goose's Settings → AI defaults contribution reads and writes Goose's own
+configuration through `GooseSetup`. Provider keys stay in Goose's secret store;
+Buzz keeps no separate Goose defaults store. Readiness requires a working
+`goose-acp` and a configured default provider. The per-agent provider/model
+fields remain overrides. Types without a provider contribution have no AI
+defaults row; a failed contribution retains the unavailable fallback.
+
 Workspace, instructions and session scope are always per-agent. Claude and Codex
 model/thinking choices may instead be blank, which means inherited rather than
 rewritten. Their effective order is explicit agent override, saved device-wide

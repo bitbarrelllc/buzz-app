@@ -3,7 +3,10 @@
 // call runs a short-lived `goose-acp`; keys go to goose's secret store, never
 // into Buzz.
 import type { ModelChoice } from "../../features/agents/ModelPicker";
-import type { Models } from "../../features/agents/service";
+import type {
+  AgentProviderSnapshot,
+  Models,
+} from "../../features/agents/service";
 import { GooseProcess, type Choice, type Spawn } from "./goose";
 import { absolute } from "./sessions";
 
@@ -68,7 +71,72 @@ export class GooseSetup {
   private listing: Promise<Providers> | undefined;
   private readonly live = new Map<string, Promise<readonly ModelChoice[]>>();
 
+  private state: AgentProviderSnapshot = { readiness: "checking" };
+  private readonly listeners = new Set<() => void>();
+  private checking: Promise<void> | undefined;
+
   constructor(private readonly spawn: Spawn | undefined) {}
+
+  snapshot = () => this.state;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  private update(state: AgentProviderSnapshot) {
+    this.state = {
+      ...state,
+      blocking: state.blocking ?? this.state.blocking ?? false,
+    };
+    for (const listener of this.listeners) listener();
+  }
+
+  /** A fresh read also notices changes made by `goose configure`. */
+  check = (): Promise<void> => {
+    if (this.checking) return this.checking;
+    this.listing = undefined;
+    this.live.clear();
+    this.update({ readiness: "checking" });
+    this.checking = this.providers()
+      .then(
+        ({ defaults, providers }) => {
+          const ready = providers.some(
+            (provider) =>
+              provider.id === defaults.provider && provider.configured,
+          );
+          this.update(
+            ready
+              ? { readiness: "ready" }
+              : { readiness: "attention", attentionLabel: "Set up Goose" },
+          );
+        },
+        () =>
+          this.update({
+            readiness: "attention",
+            attentionLabel: "Check Goose setup",
+          }),
+      )
+      .finally(() => {
+        this.checking = undefined;
+      });
+    return this.checking;
+  };
+
+  /** Writes Goose's own defaults, never a parallel Buzz preference. */
+  async saveDefaults(choice: Choice) {
+    await this.checking;
+    this.update({ ...this.state, blocking: true });
+    try {
+      await this.with((goose) =>
+        goose.request("_goose/unstable/defaults/save", {
+          providerId: choice.provider.trim(),
+          ...(choice.model.trim() ? { modelId: choice.model.trim() } : {}),
+        }),
+      );
+      await this.check();
+    } finally {
+      this.update({ ...this.state, blocking: false });
+    }
+  }
 
   /** The models an agent on `choice` can be asked to run a turn on: those of
    * its provider, or goose's config's, and the one it runs on without. */

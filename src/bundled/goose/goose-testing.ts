@@ -108,6 +108,7 @@ export function fakeSpawn(
     silent?: readonly string[];
   }> = {},
 ) {
+  let defaults = options.defaults;
   const processes: FakeGoose[] = [];
   const servers: FakeMcpServer[] = [];
   const serve = async (handler: McpHandler): Promise<HostMcpServer> => {
@@ -327,7 +328,13 @@ export function fakeSpawn(
             })),
           });
         case "_goose/unstable/defaults/read":
-          return reply(id, options.defaults ?? {});
+          return reply(id, defaults ?? {});
+        case "_goose/unstable/defaults/save":
+          defaults = {
+            providerId: String(params.providerId),
+            ...(params.modelId ? { modelId: String(params.modelId) } : {}),
+          };
+          return reply(id, defaults);
         case "_goose/unstable/providers/config/read": {
           const set = options.saved?.get(String(params.providerId));
           return reply(id, {

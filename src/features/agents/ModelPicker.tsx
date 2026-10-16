@@ -3,6 +3,8 @@
 import { useId, useRef, useState, type ComponentProps } from "react";
 import {
   ClaudeLogoIcon,
+  GoogleLogoIcon,
+  MetaLogoIcon,
   OpenAILogoIcon,
   RobotIcon,
 } from "../../shared/design-system/icons";
@@ -10,6 +12,7 @@ import { Button } from "../../shared/design-system/ui/Button";
 import { Dialog } from "../../shared/design-system/ui/Dialog";
 import { Field } from "../../shared/design-system/ui/Field";
 import { Input } from "../../shared/design-system/ui/Input";
+import { ModelFamilyMenu } from "./ModelFamilyMenu";
 import { Select } from "../../shared/design-system/ui/Select";
 
 export type ModelChoice = Readonly<{
@@ -17,6 +20,7 @@ export type ModelChoice = Readonly<{
   id: string;
   label: string;
   description?: string | undefined;
+  efforts?: readonly { id: string; label: string }[];
 }>;
 
 const CUSTOM_MODEL_ACTION: ModelChoice = {
@@ -32,7 +36,11 @@ export function ModelIcon({ model }: { model: string }) {
     ? ClaudeLogoIcon
     : /(?:^|[\s/._-])(?:gpt|codex|o[134](?:[\s/._-]|$))|openai/.test(name)
       ? OpenAILogoIcon
-      : RobotIcon;
+      : /gemini/.test(name)
+        ? GoogleLogoIcon
+        : /llama/.test(name)
+          ? MetaLogoIcon
+          : RobotIcon;
   return <Icon size={18} aria-hidden="true" />;
 }
 
@@ -104,6 +112,13 @@ export function CustomModelDialog({
 
 /** `value` is a model ID, or "" for the type's default, `defaultLabel`. */
 export function ModelPicker({
+  label = "Model",
+  groupByFamily = false,
+  onConfigure,
+  modelLabelPrefixes,
+  effort,
+  effortLabel,
+  onEffortChange,
   models,
   allowCustomModel = false,
   value,
@@ -118,6 +133,13 @@ export function ModelPicker({
   includeDefault = true,
   description,
 }: {
+  label?: string;
+  groupByFamily?: boolean;
+  onConfigure?: (() => void) | undefined;
+  modelLabelPrefixes?: readonly string[] | undefined;
+  effort?: string | undefined;
+  effortLabel?: string | undefined;
+  onEffortChange?: ((model: string, effort: string) => void) | undefined;
   models: readonly ModelChoice[];
   /** Whether text absent from `models` may be committed as its model ID. */
   allowCustomModel?: boolean;
@@ -155,9 +177,18 @@ export function ModelPicker({
       label: value,
       description: allowCustomModel ? "Custom model" : "Unavailable model",
     });
-  const selected = items.find((model) => model.id === value) ?? fallback;
+  const shown = items.map((model) => {
+    const prefix = modelLabelPrefixes?.find((prefix) =>
+      model.label.toLowerCase().startsWith(prefix.toLowerCase()),
+    );
+    return {
+      ...model,
+      label: prefix ? model.label.slice(prefix.length) : model.label,
+    };
+  });
+  const selected = shown.find((model) => model.id === value) ?? fallback;
   const choices =
-    allowCustomModel && !compact ? [...items, CUSTOM_MODEL_ACTION] : items;
+    allowCustomModel && !compact ? [...shown, CUSTOM_MODEL_ACTION] : shown;
   const openCustomDialog = () => {
     const listed = !value || models.some((model) => model.id === value);
     const initialValue = listed ? "" : value;
@@ -166,36 +197,54 @@ export function ModelPicker({
   return (
     <>
       <div ref={control}>
-        <Select
-          label="Model"
-          value={selected.id}
-          valueLabel={selected.label}
-          valueTitle={selected.label}
-          leading={<ModelIcon model={`${selected.id} ${selected.label}`} />}
-          variant={compact ? "compact" : "preference"}
-          appearance={appearance}
-          align={compact ? "end" : "start"}
-          groups={[
-            {
-              label: "",
-              options: choices.map((model) => ({
-                value: model.id,
-                label:
-                  includeDefault && model.id === ""
-                    ? `${model.label} · Default`
-                    : model.label,
-                description: model.description,
-                leading: <ModelIcon model={`${model.id} ${model.label}`} />,
-              })),
-            },
-          ]}
-          disabled={disabled || loading}
-          description={description}
-          onValueChange={(model) => {
-            if (model === CUSTOM_MODEL_ACTION.id) openCustomDialog();
-            else onChange(model);
-          }}
-        />
+        {groupByFamily ? (
+          <ModelFamilyMenu
+            effort={effort}
+            effortLabel={effortLabel}
+            onEffortChange={onEffortChange}
+            label={label}
+            compact={compact}
+            onConfigure={onConfigure}
+            models={shown.filter((model) => model.id !== "")}
+            selected={selected}
+            defaultChoice={includeDefault ? fallback : undefined}
+            disabled={disabled || loading}
+            description={description}
+            onChange={onChange}
+            onCustom={allowCustomModel ? openCustomDialog : undefined}
+          />
+        ) : (
+          <Select
+            label={label}
+            value={selected.id}
+            valueLabel={selected.label}
+            valueTitle={selected.label}
+            leading={<ModelIcon model={`${selected.id} ${selected.label}`} />}
+            variant={compact ? "compact" : "preference"}
+            appearance={appearance}
+            align={compact ? "end" : "start"}
+            groups={[
+              {
+                label: "",
+                options: choices.map((model) => ({
+                  value: model.id,
+                  label:
+                    includeDefault && model.id === ""
+                      ? `${model.label} · Default`
+                      : model.label,
+                  description: model.description,
+                  leading: <ModelIcon model={`${model.id} ${model.label}`} />,
+                })),
+              },
+            ]}
+            disabled={disabled || loading}
+            description={description}
+            onValueChange={(model) => {
+              if (model === CUSTOM_MODEL_ACTION.id) openCustomDialog();
+              else onChange(model);
+            }}
+          />
+        )}
         {loading && <p className="buzz-field-description">Loading models…</p>}
       </div>
       {allowCustomModel && customModel !== null && (
@@ -207,8 +256,9 @@ export function ModelPicker({
             setCustomModel(null);
           }}
           finalFocus={() =>
-            control.current?.querySelector<HTMLElement>("[role=combobox]") ??
-            false
+            control.current?.querySelector<HTMLElement>(
+              "[role=combobox], [aria-haspopup=menu]",
+            ) ?? false
           }
         />
       )}

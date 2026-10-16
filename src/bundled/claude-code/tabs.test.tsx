@@ -461,11 +461,8 @@ it("keeps provider readiness quiet and agent sessions out of Settings", async ()
   const installedType = installed().type;
   const Setup = providerSetup(installedType);
   render(<Setup onClose={vi.fn()} />);
-  await waitFor(() =>
-    expect(screen.getByLabelText("Default model")).toHaveTextContent(
-      "Claude default (Opus 5.5)",
-    ),
-  );
+  expect(await screen.findByText("Claude is signed in.")).toBeVisible();
+  expect(screen.queryByLabelText("Default model")).not.toBeInTheDocument();
   expect(screen.queryByText("Connection")).not.toBeInTheDocument();
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   cleanup();
@@ -481,35 +478,22 @@ it("keeps provider readiness quiet and agent sessions out of Settings", async ()
   ).toBeInTheDocument();
 });
 
-it("saves a provider model default explicitly and leaves blank agent config inherited", async () => {
+it("edits the model through the Settings dropdown and preserves agent inheritance", async () => {
   const installedType = installed().type;
-  const Provider = providerSetup(installedType);
-  const onClose = vi.fn();
-  render(<Provider onClose={onClose} />);
-  await waitFor(() =>
-    expect(screen.getByLabelText("Default model")).toHaveTextContent(
-      "Claude default (Opus 5.5)",
-    ),
-  );
+  const Control = installedType.provider?.DefaultControl;
+  if (!Control) throw new Error("Missing default control");
+  render(<Control onConfigure={vi.fn()} />);
   const user = userEvent.setup();
-  const defaultModel = screen.getByRole("combobox", { name: "Default model" });
-  expect(defaultModel).toHaveTextContent("Claude default (Opus 5.5)");
-  await user.click(defaultModel);
-  expect(
-    await screen.findByRole("option", {
-      name: "Claude default (Opus 5.5)",
-    }),
-  ).toHaveAccessibleDescription("Following Claude Code's recommendation");
-  // Every model Claude lists is offered, not only the aliases.
-  const fable = await screen.findByRole("option", { name: "Fable 5.1" });
-  expect(fable).toHaveAccessibleDescription(
-    "Most capable for your hardest tasks",
+  const control = await screen.findByRole("button", {
+    name: "Claude default model",
+  });
+  await waitFor(() => expect(control).toHaveTextContent("Opus 5.5"));
+  await user.click(control);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Claude" }));
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Fable 5.1" }),
   );
-  await user.click(fable);
-  await user.click(screen.getByRole("button", { name: "Save defaults" }));
-  expect(onClose).toHaveBeenCalledOnce();
   cleanup();
-
   const Settings = tab(installedType, 0);
   const save = vi.fn(async () => undefined);
   render(<Settings agent={agent()} save={save} />);
@@ -519,29 +503,6 @@ it("saves a provider model default explicitly and leaves blank agent config inhe
     ),
   );
   expect(save).not.toHaveBeenCalled();
-});
-
-it("says when Claude's models could not be loaded and tries again", async () => {
-  const catalog = { listed: false };
-  const Provider = providerSetup(installed({ catalog }).type);
-  render(<Provider onClose={() => undefined} />);
-  const defaultModel = await screen.findByRole("combobox", {
-    name: "Default model",
-  });
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Couldn't load Claude's models: Claude did not list its models",
-  );
-  const retry = await screen.findByRole("button", { name: "Try again" });
-  catalog.listed = true;
-  const user = userEvent.setup();
-  await user.click(retry);
-  await waitFor(() =>
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
-  );
-  await user.click(defaultModel);
-  expect(
-    await screen.findByRole("option", { name: "Fable 5.1" }),
-  ).toBeInTheDocument();
 });
 
 it("preserves native behavior for invalid defaults and keeps explicit agent models", () => {
@@ -1089,3 +1050,31 @@ it.each(["Identity", "Settings"])(
     });
   },
 );
+
+it("saves model-specific default effort from the nested menu and inherits it", async () => {
+  const installedType = installed().type;
+  const Control = installedType.provider?.DefaultControl;
+  if (!Control) throw new Error("Missing default control");
+  render(<Control onConfigure={vi.fn()} />);
+  const control = await screen.findByRole("button", {
+    name: "Claude default model",
+  });
+  await waitFor(() => expect(control).toHaveTextContent("Opus 5.5"));
+  expect(control).toHaveTextContent("Automatic");
+  fireEvent.click(control);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Claude" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Sonnet 5.5" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "High" }));
+  expect(control).toHaveTextContent("High");
+  const reopened = new ClaudeDefaults(localStorage);
+  expect(reopened.resolve(DEFAULT_CONFIG)).toMatchObject({
+    model: "sonnet",
+    effort: "high",
+  });
+  expect(reopened.resolve({ ...DEFAULT_CONFIG, effort: "low" }).effort).toBe(
+    "low",
+  );
+  expect(reopened.resolve({ ...DEFAULT_CONFIG, model: "haiku" }).effort).toBe(
+    "",
+  );
+});

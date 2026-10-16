@@ -261,3 +261,37 @@ describe("keyLabel", () => {
     expect(keyLabel("TOKEN")).toBe("Token");
   });
 });
+
+it("checks Goose config readiness and writes defaults through Goose", async () => {
+  const { setup: goose, fake } = setup();
+  await goose.check();
+  expect(goose.snapshot().readiness).toBe("ready");
+  await goose.saveDefaults({ provider: "ollama", model: "llama4" });
+  expect((await goose.providers()).defaults).toEqual({
+    provider: "ollama",
+    model: "llama4",
+  });
+  expect(goose.snapshot()).toMatchObject({
+    readiness: "ready",
+    blocking: false,
+  });
+  expect(fake.geese.every((process) => process.killed)).toBe(true);
+});
+
+it("requires a configured default provider and recovers after setup", async () => {
+  const { setup: goose } = setup({ defaults: {} });
+  await goose.check();
+  expect(goose.snapshot().readiness).toBe("attention");
+  await goose.saveDefaults({ provider: "ollama", model: "" });
+  expect(goose.snapshot().readiness).toBe("ready");
+});
+
+it("reports unavailable Goose as needing attention", async () => {
+  const goose = new GooseSetup(undefined);
+  await goose.check();
+  expect(goose.snapshot().readiness).toBe("attention");
+  await expect(
+    goose.saveDefaults({ provider: "ollama", model: "qwen3" }),
+  ).rejects.toThrow();
+  expect(goose.snapshot().blocking).toBe(false);
+});

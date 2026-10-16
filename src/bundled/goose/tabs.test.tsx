@@ -104,8 +104,17 @@ function created(
 
 async function choose(label: string, option: string) {
   const user = userEvent.setup();
-  await user.click(screen.getByRole("combobox", { name: label }));
-  await user.click(await screen.findByRole("option", { name: option }));
+  if (label === "Provider") {
+    await user.click(screen.getByRole("combobox", { name: "Provider" }));
+    await user.click(await screen.findByRole("option", { name: option }));
+  } else {
+    await user.click(screen.getByRole("button", { name: label }));
+    (await screen.findByRole("menuitem", { name: "Claude" })).focus();
+    await user.keyboard("{ArrowRight}");
+    await user.click(
+      await screen.findByRole("menuitemradio", { name: option }),
+    );
+  }
 }
 
 /** The model field, labeled with goose's default or the agent's choice. */
@@ -123,13 +132,13 @@ it("keeps New agent's card to instructions; the model field shows goose's defaul
   expect(screen.queryByRole("combobox", { name: "Provider" })).toBeNull();
   await waitFor(() =>
     expect(modelButton()).toHaveTextContent(
-      "goose default (Databricks · goose-claude)",
+      "goose default (Databricks · claude)",
     ),
   );
 });
 
-it("chooses a provider in its dialog, saves its key into goose, and tests it", async () => {
-  const { fake, saved, changes } = created();
+it("keeps provider fields visible while saving its key and selecting a model", async () => {
+  const { saved, changes } = created();
   const user = userEvent.setup();
   const dialog = await openChoices();
   await waitFor(() =>
@@ -137,38 +146,32 @@ it("chooses a provider in its dialog, saves its key into goose, and tests it", a
       within(dialog).getByRole("combobox", { name: "Provider" }),
     ).toHaveTextContent("From goose config (Databricks)"),
   );
-  // A provider goose has set up offers to change its fields, not empty ones.
+  expect(within(dialog).getByRole("textbox", { name: /host/i })).toBeVisible();
+  expect(within(dialog).queryByRole("button", { name: "Change" })).toBeNull();
   expect(
-    within(dialog).getByText("Databricks is set up in goose."),
-  ).toBeVisible();
+    within(dialog).queryByRole("button", { name: "Test connection" }),
+  ).toBeNull();
 
   await choose("Provider", "Anthropic");
-  const key = await within(dialog).findByLabelText("API key");
+  expect(within(dialog).queryByRole("button", { name: "Model" })).toBeNull();
+  const key = await within(dialog).findByLabelText("API key", {
+    selector: "input:not([aria-hidden])",
+  });
   expect(key).toHaveAttribute("type", "password");
   await user.type(key, "sk-test");
   await user.click(
     within(dialog).getByRole("button", { name: "Save to goose" }),
   );
   await waitFor(() =>
-    expect(
-      within(dialog).getByText("Anthropic is set up in goose."),
-    ).toBeVisible(),
+    expect(key).toHaveAttribute(
+      "placeholder",
+      "Saved in goose. Enter a new value to replace it.",
+    ),
   );
+  expect(key).toBeVisible();
   expect(saved.get("anthropic")).toEqual(new Set(["ANTHROPIC_API_KEY"]));
 
   await choose("Model", "claude-opus-5-5");
-  await user.click(
-    within(dialog).getByRole("button", { name: "Test connection" }),
-  );
-  expect(await within(dialog).findByRole("status")).toHaveTextContent(
-    "Connected",
-  );
-  expect(fake.geese.at(-1)?.opened[0]?._meta).toMatchObject({
-    provider: "anthropic",
-  });
-  expect(fake.geese.at(-1)?.configured).toEqual([
-    "session-1 model=claude-opus-5-5",
-  ]);
   // Nothing reaches the agent until the choice is used.
   expect(changes).toEqual([]);
   await user.click(within(dialog).getByRole("button", { name: "Use" }));
@@ -210,10 +213,18 @@ it("saves a key on Enter in Settings, and only an absolute or ~/ workspace", asy
   );
   const user = userEvent.setup();
   await choose("Provider", "Anthropic");
-  await user.type(await screen.findByLabelText("API key"), "sk-test{Enter}");
-  expect(
-    await screen.findByText("Anthropic is set up in goose."),
-  ).toBeVisible();
+  await user.type(
+    await screen.findByLabelText("API key", {
+      selector: "input:not([aria-hidden])",
+    }),
+    "sk-test{Enter}",
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText("API key")).toHaveAttribute(
+      "placeholder",
+      "Saved in goose. Enter a new value to replace it.",
+    ),
+  );
   expect(saved.get("anthropic")).toEqual(new Set(["ANTHROPIC_API_KEY"]));
   expect(save).not.toHaveBeenCalled();
 
@@ -261,7 +272,9 @@ it("keeps the providers shown when reading them again fails", async () => {
     />,
   );
   await choose("Provider", "Anthropic");
-  const key = await screen.findByLabelText("API key");
+  const key = await screen.findByLabelText("API key", {
+    selector: "input:not([aria-hidden])",
+  });
   // Saving reads the providers again, which fails.
   vi.spyOn(setup, "providers").mockRejectedValue(new Error("goose went away"));
   await userEvent.setup().type(key, "sk-test{Enter}");
@@ -276,7 +289,7 @@ it("keeps the providers shown when reading them again fails", async () => {
 
 it("shows no other provider's models when a provider's models fail to load", async () => {
   const fake = fakeSpawn({
-    providers: PROVIDERS,
+    providers: PROVIDERS.map((entry) => ({ ...entry, configured: true })),
     defaults: { providerId: "databricks", modelId: "goose-claude" },
     saved: new Map(),
   });
@@ -302,18 +315,22 @@ it("shows no other provider's models when a provider's models fail to load", asy
     />,
   );
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("combobox", { name: "Model" }));
+  await user.click(await screen.findByRole("button", { name: "Model" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Other" }));
   expect(
-    await screen.findByRole("option", { name: "dbx-only-model" }),
+    await screen.findByRole("menuitemradio", { name: "dbx-only-model" }),
   ).toBeInTheDocument();
-  await user.keyboard("{Escape}");
+  await user.keyboard("{Escape}{Escape}");
   await choose("Provider", "Anthropic");
   expect(
     await screen.findByText("Could not list models: Anthropic is down"),
   ).toBeVisible();
   // The picker keeps its options mounted while closed, so look past hiding.
   expect(
-    screen.queryByRole("option", { name: "dbx-only-model", hidden: true }),
+    screen.queryByRole("menuitemradio", {
+      name: "dbx-only-model",
+      hidden: true,
+    }),
   ).not.toBeInTheDocument();
 });
 
@@ -331,28 +348,14 @@ it("reads a provider's models again after its fields are saved", async () => {
           message.method === "_goose/unstable/providers/supported-models/list",
       ).length;
   await waitFor(() => expect(listed()).toBe(1));
-  await user.click(within(dialog).getByRole("button", { name: "Change" }));
-  await user.type(within(dialog).getByLabelText(/host/i), "https://new.test");
+  await user.type(
+    within(dialog).getByRole("textbox", { name: /host/i }),
+    "https://new.test",
+  );
   await user.click(
     within(dialog).getByRole("button", { name: "Save to goose" }),
   );
   await waitFor(() => expect(listed()).toBe(2));
-});
-
-it("shows what the provider said when the test fails", async () => {
-  created({ reply: "Authentication failed: invalid x-api-key" });
-  const dialog = await openChoices();
-  await waitFor(() =>
-    expect(
-      within(dialog).getByRole("combobox", { name: "Provider" }),
-    ).toBeEnabled(),
-  );
-  await userEvent
-    .setup()
-    .click(within(dialog).getByRole("button", { name: "Test connection" }));
-  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-    "Authentication failed: invalid x-api-key",
-  );
 });
 
 it("says when the bundled goose-acp is missing, and tries again", async () => {
@@ -464,4 +467,139 @@ it("lists the agent's goose sessions and shows one's transcript", async () => {
   );
   expect(await screen.findByText("Hi from goose")).toBeInTheDocument();
   expect(screen.getAllByText(/@Gander what's up\?/).length).toBeGreaterThan(0);
+});
+
+it("edits Goose device defaults without creating an agent override", async () => {
+  const fake = fakeSpawn({
+    providers: PROVIDERS.map((entry) => ({ ...entry, configured: true })),
+    defaults: { providerId: "databricks", modelId: "goose-model" },
+  });
+  const setup = new GooseSetup(fake.spawn);
+  const { ProviderDialogBody } = createTabs({ setup, ...unused });
+  const onClose = vi.fn();
+  render(<ProviderDialogBody onClose={onClose} />);
+  const save = await screen.findByRole("button", { name: "Save defaults" });
+  await waitFor(() => expect(save).toBeEnabled());
+  await choose("Provider", "Anthropic");
+  expect(screen.queryByLabelText("Default model")).not.toBeInTheDocument();
+  await userEvent.setup().click(save);
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect((await setup.providers()).defaults).toEqual({
+    provider: "anthropic",
+  });
+});
+
+it("keeps Goose defaults open with the draft after a failed save", async () => {
+  const fake = fakeSpawn({
+    providers: PROVIDERS,
+    defaults: { providerId: "databricks", modelId: "goose-model" },
+  });
+  const setup = new GooseSetup(fake.spawn);
+  vi.spyOn(setup, "saveDefaults").mockRejectedValue(
+    new Error("Goose config is read-only"),
+  );
+  const { ProviderDialogBody } = createTabs({ setup, ...unused });
+  const onClose = vi.fn();
+  render(<ProviderDialogBody onClose={onClose} />);
+  const save = await screen.findByRole("button", { name: "Save defaults" });
+  await waitFor(() => expect(save).toBeEnabled());
+  await userEvent.setup().click(save);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Goose config is read-only",
+  );
+  expect(onClose).not.toHaveBeenCalled();
+  expect(save).toBeEnabled();
+  expect(screen.getByRole("combobox", { name: "Provider" })).toHaveTextContent(
+    "Databricks",
+  );
+});
+
+it("shows and changes the device default from the compact control without stripping its ID", async () => {
+  const fake = fakeSpawn({
+    providers: PROVIDERS.map((provider) =>
+      provider.providerId === "databricks"
+        ? { ...provider, providerId: "databricks_v2" }
+        : provider,
+    ),
+    defaults: { providerId: "databricks_v2", modelId: "goose-gpt-6" },
+    supported: ["goose-gpt-6", "databricks-kimi-k2"],
+  });
+  const setup = new GooseSetup(fake.spawn);
+  const { DefaultControl } = createTabs({ setup, ...unused });
+  const configure = vi.fn();
+  render(<DefaultControl onConfigure={configure} />);
+  const user = userEvent.setup();
+  const trigger = await screen.findByRole("button", {
+    name: "Goose default model",
+  });
+  await waitFor(() => expect(trigger).toBeEnabled());
+  expect(trigger).toHaveTextContent("gpt-6");
+  expect(trigger).not.toHaveTextContent("databricks-");
+  await user.click(trigger);
+  (await screen.findByRole("menuitem", { name: "Kimi" })).focus();
+  await user.keyboard("{ArrowRight}");
+  await user.click(
+    await screen.findByRole("menuitemradio", { name: "kimi-k2" }),
+  );
+  await waitFor(() => expect(trigger).toHaveTextContent("kimi-k2"));
+  expect((await setup.providers()).defaults.model).toBe("databricks-kimi-k2");
+  await user.click(trigger);
+  await user.click(
+    await screen.findByRole("menuitem", { name: "Edit configuration" }),
+  );
+  expect(configure).toHaveBeenCalledOnce();
+});
+
+it("saves provider fields with defaults and retains them when saving fails", async () => {
+  const fake = fakeSpawn({
+    providers: PROVIDERS,
+    defaults: { providerId: "databricks", modelId: "goose-model" },
+  });
+  const setup = new GooseSetup(fake.spawn);
+  const saveKeys = vi
+    .spyOn(setup, "save")
+    .mockRejectedValueOnce(new Error("Could not save key"));
+  const { ProviderDialogBody } = createTabs({ setup, ...unused });
+  const onClose = vi.fn();
+  render(<ProviderDialogBody onClose={onClose} />);
+  const user = userEvent.setup();
+  const host = await screen.findByRole("textbox", { name: "Host" });
+  await user.type(host, "https://workspace.example");
+  expect(screen.queryByRole("button", { name: "Save to goose" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Save defaults" }));
+  await screen.findByText("Could not save key");
+  expect(host).toHaveValue("https://workspace.example");
+  expect(onClose).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Save defaults" }));
+  await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  expect(saveKeys).toHaveBeenLastCalledWith("databricks", {
+    DATABRICKS_HOST: "https://workspace.example",
+  });
+});
+
+it("filters provider names with Search and selects a matching provider", async () => {
+  const fake = fakeSpawn({ providers: PROVIDERS });
+  const setup = new GooseSetup(fake.spawn);
+  const { ProviderDialogBody } = createTabs({ setup, ...unused });
+  render(<ProviderDialogBody onClose={vi.fn()} />);
+  const trigger = await screen.findByRole("combobox", { name: "Provider" });
+  await waitFor(() => expect(trigger).toBeEnabled());
+  const user = userEvent.setup();
+  await user.click(trigger);
+  const input = await screen.findByRole("combobox", { name: "Search" });
+  await waitFor(() => expect(input).toHaveFocus());
+  expect(input).toHaveValue("");
+  await user.type(input, "anth");
+  expect(
+    await screen.findByRole("option", { name: "Anthropic" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("option", { name: "Databricks" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("option", { name: "Choose a provider" }),
+  ).not.toBeInTheDocument();
+  await user.click(screen.getByRole("option", { name: "Anthropic" }));
+  expect(trigger).toHaveTextContent("Anthropic");
+  expect(await screen.findByLabelText("API key")).toBeVisible();
 });
