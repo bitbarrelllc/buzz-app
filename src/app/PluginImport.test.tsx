@@ -365,6 +365,7 @@ it.each([
 );
 
 it("signs in only to repositories the community authorizes", async () => {
+  const user = userEvent.setup();
   const preview: ImportPreview = {
     token: "preview",
     source: "repo",
@@ -396,16 +397,225 @@ it("signs in only to repositories the community authorizes", async () => {
       authorizeGit={authorizeGit}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  await user.click(screen.getByRole("button", { name: "Add" }));
   const field = screen.getByLabelText("Git or GitHub repository");
   const find = screen.getByRole("button", { name: "Find plugins" });
   fireEvent.change(field, { target: { value: ` ${buzz} ` } });
-  fireEvent.click(find);
+  find.focus();
+  await user.click(find);
+  await screen.findByRole("region", { name: "Plugin import preview" });
+  expect(screen.queryByRole("form", { name: "Add from Git" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Browse plugin folder" }),
+  ).toBeNull();
+  const back = screen.getByRole("button", { name: "Back" });
+  await waitFor(() => expect(back).toHaveFocus());
+  await user.click(back);
+  await waitFor(() => expect(find).toHaveFocus());
+  expect(field).toHaveValue(` ${buzz} `);
+  expect(manager.imports?.discard).toHaveBeenCalledWith("preview");
   await waitFor(() => expect(git).toHaveBeenCalledTimes(1));
   expect(git).toHaveBeenLastCalledWith(buzz, "", "dG9rZW4=");
   fireEvent.change(field, { target: { value: "block/plugins" } });
   await waitFor(() => expect(find).toBeEnabled());
-  fireEvent.click(find);
+  await user.click(find);
   await waitFor(() => expect(git).toHaveBeenCalledTimes(2));
   expect(git).toHaveBeenLastCalledWith("block/plugins", "");
+});
+
+it("replaces Add with an error view and returns to the retained preview for retry", async () => {
+  const preview: ImportPreview = {
+    token: "retry-preview",
+    source: "test",
+    commit: null,
+    warnings: [],
+    candidates: [
+      {
+        path: ".",
+        manifest: { id: "example.retry", name: "Retry plugin", apiVersion: 1 },
+        revision: "one",
+        publisher: null,
+      },
+    ],
+  };
+  let error: string | null = "Publisher mismatch";
+  let finish!: (success: boolean) => void;
+  const installImport = vi
+    .fn()
+    .mockResolvedValueOnce(false)
+    .mockResolvedValueOnce(true)
+    .mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const manager = {
+    imports: {
+      folder: vi.fn(async () => preview),
+      discard: vi.fn(async () => {}),
+    },
+    snapshot: () => ({ error }),
+    installImport,
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Browse plugin folder" }));
+  const dialog = screen.getByRole("dialog", { name: "Add a plugin" });
+  const install = await within(dialog).findByRole("button", {
+    name: "Install plugin",
+  });
+  install.focus();
+  fireEvent.click(install);
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Publisher mismatch",
+  );
+  expect(
+    within(dialog).queryByRole("region", { name: "Plugin import preview" }),
+  ).toBeNull();
+  expect(
+    within(dialog).queryByRole("button", { name: "Browse plugin folder" }),
+  ).toBeNull();
+  const back = within(dialog).getByRole("button", { name: "Back" });
+  expect(back).toHaveFocus();
+  fireEvent.click(back);
+  const retry = within(dialog).getByRole("button", { name: "Install plugin" });
+  expect(retry).toHaveFocus();
+  expect(
+    within(dialog).getByRole("region", { name: "Plugin import preview" }),
+  ).toBeVisible();
+  error = null;
+  fireEvent.click(retry);
+  expect(await within(dialog).findByRole("status")).toHaveTextContent(
+    "Retry plugin installed",
+  );
+  expect(within(dialog).queryByRole("alert")).toBeNull();
+  fireEvent.click(retry);
+  expect(within(dialog).queryByRole("status")).toBeNull();
+  error = "Persistence failed";
+  finish(false);
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Persistence failed",
+  );
+  expect(installImport.mock.calls).toEqual(
+    Array(3).fill(["retry-preview", "."]),
+  );
+});
+
+it("shows a rejected dropped candidate's warning beside a usable sibling preview", async () => {
+  const entryFile = (name: string, size: number) => ({
+    name,
+    isFile: true,
+    isDirectory: false,
+    file: (resolve: (file: unknown) => void) =>
+      resolve({
+        size,
+        arrayBuffer: async () => new TextEncoder().encode("{}").buffer,
+      }),
+  });
+  const directory = (name: string, children: unknown[]) => ({
+    name,
+    isDirectory: true,
+    isFile: false,
+    createReader: () => {
+      let read = false;
+      return {
+        readEntries: (resolve: (entries: unknown[]) => void) => {
+          resolve(read ? [] : children);
+          read = true;
+        },
+      };
+    },
+  });
+  const files = vi.fn(async () => ({
+    token: "partial",
+    source: "Dropped folder",
+    commit: null,
+    candidates: [
+      {
+        path: "good",
+        revision: "one",
+        manifest: { id: "example.good", name: "Good plugin", apiVersion: 1 },
+      },
+    ],
+    warnings: [],
+  }));
+  const manager = {
+    imports: { files, discard: vi.fn(async () => {}) },
+  } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  const root = directory("plugins", [
+    directory("bad", [
+      entryFile("manifest.json", 2),
+      entryFile("README.md", 300 * 1024),
+    ]),
+    directory("good", [
+      entryFile("manifest.json", 2),
+      entryFile("plugin.js", 2),
+    ]),
+  ]);
+  fireEvent.drop(screen.getByRole("region", { name: "Add from folder" }), {
+    dataTransfer: { items: [{ webkitGetAsEntry: () => root }] },
+  });
+  const warning = await screen.findByText(/bad:.*limit/);
+  fireEvent.click(
+    warning.closest("details")?.querySelector("summary") as HTMLElement,
+  );
+  expect(warning).toBeVisible();
+  expect(screen.getByRole("button", { name: "Install plugin" })).toBeEnabled();
+  expect(files).toHaveBeenCalledWith("plugins", [
+    { path: "good/manifest.json", text: "{}" },
+    { path: "good/plugin.js", text: "{}" },
+  ]);
+});
+
+it("Back restores source fields and focus after acquisition fails", async () => {
+  const user = userEvent.setup();
+  const git = vi.fn(async () => {
+    throw new Error("Repository unavailable");
+  });
+  const manager = { imports: { git } } as unknown as PluginManager;
+  render(
+    <PluginImport
+      plugins={manager}
+      catalog={{ profile: "test", location: "test", plugins: [] }}
+      busy={false}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Add" }));
+  await user.type(
+    screen.getByLabelText("Git or GitHub repository"),
+    "https://github.com/example/plugin",
+  );
+  await user.type(screen.getByLabelText("Branch or tag (optional)"), "stable");
+  const find = screen.getByRole("button", { name: "Find plugins" });
+  await user.click(find);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Repository unavailable",
+  );
+  expect(screen.queryByRole("form", { name: "Add from Git" })).toBeNull();
+  const back = screen.getByRole("button", { name: "Back" });
+  expect(back).toHaveFocus();
+  await user.click(back);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByLabelText("Git or GitHub repository")).toHaveValue(
+    "https://github.com/example/plugin",
+  );
+  expect(screen.getByLabelText("Branch or tag (optional)")).toHaveValue(
+    "stable",
+  );
+  expect(find).toHaveFocus();
 });

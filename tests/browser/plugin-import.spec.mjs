@@ -100,6 +100,8 @@ async function nativeImports(page, samples = []) {
         }
         if (command === "plugin_import_discard") return;
         if (command === "plugin_import_install") {
+          if (window.importInstallError)
+            throw new Error(window.importInstallError);
           const candidate = preview.candidates.find(
             (p) => p.path === args.path,
           );
@@ -438,7 +440,7 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
     page.getByText(/It stays on and may run immediately/),
   ).toBeVisible();
   await expect(button(page, "Update plugin")).toBeVisible();
-  await button(page, "Close preview").click();
+  await button(page, "Back").click();
   await page.getByLabel("Git or GitHub repository").fill("example/plugins");
   await page.getByLabel("Branch or tag (optional)").fill("feature/plugins");
   await button(page, "Find plugins").click();
@@ -449,13 +451,24 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
         window.importCalls.find((c) => c.command === "plugin_import_git").args,
     ),
   ).toEqual({ repository: "example/plugins", reference: "feature/plugins" });
-  await button(page, "Close preview").click();
+  await button(page, "Back").click();
+  await expect(button(page, "Find plugins")).toBeFocused();
+  await expect(page.getByLabel("Git or GitHub repository")).toHaveValue(
+    "example/plugins",
+  );
+  await expect(page.getByLabel("Branch or tag (optional)")).toHaveValue(
+    "feature/plugins",
+  );
   await page.getByLabel("Git or GitHub repository").fill("bad");
   await button(page, "Find plugins").click();
   await expect(
     page.getByRole("alert").filter({ hasText: "Repository unavailable" }),
   ).toBeVisible();
+  await expect(button(page, "Find plugins")).toHaveCount(0);
+  await button(page, "Back").click();
   await expect(button(page, "Find plugins")).toBeEnabled();
+  await expect(button(page, "Find plugins")).toBeFocused();
+  await expect(page.getByLabel("Git or GitHub repository")).toHaveValue("bad");
 });
 
 test("leaving Settings discards a late preview without installing", async ({
@@ -569,4 +582,95 @@ test("checked-in local examples activate and work independently", async ({
   await expect(
     navigation.getByRole("option", { name: "Notes playground", exact: true }),
   ).toBeVisible();
+});
+
+// Browser-only: real modal focus and manager error propagation across the IPC boundary.
+test("Add keeps a rejected install reachable and retries the same preview", async ({
+  page,
+  app,
+}, info) => {
+  await nativeImports(page, [
+    {
+      path: "dist",
+      revision: "one",
+      manifest: { id: "example.retry", name: "Retry plugin", apiVersion: 1 },
+    },
+  ]);
+  await openPlugins(page, app.origin);
+  await button(page, "Add").click();
+  await button(page, "Browse plugin folder").click();
+  const dialog = page.getByRole("dialog", { name: "Add a plugin" });
+  await expect(
+    dialog.getByRole("region", { name: "Plugin import preview" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("region", { name: "Add from folder" }),
+  ).toBeHidden();
+  await expect(dialog.getByRole("form", { name: "Add from Git" })).toBeHidden();
+  await expect(
+    dialog.getByRole("button", { name: "Back", exact: true }),
+  ).toBeFocused();
+  for (const [width, mode] of [
+    [900, "light"],
+    [480, "dark"],
+  ]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.emulateMedia({ colorScheme: mode });
+    await expect(page.locator("html")).toHaveAttribute("data-color-mode", mode);
+    await dialog.screenshot({
+      path: info.outputPath(`plugin-preview-${mode}.png`),
+    });
+  }
+  await page.evaluate(() => {
+    window.importInstallError =
+      "Publisher mismatch. Choose a package from the installed publisher.";
+  });
+  await dialog
+    .getByRole("button", { name: "Install plugin", exact: true })
+    .click();
+  await expect(dialog.getByRole("alert")).toContainText("Publisher mismatch");
+  await expect(
+    dialog.getByRole("region", { name: "Plugin import preview" }),
+  ).toBeHidden();
+  await expect(
+    dialog.getByRole("region", { name: "Add from folder" }),
+  ).toBeHidden();
+  const back = dialog.getByRole("button", { name: "Back", exact: true });
+  await expect(back).toBeFocused();
+  for (const [width, mode] of [
+    [900, "light"],
+    [480, "dark"],
+  ]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.emulateMedia({ colorScheme: mode });
+    await expect(page.locator("html")).toHaveAttribute("data-color-mode", mode);
+    await expect(back).toBeInViewport({ ratio: 1 });
+    await dialog.screenshot({
+      path: info.outputPath(`plugin-install-error-${mode}.png`),
+    });
+  }
+  await back.press("Enter");
+  await expect(
+    dialog.getByRole("region", { name: "Plugin import preview" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Install plugin", exact: true }),
+  ).toBeFocused();
+  await page.evaluate(() => {
+    window.importInstallError = null;
+  });
+  await dialog
+    .getByRole("button", { name: "Install plugin", exact: true })
+    .press("Enter");
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(dialog.getByRole("status")).toContainText(
+    "Retry plugin installed",
+  );
+  expect(
+    await page.evaluate(() =>
+      window.importCalls
+        .filter((c) => c.command === "plugin_import_install")
+        .map((c) => c.args),
+    ),
+  ).toEqual(Array(2).fill({ token: "preview-one", path: "dist" }));
 });

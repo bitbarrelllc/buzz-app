@@ -302,6 +302,18 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
     within(content).queryAllByRole("img", { name: "Essential" }),
   ).toHaveLength(essentials ? 3 : 0);
   expect(
+    within(content).queryByText("Essential", {
+      selector: "span:not(.sr-only)",
+    }),
+  ).toBeNull();
+  if (essentials) {
+    const name = within(content).getByText("Voice Notes");
+    const marker = within(name.parentElement as HTMLElement).getByRole("img", {
+      name: "Essential",
+    });
+    expect(marker.previousElementSibling?.tagName.toLowerCase()).toBe("svg");
+  }
+  expect(
     within(content).queryAllByRole("region", { name: "Essentials" }),
   ).toHaveLength(0);
   expect(
@@ -321,7 +333,9 @@ it.each([false, true])("groups plugins (Essentials=%s)", async (essentials) => {
   ).toHaveAttribute("data-enabled", "true");
   expect(
     within(content).getByRole("button", { name: "View Voice Notes details" }),
-  ).toHaveAccessibleDescription(essentials ? "Essential" : "");
+  ).toHaveAccessibleDescription(
+    `Record voice notes and play them in conversations.${essentials ? " Essential" : ""}`,
+  );
   expect(
     within(content).getByRole("button", { name: "View Invoices details" }),
   ).toHaveAttribute("data-enabled", "false");
@@ -750,6 +764,7 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
       ...bundled.manifest,
       id,
       name,
+      description: "A Core plugin.",
       discovery: { category, tags: [" Core ", "Essentials"] },
     },
   }));
@@ -794,6 +809,7 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
   const trigger = within(featured).getByRole("button", {
     name: "View Agents details",
   });
+  expect(trigger).toHaveAccessibleDescription("A Core plugin. Essential");
   expect(trigger.querySelector("[data-category]")).toHaveAttribute(
     "data-category",
     "agents",
@@ -1527,4 +1543,131 @@ it("retains departure confirmation until local cleanup settles", async () => {
       "Primary was removed from this device. Your membership wasn’t changed. You can add it again later.",
     ),
   ).toBeVisible();
+});
+
+it("focuses details on open and restores the row after Escape", () => {
+  reviewPluginFixture();
+  const row = screen.getByRole("button", {
+    name: "View Zebra external details",
+  });
+  row.focus();
+  fireEvent.click(row);
+  expect(
+    screen.getByRole("button", { name: "Close plugin details" }),
+  ).toHaveFocus();
+  fireEvent.keyDown(
+    screen.getByRole("complementary", { name: "Zebra external details" }),
+    { key: "Escape" },
+  );
+  expect(
+    screen.queryByRole("complementary", { name: "Zebra external details" }),
+  ).toBeNull();
+  expect(row).toHaveFocus();
+});
+
+it("announces the selected plugin's failure only once", () => {
+  const fixture = reviewPluginFixture();
+  fixture.external.error = "Activation failed";
+  fixture.publish();
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  );
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent("Activation failed");
+  expect(screen.getAllByText("Activation failed")).toHaveLength(2);
+});
+
+it("describes plugin rows with their supporting copy, publisher and curated marker", () => {
+  const fixture = reviewPluginFixture();
+  Object.assign(fixture.external.manifest, {
+    description: "Works with agents",
+  });
+  Object.assign(fixture.external, { publisher: "publisher-key" });
+  const bundled = fixture.snapshot.configuration.catalog.plugins[0];
+  if (!bundled) throw new Error("Missing bundled fixture");
+  bundled.manifest.discovery.tags = ["essentials"];
+  act(() => fixture.publish());
+  expect(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  ).toHaveAccessibleDescription("Works with agents publisher-key");
+  expect(
+    screen.getByRole("button", { name: "View Alphabet bundled details" }),
+  ).toHaveAccessibleDescription("Essential");
+});
+
+it("restores the Plugins region when the closed detail row was filtered out", () => {
+  reviewPluginFixture();
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  );
+  fireEvent.change(screen.getByRole("searchbox", { name: "Search plugins" }), {
+    target: { value: "Alphabet" },
+  });
+  fireEvent.keyDown(
+    screen.getByRole("complementary", { name: "Zebra external details" }),
+    {
+      key: "Escape",
+    },
+  );
+  expect(screen.getByRole("region", { name: "Plugins" })).toHaveFocus();
+});
+
+it("announces a new action failure while inspecting another failed plugin", () => {
+  const fixture = reviewPluginFixture();
+  const bundled = fixture.snapshot.configuration.catalog.plugins[0];
+  if (!bundled) throw new Error("Missing bundled fixture");
+  bundled.error = "Bundled plugin failed";
+  fixture.external.enabled = false;
+  act(fixture.publish);
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Alphabet bundled details" }),
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Alphabet bundled: Bundled plugin failed",
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Enable Zebra external" }),
+  );
+  act(() => {
+    fixture.external.enabled = true;
+    fixture.snapshot.activation[fixture.external.manifest.id] = {
+      revision: "current",
+      error: "New activation failure",
+    };
+    fixture.publish();
+  });
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Zebra external: New activation failure",
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Zebra external details" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "View Alphabet bundled details" }),
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Alphabet bundled: Bundled plugin failed",
+  );
+});
+
+it("restores a selected row remounted by clearing search", async () => {
+  reviewPluginFixture();
+  const user = userEvent.setup();
+  const original = screen.getByRole("button", {
+    name: "View Zebra external details",
+  });
+  fireEvent.click(original);
+  const search = screen.getByRole("searchbox", { name: "Search plugins" });
+  await user.type(search, "Alphabet");
+  expect(
+    screen.queryByRole("button", { name: "View Zebra external details" }),
+  ).toBeNull();
+  await waitFor(() => expect(original).not.toBeInTheDocument());
+  await user.clear(search);
+  const restored = screen.getByRole("button", {
+    name: "View Zebra external details",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close plugin details" }));
+  expect(restored).toHaveFocus();
 });
