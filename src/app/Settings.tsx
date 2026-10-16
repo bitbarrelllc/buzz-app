@@ -112,8 +112,6 @@ function isEssentialPlugin(plugin: PluginInfo) {
 function comparePlugins(a: PluginInfo, b: PluginInfo) {
   return (
     Number(isRequiredPlugin(b)) - Number(isRequiredPlugin(a)) ||
-    Number(b.source === "bundled" && b.manifest.id === "buzz.agents") -
-      Number(a.source === "bundled" && a.manifest.id === "buzz.agents") ||
     Number(isEssentialPlugin(b)) - Number(isEssentialPlugin(a)) ||
     a.manifest.name.localeCompare(b.manifest.name)
   );
@@ -140,7 +138,6 @@ function groupPlugins(plugins: readonly PluginInfo[]) {
       ? [
           {
             id: "core",
-            label: "Start with the best of Buzz",
             plugins: core.sort(comparePlugins),
           },
         ]

@@ -686,7 +686,7 @@ function reviewPluginFixture() {
   return { external, snapshot, publish, manager };
 }
 
-it("pins agent management, then sorts Essentials first and names alphabetically", () => {
+it("sorts Essentials first and names alphabetically", () => {
   const { snapshot, publish, external } = reviewPluginFixture();
   const bundled = snapshot.configuration.catalog.plugins[0];
   if (!bundled) throw new Error("Missing bundled fixture");
@@ -713,7 +713,7 @@ it("pins agent management, then sorts Essentials first and names alphabetically"
       },
       {
         ...essential,
-        manifest: { ...essential.manifest, id: "buzz.agents", name: "Agents" },
+        manifest: { ...essential.manifest, id: "buzz.goose", name: "Goose" },
       },
     ],
   };
@@ -724,8 +724,8 @@ it("pins agent management, then sorts Essentials first and names alphabetically"
       .getAllByRole("button", { name: /^View .* details$/ })
       .map((button) => button.getAttribute("aria-label")),
   ).toEqual([
-    "View Agents details",
     "View Codex details",
+    "View Goose details",
     "View Builderlab details",
     "View Zebra external details",
   ]);
@@ -775,7 +775,6 @@ it("features bundled Core plugins once, preserving filters, colors and controls"
   expect(
     tabs.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
-  expect(screen.queryByText("Start with the best of Buzz")).toBeNull();
   expect(
     within(featured)
       .getAllByRole("button", { name: /^View .* details$/ })
