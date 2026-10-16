@@ -630,7 +630,7 @@ test.describe("signed newest-first Inbox windows", () => {
     const row = inbox
       .getByRole("list", { name: "Inbox conversations" })
       .getByRole("listitem")
-      .filter({ hasText: "Inbox strict reply 0" });
+      .filter({ hasText: "Window room" });
     await row.getByRole("button", { name: /^Open / }).click();
     const detail = inbox.getByRole("region", { name: "Inbox detail" });
     const target = detail.locator(`[data-message-id="${oldest.id}"]`);
@@ -709,10 +709,7 @@ test.describe("DM exact opening outside the head", () => {
     await openPage(page, "Inbox");
     const inbox = page.getByRole("region", { name: "Inbox", exact: true });
     await expect(inbox.getByText("Checking recent activity…")).toHaveCount(0);
-    const row = inbox
-      .getByRole("list", { name: "Inbox conversations" })
-      .getByRole("listitem")
-      .filter({ hasText: "Inbox old DM anchor" });
+    const row = inbox.locator('[data-inbox-row="dm-peer:dm-peer"]');
     await row.getByRole("button", { name: /^Open / }).click();
     const detail = inbox.getByRole("region", { name: "Inbox detail" });
     const target = detail.locator(
@@ -750,7 +747,7 @@ test.describe("DM exact opening outside the head", () => {
         ),
       )
       .toBe(true);
-    // The row now describes the newest read message, but clicking the already
+    // The row describes the newest message, but clicking the already
     // selected conversation must retain this exact reader and captured origin.
     const selectedRow = inbox
       .getByRole("list", { name: "Inbox conversations" })
