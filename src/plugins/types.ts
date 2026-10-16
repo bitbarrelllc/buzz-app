@@ -11,6 +11,9 @@ export type PluginInfo = {
   rollbackBlockedReason?: string | null;
   reloadable: boolean;
   error: string | null;
+  readmeRevision?: string | null;
+  iconPngRevision?: string | null;
+  iconJpgRevision?: string | null;
 };
 export type Catalog = {
   profile: string;
@@ -35,15 +38,19 @@ export type ImportPreview = {
     manifest: PluginManifest;
     revision: string;
     publisher?: string | null;
+    readmeRevision?: string | null;
+    iconPngRevision?: string | null;
+    iconJpgRevision?: string | null;
   }[];
   warnings: string[];
 };
+export type ImportFile = { path: string } & (
+  | { text: string; base64?: never }
+  | { base64: string; text?: never }
+);
 export type PluginImports = {
   folder(): Promise<ImportPreview | null>;
-  files(
-    source: string,
-    files: { path: string; text: string }[],
-  ): Promise<ImportPreview | null>;
+  files(source: string, files: ImportFile[]): Promise<ImportPreview | null>;
   /** `authorization` is a NIP-98 token signed for exactly `repository`. */
   git(
     repository: string,

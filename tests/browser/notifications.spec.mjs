@@ -287,7 +287,32 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
   await page.clock.install({ time: base });
   await page.clock.pauseAt(base + 30_000);
   const row = liveMessage(app, "Visible mention");
-  await observed(page, row.id);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) =>
+          window.fixtureRelay.snapshot().session.unread.attention("beta", id)
+            .status,
+        row.id,
+      ),
+    )
+    .toBe("eligible");
+  // The paused clock must not run presentation's deadline ahead of the new
+  // row's commit/positioning. Let its first frame run, then establish viewing
+  // before allowing notification delivery (100ms) or reading dwell (300ms).
+  await page.clock.runFor(16);
+  await expect(history.locator(`[data-message-id="${row.id}"]`)).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) =>
+          window.fixtureRelay.snapshot().session.unread.attention("beta", id)
+            .viewing,
+        row.id,
+      ),
+    )
+    .toBe(true);
+  await page.clock.runFor(100);
   expect(await systemCount(page)).toBe(0);
   expect(
     await page.evaluate(
@@ -299,7 +324,7 @@ test("a fully visible incoming row stays quiet without publishing read intent", 
   ).toBe(true);
   await page.clock.resume();
   // The paused clock also owned requestAnimationFrame, so the frames that
-  // re-pin the bottom after an append only ran inside observed()'s runFor.
+  // re-pin the bottom after an append ran in the explicit clock steps above.
   // Check the row's full visibility on the running clock, while it is mounted.
   await expect(history.locator(`[data-message-id="${row.id}"]`)).toBeInViewport(
     { ratio: 1 },
