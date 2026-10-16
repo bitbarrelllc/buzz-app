@@ -1,3 +1,4 @@
+import { npubEncode } from "nostr-tools/nip19";
 import { expect, it, vi } from "vitest";
 import type { BuzzClient, BuzzEvent, Filter, Memory, Template } from "./client";
 import { respond } from "./rpc";
@@ -1494,6 +1495,7 @@ it("reads a shared note by name, from whichever author has it", async () => {
 it("asks which author's note when several share a name", async () => {
   const { client } = fake([
     ...community,
+    profile(me, "Bob"),
     note(alice, "recipe", 200),
     note(bob, "recipe", 300),
   ]);
@@ -1516,8 +1518,19 @@ it("asks which author's note when several share a name", async () => {
     callTool(client, {}, "notes_get", { name: "recipe", author: bob }),
   ).resolves.toMatch(/\nrecipe by b$/);
   await expect(
+    callTool(client, {}, "notes_get", {
+      name: "recipe",
+      author: npubEncode(bob),
+    }),
+  ).resolves.toMatch(/\nrecipe by b$/);
+  await expect(
     callTool(client, {}, "notes_get", { name: "recipe", author: "Carol" }),
   ).rejects.toThrow("No one is named Carol.");
+  await expect(
+    callTool(client, {}, "notes_get", { name: "recipe", author: "Bob" }),
+  ).rejects.toThrow(
+    /^2 people are named Bob; give their npub\.\nnpub1\w+\nnpub1\w+$/,
+  );
   await expect(
     callTool(client, {}, "notes_get", {
       name: "recipe",
