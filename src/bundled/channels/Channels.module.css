@@ -437,9 +437,9 @@
 .sectionChevron {
   opacity: 0;
   display: inline-grid;
-  width: var(--space-6);
+  width: var(--space-4);
   height: var(--space-6);
-  flex: 0 0 var(--space-6);
+  flex: 0 0 var(--space-4);
   place-items: center;
   color: var(--text-subtle);
   transition: transform 160ms ease-out;
