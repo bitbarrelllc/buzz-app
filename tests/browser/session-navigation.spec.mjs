@@ -356,9 +356,8 @@ test.describe("Me layout", () => {
       workspace.getByRole("heading", { name: "Alpha", exact: true }),
     ).toBeVisible();
     await expectReachable();
-    await sidebar
-      .getByRole("button", { name: "New chat", exact: true })
-      .click();
+    await page.getByRole("button", { name: "New", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New chat", exact: true }).click();
     await expect(composer).toHaveText("Scaled session draft");
     await page.evaluate(() =>
       document.documentElement.style.setProperty("--buzz-text-scale", "1"),

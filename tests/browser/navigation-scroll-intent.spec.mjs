@@ -1,3 +1,4 @@
+import { selectCommunity } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
 
@@ -21,6 +22,11 @@ for (const cachedStartup of [false, true]) {
       app,
     }) => {
       await open(page, app);
+      // This journey owns channel inventory restoration; Solo hydration has its own layout.
+      await page
+        .getByRole("tablist", { name: "Navigation scope", exact: true })
+        .getByRole("tab", { name: "Team", exact: true })
+        .click();
       const sidebar = page.getByRole("navigation", {
         name: "Subscribed channels",
       });
@@ -29,11 +35,10 @@ for (const cachedStartup of [false, true]) {
         element.scrollTop = 900;
         element.dispatchEvent(new Event("scroll"));
       });
-      await button(page, "Personal space").click();
-      await expect(button(page, "Personal space")).toHaveAttribute(
-        "aria-current",
-        "true",
-      );
+      await selectCommunity(page, "Personal space");
+      await expect(
+        button(page, "Community switcher: Personal space"),
+      ).toBeVisible();
       // Preserve delayed-first-layout coverage on a genuine cold launch too.
       // Without a saved roster/preferences record, the first layout waits for
       // fresh preferences; the cached case intentionally restores immediately.
@@ -69,7 +74,11 @@ for (const cachedStartup of [false, true]) {
       });
       try {
         await page.reload();
-        await button(page, "Switch to Primary").click();
+        await page
+          .getByRole("tablist", { name: "Navigation scope", exact: true })
+          .getByRole("tab", { name: "Team", exact: true })
+          .click();
+        await selectCommunity(page, "Primary");
         await expect
           .poll(() => sidebar.locator("[data-channel-id]").count())
           .toBeGreaterThan(100);

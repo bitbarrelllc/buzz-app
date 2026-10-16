@@ -1,3 +1,4 @@
+import { openCommunityPicker } from "./navigation.mjs";
 import { settleShellToggle } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 
@@ -197,8 +198,11 @@ for (const action of ["Remove from this device", "Leave community"]) {
       ),
     ).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Personal space", exact: true }),
-    ).toHaveAttribute("aria-current", "true");
+      page.getByRole("button", {
+        name: "Community switcher: Personal space",
+        exact: true,
+      }),
+    ).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Profile", exact: true }),
     ).toBeVisible();
@@ -399,6 +403,10 @@ confirmedPresence(
       await tab(true);
       await expect(account).toBeHidden();
       await expect(avatar).toBeFocused();
+      await tab(true);
+      await expect(
+        page.getByRole("button", { name: /^Community switcher:/ }),
+      ).toBeFocused();
       await tab(true);
       await expect(button(page, "Search Buzz")).toBeFocused();
     }
@@ -1025,7 +1033,9 @@ test("discarding community setup leaves the published profile unchanged", async 
     }),
   );
   await page.goto(app.origin);
-  await button(page, "Add a community").click();
+  await (await openCommunityPicker(page))
+    .getByRole("button", { name: "Join a community", exact: true })
+    .click();
   await page
     .getByRole("textbox", { name: "Relay URL", exact: true })
     .fill("wss://primary.example");

@@ -1,3 +1,4 @@
+import { selectCommunity } from "./navigation.mjs";
 import { settleShellToggle, openPage } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test, expect } from "./fixture.mjs";
@@ -70,13 +71,9 @@ test("compact sidenav keeps its geometry across persistent page navigation", asy
     exact: true,
   });
   const pages = panel.getByRole("navigation", { name: "Pages" });
-  const destinations = [
-    "Inbox",
-    "Bestie",
-    "Projects",
-    "Agents",
-    "Workflows",
-  ].map((name) => pages.getByRole("button", { name, exact: true }));
+  const destinations = ["Inbox", "Bestie"].map((name) =>
+    pages.getByRole("button", { name, exact: true }),
+  );
   const assertDestinationFillParity = async () => {
     const geometry = await Promise.all(
       destinations.map((destination) =>
@@ -89,19 +86,13 @@ test("compact sidenav keeps its geometry across persistent page navigation", asy
           return {
             left: rowRect.left - panelRect.left,
             right: panelRect.right - rowRect.right,
-            gutter: (() => {
-              const scroll = element.closest(
-                '[aria-label="Subscribed channels"]',
-              );
-              return scroll.offsetWidth - scroll.clientWidth;
-            })(),
           };
         }),
       ),
     );
     for (const row of geometry) {
       expect(row.left).toBe(13);
-      expect(row.right).toBe(row.left + row.gutter);
+      expect(row.right).toBe(row.left);
     }
   };
   await assertDestinationFillParity();
@@ -199,10 +190,7 @@ test("compact sidenav keeps its geometry across persistent page navigation", asy
   await expect(menu).toHaveCount(0);
   await expect(alpha).toBeFocused();
   const node = await sidebar.elementHandle();
-  await page
-    .getByRole("button", { name: "Agents", exact: true })
-    .first()
-    .click();
+  await page.getByRole("tab", { name: "Agents", exact: true }).first().click();
   await expect(
     page.getByRole("region", { name: "Agents", exact: true }),
   ).toBeVisible();
@@ -221,9 +209,7 @@ test("compact sidenav keeps its geometry across persistent page navigation", asy
     );
     await sidebar.screenshot({ path: info.outputPath(`sidenav-${mode}.png`) });
   }
-  await page
-    .getByRole("button", { name: "Personal space", exact: true })
-    .click();
+  await selectCommunity(page, "Personal space");
   // Plugin pages do not need a community, so personal space keeps them enabled.
   for (const destination of destinations)
     await expect(destination).toBeEnabled();
@@ -281,10 +267,12 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
   await open(page, app);
   const header = page.locator(".shell-header");
   await expect(header).toBeVisible();
-  expect((await header.boundingBox()).height).toBe(48);
+  expect((await header.boundingBox()).height).toBe(56);
   // The overflow trigger stays mounted but is hidden while header pages fit.
   const controls = header.locator(".buzz-button[data-icon-variant]:visible");
-  const icons = controls.locator("svg");
+  const icons = header.locator(
+    '.buzz-button[data-icon-variant]:visible:not([aria-label="New"]):not([aria-label="Search Buzz"]) svg',
+  );
   await expect(
     header.getByRole("button", { name: "Bestie", exact: true }),
   ).toHaveCount(0);
@@ -316,7 +304,7 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
     });
     for (const control of await rail.getByRole("button").all()) {
       const box = await control.boundingBox();
-      expect([box.width, box.height]).toEqual([40, 40]);
+      expect([box.width, box.height]).toEqual([32, 32]);
     }
     await header
       .getByRole("button", { name: "Your profile", exact: true })
@@ -348,7 +336,7 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
       await expect(control).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     for (const [group, gap] of [
       [".shell-communities", 0],
-      [".shell-actions", 8],
+      [".shell-community-switcher", 0],
     ]) {
       const boxes = await header
         .locator(`${group} .buzz-button[data-icon-variant]:visible`)
@@ -365,7 +353,12 @@ test("top bar uses consistent square controls and translucent ghost fills", asyn
       header.getByRole("button", { name: "Your profile" }),
     ).toHaveAttribute("data-icon-shape", "round");
     for (const control of await ghosts.all()) {
-      await expect(control).toHaveCSS("border-radius", "10px");
+      await expect(control).toHaveCSS(
+        "border-radius",
+        (await control.getAttribute("data-icon-shape")) === "round"
+          ? "50%"
+          : "10px",
+      );
       if (await control.isDisabled()) continue;
       for (const [mode, fill] of [
         ["light", "rgba(0, 0, 0, 0.06)"],
@@ -698,7 +691,7 @@ test("shell toggle restores the shared sidebar for Channels and Agents", async (
     )
     .toBe(expandedWidth);
 
-  await sidebar.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.getByRole("tab", { name: "Agents", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Agents", exact: true }),
   ).toBeVisible();
@@ -718,14 +711,14 @@ test("shell toggle restores the shared sidebar for Channels and Agents", async (
   expect(accessibilityHiddenWidth).toBe(expandedWidth + gutterWidth + panelGap);
   await shellNavigation.evaluate((node) => node.removeAttribute("aria-hidden"));
 
-  await page.getByRole("button", { name: "Hide Channel sidebar" }).click();
+  await page.getByRole("button", { name: "Hide sidebar" }).click();
   await expect(sidebar).not.toBeVisible();
   await expect(rail).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Agents", exact: true }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Show Channel sidebar" }).click();
+  await page.getByRole("button", { name: "Show sidebar" }).click();
   await expect(sidebar).toBeVisible();
   expect(await sidebarNode.evaluate((element) => element.isConnected)).toBe(
     true,
@@ -739,8 +732,8 @@ test("shell toggle restores the shared sidebar for Channels and Agents", async (
     )
     .toBe(expandedWidth);
   await expect(
-    sidebar.getByRole("button", { name: "Agents", exact: true }),
-  ).toHaveAttribute("aria-current", "page");
+    page.getByRole("tab", { name: "Agents", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
 });
 
 // A real grid/overlay measurement is needed: DOM presence misses implicit columns.
@@ -889,7 +882,7 @@ fillSidebar(
     const list = page.getByRole("navigation", { name: "Subscribed channels" });
     const rows = {
       destination: sidebar.getByRole("button", {
-        name: "Projects",
+        name: "Inbox",
         exact: true,
       }),
       channel: sidebar.getByRole("button", { name: "Beta", exact: true }),
@@ -941,10 +934,12 @@ fillSidebar(
         expect(
           listBounds.right - bounds.destination.right,
         ).toBeGreaterThanOrEqual(4);
-        for (const bound of Object.values(bounds)) {
-          expect(bound.left).toBeCloseTo(bounds.destination.left, 0);
-          expect(bound.right).toBeCloseTo(bounds.destination.right, 0);
-        }
+        expect(bounds.channel.left).toBeCloseTo(bounds.destination.left, 0);
+        expect(bounds.dm.left).toBeCloseTo(bounds.channel.left, 0);
+        expect(bounds.dm.right).toBeCloseTo(bounds.channel.right, 0);
+        expect(bounds.destination.right).toBeGreaterThanOrEqual(
+          bounds.channel.right,
+        );
       }).toPass({ timeout: 10_000 });
     }
 
@@ -984,7 +979,7 @@ test("non-ready sidebar keeps page rows and Retry reachable by pointer scrolling
   await expect(retry).toBeAttached();
   const scroller = sidebar.locator('[class*="_channelList_"]');
   const scrollToBottom = async (target) => {
-    await sidebar.hover();
+    await scroller.hover();
     // Visibility is not input completion: focusing early interrupts WebKit's
     // smooth wheel at a visible-but-not-fully-scrolled Retry button. The shared
     // helper observes scrollend before dispatch; an already-reached edge needs
@@ -1028,6 +1023,7 @@ test("non-ready sidebar keeps page rows and Retry reachable by pointer scrolling
           let scroll = element.parentElement;
           while (scroll && getComputedStyle(scroll).overflowY !== "auto")
             scroll = scroll.parentElement;
+          scroll ??= element.closest('[aria-label="Channel sidebar"]');
           if (!scroll || style.outlineStyle === "none" || extent <= 0)
             return false;
           const row = element.getBoundingClientRect();
@@ -1072,25 +1068,23 @@ test("non-ready sidebar keeps page rows and Retry reachable by pointer scrolling
   await expect(
     page.getByRole("navigation", { name: "Subscribed channels" }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Personal space", exact: true })
-    .click();
+  await selectCommunity(page, "Personal space");
   const status = sidebar.getByText("Choose a community to see channels.", {
     exact: true,
   });
   await expect(status).toBeAttached();
   await scrollToBottom(status);
   await expectUnclippedFocus(
-    sidebar.getByRole("button", { name: "Workflows", exact: true }),
+    sidebar.getByRole("button", { name: "Inbox", exact: true }),
   );
-  await sidebar.getByRole("button", { name: "Workflows", exact: true }).click();
+  await sidebar.getByRole("button", { name: "Inbox", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Workflows", exact: true }),
+    page.getByRole("heading", { name: "Inbox", exact: true }),
   ).toBeVisible();
 });
 
 // Pixel positions across two sidebar states need a real layout engine.
-test("Personal space keeps the brand and page rows where a community places them", async ({
+test("Personal space preserves scope control and global-row geometry", async ({
   page,
   app,
 }) => {
@@ -1100,24 +1094,18 @@ test("Personal space keeps the brand and page rows where a community places them
     name: "Channel sidebar",
     exact: true,
   });
-  // Measure from the scrollport: the fixture's unresolved Me placement adds a
-  // community-only notice above it, which a live relay settles.
   const geometry = () =>
     sidebar.evaluate((frame) => {
-      const brand = frame.querySelector('[role="img"][aria-label="Buzz"]');
-      let scroll = brand.parentElement;
-      while (getComputedStyle(scroll).overflowY !== "auto")
-        scroll = scroll.parentElement;
-      const top = scroll.getBoundingClientRect().top;
-      const left = frame.getBoundingClientRect().left;
-      const pages = brand.parentElement.nextElementSibling.querySelectorAll(
-        '[data-variant="row"]',
-      );
-      return [brand, ...pages].map((element) => {
+      const bounds = frame.getBoundingClientRect();
+      const scope = frame.querySelector('[aria-label="Navigation scope"]');
+      const rows = frame
+        .querySelector('[aria-label="Pages"]')
+        .querySelectorAll('[data-variant="row"]');
+      return [scope, ...rows].map((element) => {
         const box = element.getBoundingClientRect();
         return {
-          left: box.left - left,
-          top: box.top - top,
+          left: box.left - bounds.left,
+          top: box.top - bounds.top,
           width: box.width,
         };
       });
@@ -1126,9 +1114,7 @@ test("Personal space keeps the brand and page rows where a community places them
     page.getByRole("navigation", { name: "Subscribed channels" }),
   ).toBeVisible();
   const community = await geometry();
-  await page
-    .getByRole("button", { name: "Personal space", exact: true })
-    .click();
+  await selectCommunity(page, "Personal space");
   await expect(
     sidebar.getByText("Choose a community to see channels.", { exact: true }),
   ).toBeVisible();

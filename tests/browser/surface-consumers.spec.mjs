@@ -147,8 +147,9 @@ for (const mode of ["light", "dark"]) {
       await session.hover();
       await expect(row).toHaveCSS("background-color", selected);
       await expect(session).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-      await sidebar
-        .getByRole("button", { name: "New chat", exact: true })
+      await page.getByRole("button", { name: "New", exact: true }).click();
+      await page
+        .getByRole("menuitem", { name: "New chat", exact: true })
         .click();
       await expect(session).not.toHaveAttribute("aria-current", "page");
       await session.hover();

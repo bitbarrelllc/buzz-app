@@ -1,3 +1,4 @@
+import { selectCommunity, openCommunityPicker } from "./navigation.mjs";
 import { checkDurationConsumer } from "./duration-layout.mjs";
 import { openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
@@ -142,7 +143,7 @@ test("channel sidebar resizes from the full gutter and persists", async ({
     .toBeGreaterThan(keyboardWidth + 100);
   const resized = await sidebar.boundingBox();
   await openPage(page, "Projects");
-  await openPage(page, "Multiplayer");
+  await openPage(page, "Messages");
   await expect
     .poll(async () => (await sidebar.boundingBox())?.width)
     .toBeCloseTo(resized.width, 0);
@@ -207,7 +208,7 @@ sessionSidebar(
   "legacy child sessions do not add disclosure rows to channels",
   async ({ page, app }) => {
     await page.goto(app.origin);
-    await openPage(page, "Multiplayer");
+    await openPage(page, "Messages");
     const parent = page.locator(`[data-channel-id="${sessionParent}"]`);
     await expect(parent).toBeVisible();
     await expect(page.locator('[data-channel-id="alpha"]')).toBeVisible();
@@ -225,7 +226,7 @@ sessionSidebar(
   "Channels opens the shared creation dialog without nested session rows",
   async ({ page, app }, testInfo) => {
     await page.goto(app.origin);
-    await openPage(page, "Multiplayer");
+    await openPage(page, "Messages");
     await expect(page.locator('[data-channel-id="alpha"]')).toBeVisible();
 
     await openPage(page, "Projects");
@@ -330,7 +331,7 @@ sessionSidebar(
     await expect(
       page.getByRole("heading", { name: "Projects", exact: true }),
     ).toBeVisible();
-    await openPage(page, "Multiplayer");
+    await openPage(page, "Messages");
     const conversation = page.getByRole("article", { name: "Conversation" });
     await conversation.click({ position: { x: 20, y: 20 } });
     await expect(create).not.toBeFocused();
@@ -363,7 +364,7 @@ test("disabling Sessions keeps independent lifecycle actions available", async (
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "false");
 
-  await openPage(page, "Multiplayer");
+  await openPage(page, "Messages");
   // Lifecycle is independent of Sessions and retains its unavailable-host explanation.
   for (const keyboard of [false, true]) {
     if (keyboard) {
@@ -434,8 +435,8 @@ test("navigation reveals the current sidebar entry without moving a visible one"
     });
   const alpha = sidebar.locator('[data-channel-id="alpha"]');
   const projects = page
-    .getByRole("navigation", { name: "Pages" })
-    .getByRole("button", { name: "Projects", exact: true });
+    .getByRole("navigation", { name: "Topbar pages" })
+    .getByRole("tab", { name: "Projects", exact: true });
   const group = sidebar
     .locator("details")
     .filter({ has: page.locator("summary", { hasText: /^Channels$/ }) });
@@ -444,7 +445,7 @@ test("navigation reveals the current sidebar entry without moving a visible one"
   await expect(alpha).not.toBeInViewport();
   // Search navigation reveals a page entry.
   await openPage(page, "Projects");
-  await expect(projects).toHaveAttribute("aria-current", "page");
+  await expect(projects).toHaveAttribute("aria-selected", "true");
   await expect(projects).toBeInViewport({ ratio: 1 });
   // History navigation reveals a channel row.
   await toBottom();
@@ -550,9 +551,13 @@ for (const destination of [
         return element.scrollTop;
       });
     const pageEntry = (name) =>
-      page
-        .getByRole("navigation", { name: "Pages" })
-        .getByRole("button", { name, exact: true });
+      ["Inbox", "Bestie"].includes(name)
+        ? page
+            .getByRole("navigation", { name: "Pages" })
+            .getByRole("button", { name, exact: true })
+        : page
+            .getByRole("navigation", { name: "Topbar pages" })
+            .getByRole("tab", { name, exact: true });
     const leave = async () => {
       if (destination === "Settings") {
         await button(page, "Your profile").click();
@@ -595,7 +600,7 @@ for (const destination of [
           .getByRole("complementary", { name: "Settings sidebar" })
           .getByRole("button", { name: "Back", exact: true })
           .click();
-      else await openPage(page, "Multiplayer");
+      else await openPage(page, "Messages");
     };
     await group.locator("summary").click();
     await expect(group).not.toHaveAttribute("open");
@@ -627,7 +632,7 @@ for (const destination of [
   });
 }
 
-test("community rail stays visible across pages and switches without a picker", async ({
+test("community picker stays available across pages and restores focus after joining", async ({
   page,
   app,
 }) => {
@@ -637,26 +642,30 @@ test("community rail stays visible across pages and switches without a picker", 
     exact: true,
   });
   await expect(
-    rail.getByRole("button", { name: "Switch to Primary" }),
-  ).toHaveAttribute("aria-current", "true");
-  await rail.getByRole("button", { name: "Switch to Secondary" }).click();
-  await expect(
-    rail.getByRole("button", { name: "Switch to Secondary" }),
-  ).toHaveAttribute("aria-current", "true");
+    rail.getByRole("button", {
+      name: "Community switcher: Primary",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await selectCommunity(page, "Secondary");
   await openPage(page, "Projects");
   await expect(rail).toBeVisible();
-  await expect(button(page, "Switch community")).toHaveCount(0);
-  await rail.getByRole("button", { name: "Personal space" }).click();
   await expect(
-    rail.getByRole("button", { name: "Personal space" }),
-  ).toHaveAttribute("aria-current", "true");
-  await rail.getByRole("button", { name: "Add a community" }).click();
+    page.getByRole("dialog", { name: "Switch community", exact: true }),
+  ).toHaveCount(0);
+  await selectCommunity(page, "Personal space");
+  await (await openCommunityPicker(page))
+    .getByRole("button", { name: "Join a community", exact: true })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Add a community", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(
-    rail.getByRole("button", { name: "Add a community" }),
+    rail.getByRole("button", {
+      name: "Community switcher: Personal space",
+      exact: true,
+    }),
   ).toBeFocused();
 });
 
@@ -671,13 +680,10 @@ test("sidebar view state does not leak across communities", async ({
     .filter({ has: page.locator("summary", { hasText: /^Channels$/ }) });
   await group.locator("summary").click();
   await expect(group).not.toHaveAttribute("open");
-  await button(page, "Switch to Secondary").click();
-  await expect(button(page, "Switch to Secondary")).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
+  await selectCommunity(page, "Secondary");
+  await expect(button(page, "Community switcher: Secondary")).toBeVisible();
   await expect(group).toHaveAttribute("open");
-  await button(page, "Switch to Primary").click();
+  await selectCommunity(page, "Primary");
   await expect(group).not.toHaveAttribute("open");
 });
 
@@ -689,11 +695,8 @@ test("legacy filters are ignored and invalid saved sidebar fields fall back", as
   const sidebar = page.getByRole("navigation", { name: "Subscribed channels" });
   const group = sidebar.locator("details").first();
   await group.locator("summary").click();
-  await button(page, "Switch to Secondary").click();
-  await expect(button(page, "Switch to Secondary")).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
+  await selectCommunity(page, "Secondary");
+  await expect(button(page, "Community switcher: Secondary")).toBeVisible();
   await page.evaluate(() => {
     const key = Object.keys(localStorage).find((key) =>
       key.includes('"channel-sidebar"'),
@@ -710,11 +713,8 @@ test("legacy filters are ignored and invalid saved sidebar fields fall back", as
       }),
     );
   });
-  await button(page, "Switch to Primary").click();
-  await expect(button(page, "Switch to Primary")).toHaveAttribute(
-    "aria-current",
-    "true",
-  );
+  await selectCommunity(page, "Primary");
+  await expect(button(page, "Community switcher: Primary")).toBeVisible();
   await expect(
     page.getByRole("searchbox", { name: "Search channels" }),
   ).toHaveCount(0);
@@ -744,7 +744,7 @@ test("rail loads relay-owned image icons for inactive communities without acquir
     return route.fulfill({ json: { icon } });
   });
   await open(page, app);
-  const rail = page.getByRole("navigation", { name: "Communities" });
+  const rail = await openCommunityPicker(page);
   for (const [name, icon] of [
     ["Primary", rasterIcon],
     ["Secondary", emojiIcon],
@@ -776,9 +776,9 @@ test("Messages reselects the latest sidebar channel and keyboard page search foc
   const dialog = page.getByRole("dialog", { name: "Search Buzz", exact: true });
   const search = dialog.getByRole("combobox", { name: "Search Buzz" });
   await expect(search).toBeFocused();
-  await search.pressSequentially("Multiplayer");
+  await search.pressSequentially("Messages");
   await expect(
-    dialog.getByRole("option", { name: "Multiplayer", exact: true }),
+    dialog.getByRole("option", { name: "Messages", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
   await search.press("Enter");
   await expect(composer).toBeVisible();

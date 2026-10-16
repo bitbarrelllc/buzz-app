@@ -1,3 +1,4 @@
+import { selectCommunity } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import { test as base, expect } from "./fixture.mjs";
 import { streamEvidence } from "./stream-evidence.mjs";
@@ -472,9 +473,7 @@ test("session changes discard the previous sidebar targets and manual unread sti
   try {
     await open(page, app);
     await expect(cue(page, "below")).toBeVisible();
-    await page
-      .getByRole("button", { name: "Switch to Secondary", exact: true })
-      .click();
+    await selectCommunity(page, "Secondary");
     await expect(
       page.getByText(/secondary alpha message/).first(),
     ).toBeVisible();

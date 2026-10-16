@@ -1,3 +1,4 @@
+import { selectCommunity, openCommunityPicker } from "./navigation.mjs";
 import { openChannelDetails } from "./channel-details.mjs";
 import {
   openPage,
@@ -55,14 +56,7 @@ const companionLauncher = (page, name) =>
   button(page, name).and(page.locator("button[aria-expanded]"));
 // The fixture's active plugin pages, in shell order, lead the channel sidebar.
 // Sidebar rows exclude header pages; Me and Messages remain available through search.
-const destinationTitles = [
-  "Inbox",
-  "Reminders",
-  "Bestie",
-  "Projects",
-  "Agents",
-  "Workflows",
-];
+const destinationTitles = ["Inbox", "Bestie"];
 const sidebarDestinations = (page, options = {}) =>
   page
     .getByRole("complementary", { name: "Channel sidebar", ...options })
@@ -91,7 +85,7 @@ const panel = (page) =>
 
 async function open(page, app) {
   await page.goto(app.origin);
-  await openPage(page, "Multiplayer");
+  await openPage(page, "Messages");
   await page
     .getByRole("textbox", { name: "Message #Alpha", exact: true })
     .waitFor();
@@ -202,14 +196,12 @@ async function shellFits(page, width) {
     page.getByRole("navigation", { name: "Communities", exact: true }),
   );
   expect(actions.x + actions.width).toBeLessThanOrEqual(width);
-  expect(communities.x + communities.width).toBeLessThan(actions.x);
+  expect(communities.x).toBeGreaterThanOrEqual(actions.x);
+  const profile = await box(button(page, "Your profile"));
+  expect(communities.x + communities.width).toBeLessThanOrEqual(profile.x);
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
     .toBe(width);
-  if (width > 700) {
-    // The compact rail meets the sidebar edge without overlapping it.
-    expect(communities.x + communities.width).toBeLessThanOrEqual(sidebar.x);
-  }
   if (collapsed) await button(page, "Hide navigation").click();
 }
 
@@ -324,11 +316,13 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
   const rail = await box(
     page.getByRole("navigation", { name: "Communities", exact: true }),
   );
-  near(rail.width, 48);
-  near(sidebar.x, rail.x + rail.width);
+  near(rail.width, 32);
+  near(sidebar.x, gap);
+  const profile = await box(button(page, "Your profile"));
+  near(rail.x + rail.width, profile.x);
   // The conversation starts inside the main panel's reserved 1px border.
   near(before.x - sidebar.x - sidebar.width, gap + 1);
-  near(before.y, 49);
+  near(before.y, 57);
   near(before.height, 766);
   const background = await page
     .locator(".shell-background")
@@ -401,26 +395,27 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
   await expect(panel(page)).toHaveCount(0);
   await button(page, "Alpha").click();
   await expect(composer).toHaveJSProperty("value", "Layout draft");
-  const railButtons = page.getByRole("navigation", {
-    name: "Communities",
-    exact: true,
-  });
+  const picker = await openCommunityPicker(page);
   await expect(
-    railButtons.getByRole("button", { name: "Personal space" }),
+    picker.getByRole("button", { name: "Personal space", exact: true }),
   ).toBeVisible();
-  const add = railButtons.getByRole("button", { name: "Add a community" });
-  await add.click();
+  await picker
+    .getByRole("button", { name: "Join a community", exact: true })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Add a community", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(add).toBeFocused();
-  await railButtons
-    .getByRole("button", { name: "Switch to Secondary" })
-    .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Community switcher: Primary",
+      exact: true,
+    }),
+  ).toBeFocused();
+  await selectCommunity(page, "Secondary");
   await expect(composer).toHaveJSProperty("value", "");
-  await railButtons.getByRole("button", { name: "Switch to Primary" }).click();
+  await selectCommunity(page, "Primary");
   await expect(composer).toHaveJSProperty("value", "Layout draft");
   for (const [width, height] of [
     [1200, 800],
@@ -437,7 +432,7 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
       page.getByRole("region", { name: "Settings", exact: true }),
     ).toBeVisible();
     if (width <= 650) await button(page, "Show navigation").click();
-    await openPage(page, "Multiplayer");
+    await openPage(page, "Messages");
     await expect(composer).toHaveJSProperty("value", "Layout draft");
     await expect(page.locator("[data-message-id]").last()).toBeInViewport();
   }
@@ -493,7 +488,7 @@ test("separate sidebar and workspace surfaces, real link panel and compact commu
     const choices = await pageChoices(page);
     // Messages proves the Pages group rendered before counting Projects.
     await expect(
-      choices.getByRole("option", { name: "Multiplayer", exact: true }),
+      choices.getByRole("option", { name: "Messages", exact: true }),
     ).toBeVisible();
     await expect(
       choices.getByRole("option", { name: "Projects", exact: true }),
@@ -833,7 +828,7 @@ companionTest(
     await expect(launch).toBeVisible();
     await expect(companion).toHaveCount(0);
     await launch.click();
-    await openPage(page, "Multiplayer");
+    await openPage(page, "Messages");
     const composer = page.getByRole("textbox", {
       name: "Message #Alpha",
       exact: true,
@@ -897,7 +892,7 @@ companionTest(
     await expect(companion).toHaveCount(1);
     await button(page, "Alpha").click();
     await expect(composer).toHaveJSProperty("value", "Companion draft");
-    await button(page, "Personal space").click();
+    await selectCommunity(page, "Personal space");
     await expect(
       page.getByRole("heading", { name: "Your channels, one conversation." }),
     ).toBeVisible();
@@ -988,7 +983,7 @@ todosOverlapTest(
     await page
       .getByRole("switch", { name: "Enable Todos", exact: true })
       .click();
-    await openPage(page, "Multiplayer");
+    await openPage(page, "Messages");
     const todos = page.getByRole("region", {
       name: "Todos panel",
       exact: true,
@@ -1226,7 +1221,7 @@ test("Projects directory fits the workspace and page navigation survives plugin 
   const search = page.getByRole("dialog", { name: "Search Buzz", exact: true });
   const titles = [
     "Solo",
-    "Multiplayer",
+    "Messages",
     "Inbox",
     "Reminders",
     "Bestie",
@@ -1309,7 +1304,7 @@ test("Projects directory fits the workspace and page navigation survives plugin 
   await expect(projects).toHaveAttribute("aria-checked", "false");
   await expectPageOrder([
     "Solo",
-    "Multiplayer",
+    "Messages",
     "Inbox",
     "Reminders",
     "Bestie",

@@ -353,7 +353,7 @@ test("keyboard selection follows its action while recent conversations arrive ab
   app,
 }) => {
   const rail = page.getByRole("button", {
-    name: "Switch to Primary",
+    name: "Community switcher: Primary",
     exact: true,
   });
   // Hold startup membership before navigation so the channel list arrives after

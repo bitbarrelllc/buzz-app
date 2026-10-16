@@ -143,7 +143,7 @@ test("Me Activity opens the agent's profile locally, restores per conversation a
   });
   await expect(conversationAction).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(sidebar).toHaveCount(0);
+  await expect(sidebar).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Alpha", exact: true }),
   ).toBeVisible();
@@ -594,7 +594,7 @@ test("Me sidebar opens a captured trigger in the canonical message reader", asyn
   });
   await expect(popup).toBeVisible();
   await popup.getByRole("button", { name: /Open thread for/ }).click();
-  await expect(sidebar).toHaveCount(0);
+  await expect(sidebar).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(() =>

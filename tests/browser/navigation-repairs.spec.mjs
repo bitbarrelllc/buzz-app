@@ -1,3 +1,4 @@
+import { selectCommunity } from "./navigation.mjs";
 import { openPage } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open } from "./timeline.mjs";
@@ -14,19 +15,19 @@ test("Back restores Personal space without inheriting the active community", asy
 }) => {
   await open(page, app);
   const rail = page.getByRole("navigation", { name: "Communities" });
-  await button(page, "Personal space").click();
+  await selectCommunity(page, "Personal space");
   await expect(
-    rail.getByRole("button", { name: "Personal space" }),
-  ).toHaveAttribute("aria-current", "true");
+    rail.getByRole("button", { name: "Community switcher: Personal space" }),
+  ).toBeVisible();
   const personal = await entry(page);
-  await button(page, "Switch to Primary").click();
+  await selectCommunity(page, "Primary");
   await expect(
     page.getByRole("textbox", { name: "Message #Alpha", exact: true }),
   ).toBeVisible();
   await button(page, "Go back").click();
   await expect(
-    rail.getByRole("button", { name: "Personal space" }),
-  ).toHaveAttribute("aria-current", "true", { timeout: 1500 });
+    rail.getByRole("button", { name: "Community switcher: Personal space" }),
+  ).toBeVisible({ timeout: 1500 });
   expect(await entry(page)).toEqual(personal);
   await expect(
     page.getByRole("heading", { name: "Your channels, one conversation." }),
@@ -72,10 +73,8 @@ test("keyboard Retry hands off focus while reconnecting a failed Messages tab op
   await page.goto(
     `${app.origin}/#buzz=${encodeURIComponent(JSON.stringify({ version: 1, kind: "page", pluginId: "buzz.me", pageId: "me" }))}`,
   );
-  await expect(
-    page.getByRole("tab", { name: "Solo", exact: true }),
-  ).toHaveAttribute("aria-selected", "true");
-  const messages = page.getByRole("tab", { name: "Multiplayer", exact: true });
+  await expect.poll(async () => (await entry(page)).target.pageId).toBe("me");
+  const messages = page.getByRole("tab", { name: "Messages", exact: true });
   await messages.focus();
   await messages.press("Enter");
   await expect(
@@ -110,7 +109,7 @@ test("keyboard Retry hands off focus while reconnecting a failed Messages tab op
   });
   await page.keyboard.press("Tab");
   await expect(
-    page.getByRole("tabpanel", { name: "Multiplayer", exact: true }),
+    page.getByRole("tabpanel", { name: "Messages", exact: true }),
   ).toBeFocused();
 });
 
@@ -185,7 +184,7 @@ launchTest(
     await expect(failed).toBeVisible();
     await openPage(page, "Projects");
     await expect(failed).toBeHidden();
-    await button(page, "Agents").first().click();
+    await page.getByRole("tab", { name: "Agents", exact: true }).click();
     await page.evaluate(() => {
       location.hash = "#buzz=%7B";
     });
