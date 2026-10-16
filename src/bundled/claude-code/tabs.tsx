@@ -575,11 +575,19 @@ export function createTabs({
           <p className="m-0 text-body-sm text-subtle">Claude is signed in.</p>
         )}
         <ProviderDialogActions>
-          <Button onClick={() => state.running && !ready ? void setup.cancel() : onClose()}>
+          <Button
+            onClick={() =>
+              state.running && !ready ? void setup.cancel() : onClose()
+            }
+          >
             {ready ? "Done" : "Cancel"}
           </Button>
           {!ready && action && !state.running && !state.checking && (
-            <Button autoFocus variant="prominent" onClick={() => void setup.run(action.step)}>
+            <Button
+              autoFocus
+              variant="prominent"
+              onClick={() => void setup.run(action.step)}
+            >
               {action.label}
             </Button>
           )}

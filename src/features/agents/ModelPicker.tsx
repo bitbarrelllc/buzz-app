@@ -200,7 +200,9 @@ export function ModelPicker({
   });
   const selected = shown.find((model) => model.id === value) ?? fallback;
   const inherited = includeDefault && selected.id === "";
-  const selectedLabel = inherited ? `${selected.label} · Default` : selected.label;
+  const selectedLabel = inherited
+    ? `${selected.label} · Default`
+    : selected.label;
   const choices =
     allowCustomModel && !compact ? [...shown, CUSTOM_MODEL_ACTION] : shown;
   const openCustomDialog = () => {
@@ -223,7 +225,9 @@ export function ModelPicker({
             compact={compact}
             onConfigure={onConfigure}
             models={shown.filter((model) => model.id !== "")}
-            selected={loading ? { ...selected, label: "Loading models…" } : selected}
+            selected={
+              loading ? { ...selected, label: "Loading models…" } : selected
+            }
             defaultChoice={includeDefault ? fallback : undefined}
             disabled={disabled || loading}
             description={description}

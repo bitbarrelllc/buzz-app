@@ -137,7 +137,9 @@ export function MenuPopup(props: PopupProps) {
   return <PositionedPopup {...props} />;
 }
 
-export function MenuSubmenu(props: ComponentProps<typeof BaseMenu.SubmenuRoot>) {
+export function MenuSubmenu(
+  props: ComponentProps<typeof BaseMenu.SubmenuRoot>,
+) {
   return (
     <ContextMenuPresence value={null}>
       <BaseMenu.SubmenuRoot {...props} />
