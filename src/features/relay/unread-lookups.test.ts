@@ -304,3 +304,32 @@ it("Inbox retains a relevant direct reply as thread activity when the root canno
     stop();
   }
 });
+
+it("Activity recovers the root of a joined thread the window dropped", async () => {
+  const { owner, store } = await setup();
+  const root = event(viewer, 9, 10, []);
+  const thread = (pubkey: string, time: number) =>
+    event(pubkey, 9, time, [
+      ["e", root.id, "", "root"],
+      ["e", root.id, "", "reply"],
+    ]);
+  const mine = thread(viewer, 20);
+  const answer = thread(peer, 30);
+  store.push(root);
+  // The sampled window kept the thread's replies but not its root.
+  owner.accept([mine, answer]);
+  const stop = owner.capability.subscribeActivity("c0", () => {});
+  try {
+    expect(owner.capability.attention("c0", answer.id)).toMatchObject({
+      category: "thread",
+      unread: true,
+    });
+    await vi.waitFor(() =>
+      expect(owner.capability.activity("c0").items).toEqual([
+        expect.objectContaining({ rootId: root.id, unreadCount: 1 }),
+      ]),
+    );
+  } finally {
+    stop();
+  }
+});
