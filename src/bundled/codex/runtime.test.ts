@@ -1086,6 +1086,33 @@ it("leaves a thread unpinned when a local save lands while its turn starts", asy
   await vi.waitFor(() => expect(starts()).toHaveLength(3));
   expect(starts()[2]).toContain("SYNCED B");
 });
+it("leaves a thread unpinned when a local save lands while its turn waits to start", async () => {
+  const f = fixture();
+  const root = "a".repeat(64);
+  const carrying = (content: string, instructions: string, effort?: string) => {
+    const delivery = f.delivery(content, root);
+    return {
+      ...delivery,
+      config: { ...(delivery.config as object), instructions },
+      ...(effort ? { effort } : {}),
+    };
+  };
+  const starts = () => f.starts().map((start) => JSON.stringify(start.params));
+  await f.runtime.run(carrying("@Codex one", "SYNCED A"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(1));
+  // A differing pick queues the second turn behind the first, holding
+  // settings A while a save clears the pins.
+  await f.runtime.run(carrying("@Codex two", "SYNCED A", "high"));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  f.runtime.restart(pubkey);
+  f.complete(0, "ONE");
+  await vi.waitFor(() => expect(starts()).toHaveLength(2));
+  f.complete(1, "TWO");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(2));
+  await f.runtime.run(carrying("@Codex three", "SYNCED B"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(3));
+  expect(starts()[2]).toContain("SYNCED B");
+});
 it.each([
   ["", "", "test-model", "medium"],
   ["test-model", "high", "test-model", "high"],
@@ -3411,4 +3438,71 @@ it("method calls: a thread and a turn make no relay-session call beyond the turn
   ).toEqual([]);
   expect(context()).toBe(true);
   expect(f.core).toHaveBeenCalled();
+});
+
+it("refuses a pinned synced effort never validated on its configured model", async () => {
+  const f = fixture();
+  const carrying = (content: string) => {
+    const delivery = f.delivery(content);
+    return {
+      ...delivery,
+      config: {
+        ...(delivery.config as object),
+        model: "test-model",
+        effort: "xhigh",
+      },
+      synced: { effort: "xhigh" },
+    };
+  };
+  await f.runtime.run({ ...carrying("@Codex first"), model: "deep-model" });
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  expect(f.starts()[0]?.params).toMatchObject({
+    model: "deep-model",
+    effort: "xhigh",
+  });
+  await f.complete(0, "ONE");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  await f.runtime.run(carrying("@Codex next"));
+  await vi.waitFor(() =>
+    expect(f.starts().length === 2 || f.publish.mock.calls.length === 2).toBe(
+      true,
+    ),
+  );
+  expect(f.starts()).toHaveLength(1);
+  expect(JSON.stringify(f.publish.mock.calls)).toContain("synced effort");
+});
+
+it("a first turn held at startup cannot undo a local Save", async () => {
+  const f = fixture();
+  const turn = deferred<void>();
+  f.held.set("turn/start", turn.promise);
+  const carrying = (content: string, instructions: string) => {
+    const d = f.delivery(content);
+    return { ...d, config: { ...(d.config as object), instructions } };
+  };
+  try {
+    await f.runtime.run(carrying("@Codex first", "OLD"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    f.runtime.sync([
+      {
+        pubkey,
+        config: carrying("", "NEW").config,
+        saves: 1,
+      } as unknown as Agent,
+    ]);
+    f.held.delete("turn/start");
+    turn.resolve();
+    await vi.waitFor(() =>
+      expect(JSON.stringify([...f.storage.values()])).toContain("thread-1"),
+    );
+    await f.complete(0, "ONE");
+    await f.runtime.run(carrying("@Codex next", "NEW"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    const next = JSON.stringify(f.starts()[1]?.params);
+    expect(next).toContain("NEW");
+    expect(next).not.toContain("OLD");
+  } finally {
+    f.held.delete("turn/start");
+    turn.resolve();
+  }
 });

@@ -65,6 +65,8 @@ type Request = {
   effort?: string;
   /** The agent's effort when it came from its synced settings. */
   syncedEffort?: string;
+  /** Restarts counted when `settings` was read; a later one supersedes it. */
+  restarts: number;
   /** Called once a final send answers this request, or one steered after it,
    * a steering rejection is posted in its place, or the turn ends normally. */
   answered: () => void;
@@ -84,6 +86,9 @@ type Saved = {
   /** The config the thread runs on, kept until a local save or Restart to
    * apply; absent until its first turn after one. */
   pin?: unknown;
+  /** The pin's effort when it came from synced settings, checked on each
+   * turn no pick overrides. */
+  synced?: string;
 };
 type Active = {
   /** The server this turn runs on; steering must reach the same process. */
@@ -130,8 +135,6 @@ type Entry = {
   after: Promise<void>;
   lanes: Map<string, Lane>;
   saved: Record<string, Saved>;
-  /** Counts Restart to apply and local saves, which clear the pins. */
-  restarts: number;
   /** Standalone turns now running, for their tool calls to find. */
   onces: Set<Once>;
 };
@@ -167,6 +170,9 @@ function textOf(event: EventData, name: string) {
  * calls find their agent by thread and turn. */
 export class CodexRuntime {
   private entries = new Map<string, Entry>();
+  /** Counts each agent's Restart to apply and local saves, which clear the
+   * pins. */
+  private restarts = new Map<string, number>();
   private server: Server | undefined;
   private stopping = new Map<string, Promise<void>>();
   private views = new Map<string, readonly SessionView[]>();
@@ -320,16 +326,13 @@ export class CodexRuntime {
     const bindings = this.bindings(pubkey);
     if (!bindings) return;
     const saved = Object.fromEntries(
-      Object.entries(bindings.saved).map(([key, { pin: _, ...rest }]) => [
-        key,
-        rest,
-      ]),
+      Object.entries(bindings.saved).map(
+        ([key, { pin: _, synced: __, ...rest }]) => [key, rest],
+      ),
     );
+    this.restarts.set(pubkey, (this.restarts.get(pubkey) ?? 0) + 1);
     const entry = this.entries.get(pubkey);
-    if (entry) {
-      entry.saved = saved;
-      entry.restarts++;
-    }
+    if (entry) entry.saved = saved;
     try {
       this.storage.setItem(bindings.storageKey, JSON.stringify(saved));
     } catch (error) {
@@ -423,7 +426,6 @@ export class CodexRuntime {
       abort: new AbortController(),
       after: this.stopping.get(pubkey) ?? Promise.resolve(),
       saved,
-      restarts: 0,
       lanes: new Map(),
       onces: new Set(),
     };
@@ -557,6 +559,7 @@ export class CodexRuntime {
     const channelId = delivery.channelId;
     if (!channelId) throw new Error("The event has no unambiguous channel");
     const settings = this.resolveConfig(delivery.config);
+    const restarts = this.restarts.get(agent.pubkey) ?? 0;
     const channel = await reads.channel(channelId);
     const topLevel = await reads.meChat(
       agent.owner,
@@ -584,6 +587,7 @@ export class CodexRuntime {
       event: trigger.event,
       agent,
       settings,
+      restarts,
       ...(toolRoot ? { toolRoot } : {}),
       ...(delivery.model ? { model: delivery.model } : {}),
       ...(delivery.effort ? { effort: delivery.effort } : {}),
@@ -1108,8 +1112,8 @@ export class CodexRuntime {
   ) {
     // A thread keeps the config it was pinned to; the delivery's current
     // copy reaches it only after a local save or Restart to apply.
-    const pin = entry.saved[key]?.pin;
-    const restarts = entry.restarts;
+    const { pin, synced } = entry.saved[key] ?? {};
+    const syncedEffort = pin === undefined ? request.syncedEffort : synced;
     const settings =
       pin === undefined ? request.settings : this.resolveConfig(pin);
     let ready!: () => void;
@@ -1166,7 +1170,7 @@ export class CodexRuntime {
         workspace,
         request,
         // A pinned thread runs on its pin, not the synced copy's effort.
-        pin === undefined ? request.syncedEffort : undefined,
+        syncedEffort,
       );
       active.model = model;
       active.effort = effort;
@@ -1238,8 +1242,11 @@ export class CodexRuntime {
         workspace,
         at: Date.now(),
         ...(tools ? { tools } : {}),
-        // A restart meanwhile moved the thread to the current config.
-        ...(entry.restarts === restarts ? { pin: settings } : {}),
+        // A restart since the settings were read moved the thread to the
+        // current config.
+        ...((this.restarts.get(agent.pubkey) ?? 0) === request.restarts
+          ? { pin: settings, ...(syncedEffort ? { synced: syncedEffort } : {}) }
+          : {}),
       });
       ready();
       this.status(agent.pubkey, key, "Working");

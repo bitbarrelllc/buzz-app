@@ -277,10 +277,11 @@ async function setup<Config>(
       .filter((work) => !["waiting", "working"].includes(work.state)).length ===
     mentions;
   /** A new top-level mention from the owner: a new conversation. */
-  const mention = () => {
+  const mention = (tags: string[][] = []) => {
     mentions++;
     const sent = message(owner, channel, "@agent hello", ++at, [
       ["p", agentKey.pubkey],
+      ...tags,
     ]);
     counted.live().receive([sent], { phase: "live", channelId: channel });
     return sent;
@@ -371,7 +372,7 @@ async function expectCounterSeesSync(f: Fixture) {
  * carries the synced one. Returns the sync, for a test to run after an edit. */
 function plugged(
   f: Fixture,
-  runtime: Pick<ClaudeRuntime | GooseRuntime, "sync">,
+  runtime: Pick<ClaudeRuntime | GooseRuntime | CodexRuntime, "sync">,
 ) {
   const sync = () =>
     runtime.sync(
@@ -538,8 +539,13 @@ function fakeCodex() {
       if (request.id == null || !request.method) return;
       const params = request.params as Record<string, unknown>;
       const result =
-        request.method === "thread/start"
-          ? { thread: { id: `thread-${sent.length}`, cwd: params.cwd } }
+        request.method === "thread/start" || request.method === "thread/resume"
+          ? {
+              thread: {
+                id: params.threadId ?? `thread-${sent.length}`,
+                cwd: params.cwd,
+              },
+            }
           : request.method === "turn/start"
             ? { turn: { id: `turn-${sent.length}` } }
             : request.method === "model/list"
@@ -907,4 +913,123 @@ it("refuses a synced Claude effort it can't check when Claude lists no models", 
     "The synced effort \"high\" couldn't be checked: Claude doesn't list the model opus.",
   );
   expect(prompted()).toBe(false);
+});
+
+it("refuses a pinned synced effort after a supported first-turn composer override", async () => {
+  const codex = fakeCodex();
+  const { seeded } = heads("buzz/codex", {
+    model: "synced-model",
+    effort: "xhigh",
+    scope: "thread",
+  });
+  let runtime!: CodexRuntime;
+  const f = await setup(
+    "codex",
+    (_relay, reads, core) => {
+      runtime = new CodexRuntime(codex.spawn, reads, core, memoryStorage());
+      disposals.push(() => runtime.dispose());
+      return codexRun(runtime);
+    },
+    {
+      model: "local-model",
+      effort: "low",
+      instructions: "LOCAL INSTRUCTIONS",
+      workspace: "/this/device",
+      scope: "thread",
+    },
+    seeded,
+    synced(),
+  );
+  plugged(f, runtime);
+  const turns = () => codex.sent.filter((wire) => wire.method === "turn/start");
+  const outcome = (id: string) =>
+    f.activity.reader.work().find((work) => work.messageId === id);
+  const first = f.mention([
+    ["model", agentKey.pubkey, "local-model"],
+    ["effort", agentKey.pubkey, "high"],
+  ]);
+  await vi.waitFor(() => expect(outcome(first.id)?.state).toBe("done"));
+  expect(f.deliveries[0]).toMatchObject({
+    model: "local-model",
+    effort: "high",
+    synced: { effort: "xhigh" },
+    config: { model: "synced-model", effort: "xhigh" },
+  });
+  expect(turns()).toHaveLength(1);
+  expect(turns()[0]?.params).toMatchObject({
+    model: "local-model",
+    effort: "high",
+  });
+  const next = f.reply(first);
+  await vi.waitFor(() =>
+    expect(["done", "error"]).toContain(outcome(next.id)?.state),
+  );
+  expect(f.deliveries[1]?.model).toBeUndefined();
+  expect(f.deliveries[1]?.effort).toBeUndefined();
+  expect({
+    state: outcome(next.id)?.state,
+    error: outcome(next.id)?.error,
+    turns: turns().map((wire) => {
+      const { model, effort } = wire.params as {
+        model: string;
+        effort: string;
+      };
+      return { model, effort };
+    }),
+  }).toEqual({
+    state: "error",
+    error:
+      'The synced effort "xhigh" isn\'t available for synced-model. Choose a supported effort in Settings.',
+    turns: [{ model: "local-model", effort: "high" }],
+  });
+});
+
+it("keeps a valid Codex pin's effort after an unsupported remote edit", async () => {
+  const codex = fakeCodex();
+  const { seeded } = heads("buzz/codex", {
+    model: "local-model",
+    effort: "high",
+    scope: "thread",
+  });
+  let runtime!: CodexRuntime;
+  const f = await setup(
+    "codex",
+    (_relay, reads, core) => {
+      runtime = new CodexRuntime(codex.spawn, reads, core, memoryStorage());
+      disposals.push(() => runtime.dispose());
+      return codexRun(runtime);
+    },
+    {
+      model: "local-model",
+      effort: "low",
+      instructions: "LOCAL INSTRUCTIONS",
+      workspace: "/this/device",
+      scope: "thread",
+    },
+    seeded,
+    synced(),
+  );
+  const sync = plugged(f, runtime);
+  const turns = () => codex.sent.filter((wire) => wire.method === "turn/start");
+  const outcome = (id: string) =>
+    f.activity.reader.work().find((work) => work.messageId === id);
+  const first = f.mention();
+  await vi.waitFor(() => expect(outcome(first.id)?.state).toBe("done"));
+  remoteEdit(f, "buzz/codex", {
+    model: "synced-model",
+    effort: "xhigh",
+    scope: "thread",
+  });
+  sync();
+  const next = f.reply(first);
+  await vi.waitFor(() => expect(outcome(next.id)?.state).toBe("done"));
+  expect(f.deliveries[1]).toMatchObject({
+    synced: { effort: "xhigh" },
+    config: { model: "synced-model", effort: "xhigh" },
+  });
+  expect(turns()).toHaveLength(2);
+  expect(turns()[1]?.params).toMatchObject({
+    model: "local-model",
+    effort: "high",
+  });
 });
