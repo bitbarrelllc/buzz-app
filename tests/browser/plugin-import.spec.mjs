@@ -412,6 +412,9 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   );
   await openPlugins(page, app.origin);
   await button(page, "Add").click();
+  await page.getByRole("dialog").screenshot({
+    path: info.outputPath("plugin-source.png"),
+  });
   await button(page, "Browse plugin folder").click();
   const skippedFolders = page.getByRole("region", {
     name: "Skipped folders",

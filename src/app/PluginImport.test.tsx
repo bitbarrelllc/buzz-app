@@ -16,7 +16,7 @@ import userEvent from "@testing-library/user-event";
 
 afterEach(cleanup);
 
-it("opens both sources and the safety hint only inside Add, and restores focus on close", async () => {
+it("opens both sources inside Add without a duplicate safety warning, and restores focus on close", async () => {
   const user = userEvent.setup();
   const manager = {
     imports: { folder: vi.fn(), discard: vi.fn() },
@@ -37,7 +37,7 @@ it("opens both sources and the safety hint only inside Add, and restores focus o
   expect(
     within(dialog).getByLabelText("Git or GitHub repository"),
   ).toBeVisible();
-  expect(within(dialog).getByText(/plugins aren’t sandboxed/)).toBeVisible();
+  expect(within(dialog).queryByText(/plugins aren’t sandboxed/)).toBeNull();
   expect(
     within(dialog).getByRole("button", { name: "Browse plugin folder" }),
   ).toBeVisible();

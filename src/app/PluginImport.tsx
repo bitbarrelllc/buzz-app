@@ -249,7 +249,7 @@ export function PluginImport({
                 : preview.candidates.length
                   ? "Select a plugin to review before installing."
                   : "Try another folder or repository."
-              : "Load built plugins containing manifest.json and plugin.js. Buzz doesn’t build source code or run install scripts. Only load code you trust: plugins aren’t sandboxed."
+              : "Load built plugins containing manifest.json and plugin.js. Buzz doesn’t build source code or run install scripts."
         }
         size={error ? "default" : "wide"}
         actions={
