@@ -22,6 +22,7 @@ import type { HostProcessOptions } from "../../features/host/service";
 import { ClaudeLogoIcon } from "../../shared/design-system/icons";
 import { apply, inject } from "./index";
 import { type Config, DEFAULT_CONFIG } from "./runtime";
+import { ClaudeSetup } from "./setup";
 import { ClaudeDefaults } from "./defaults";
 
 const desktop = vi.hoisted(() => ({ tauri: true }));
@@ -1130,4 +1131,45 @@ it("keeps the model inherited when changing the default model's effort", async (
     effort: "high",
   });
   expect(control).toHaveTextContent("· Default");
+});
+
+it("keeps keyboard focus through Claude defaults discovery retries", async () => {
+  const calls = vi.spyOn(ClaudeSetup.prototype, "loadModels");
+  const catalog: { listed: boolean; ready?: Promise<void> } = { listed: false };
+  const Control = installed({ catalog }).type.provider?.DefaultControl;
+  if (!Control) throw new Error("Missing default control");
+  render(<Control onConfigure={vi.fn()} />);
+  await screen.findByRole("alert");
+  const retry = screen.getByRole("button", { name: "Try again" });
+  await act(async () => {
+    await Promise.all(calls.mock.results.map((result) => result.value));
+  });
+  const user = userEvent.setup();
+  for (const succeeds of [false, true]) {
+    let release!: () => void;
+    catalog.ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    catalog.listed = succeeds;
+    await waitFor(() =>
+      expect(retry).not.toHaveAttribute("aria-disabled", "true"),
+    );
+    retry.focus();
+    try {
+      await user.keyboard("{Enter}");
+      expect(retry).toHaveFocus();
+      expect(retry).not.toHaveAttribute("disabled");
+      expect(retry).toHaveAttribute("aria-disabled", "true");
+    } finally {
+      await act(async () => release());
+    }
+    if (!succeeds) {
+      await screen.findByRole("alert");
+      expect(retry).toHaveFocus();
+    }
+  }
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(
+    screen.getByRole("button", { name: /^Claude default model:/ }),
+  ).toHaveFocus();
 });

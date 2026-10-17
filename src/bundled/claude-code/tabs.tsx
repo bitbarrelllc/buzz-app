@@ -1,3 +1,4 @@
+import { ModelDiscoveryRecovery } from "../../features/agents/ModelDiscoveryRecovery";
 import { SettingsGroup } from "../../shared/design-system/ui/SettingsGroup";
 import { AgentSaveButton } from "../../features/agents/AgentSaveButton";
 import { ProviderDialogActions } from "../../features/agents/ProviderDialogActions";
@@ -408,59 +409,58 @@ export function createTabs({
     const [error, setError] = useState("");
     return (
       <>
-        <ModelPicker
-          includeDefault={false}
-          resetLabel="Use Claude default"
-          compact
-          groupByFamily
-          label="Claude default model"
-          models={modelChoices(state.models).map((choice) => ({
-            ...choice,
-            efforts: (() => {
-              const model = state.models.find(
-                (item) => item.value === choice.id,
-              );
-              const levels = model ? effortChoices(effortLevels(model)) : [];
-              return levels.length
-                ? [{ id: "", label: "Automatic" }, ...levels]
-                : [];
-            })(),
-          }))}
-          effort={saved.effort ?? ""}
-          effortLabel={saved.effort ? effortLabel(saved.effort) : "Automatic"}
-          onEffortChange={(model, effort) => {
-            try {
-              defaults.save({ model, effort });
-              setError("");
-            } catch (reason) {
-              setError(String(reason));
+        <ModelDiscoveryRecovery
+          error={state.modelsError}
+          loading={state.modelsChecking}
+          retry={() => void setup.loadModels(true)}
+        >
+          <ModelPicker
+            includeDefault={false}
+            resetLabel="Use Claude default"
+            compact
+            groupByFamily
+            label="Claude default model"
+            models={modelChoices(state.models).map((choice) => ({
+              ...choice,
+              efforts: (() => {
+                const model = state.models.find(
+                  (item) => item.value === choice.id,
+                );
+                const levels = model ? effortChoices(effortLevels(model)) : [];
+                return levels.length
+                  ? [{ id: "", label: "Automatic" }, ...levels]
+                  : [];
+              })(),
+            }))}
+            effort={saved.effort ?? ""}
+            effortLabel={saved.effort ? effortLabel(saved.effort) : "Automatic"}
+            onEffortChange={(model, effort) => {
+              try {
+                defaults.save({ model, effort });
+                setError("");
+              } catch (reason) {
+                setError(String(reason));
+              }
+            }}
+            value={
+              saved.model
+                ? (providerDefaultModel(saved.model, state.models) ??
+                  saved.model)
+                : ""
             }
-          }}
-          value={
-            saved.model
-              ? (providerDefaultModel(saved.model, state.models) ?? saved.model)
-              : ""
-          }
-          defaultModel={providerDefaultModel("", state.models)}
-          defaultLabel={providerDefaultLabel("", state.models)}
-          onConfigure={onConfigure}
-          onChange={(model) => {
-            try {
-              defaults.save({ model });
-              setError("");
-            } catch (reason) {
-              setError(String(reason));
-            }
-          }}
-        />
-        {state.modelsError && (
-          <>
-            <span role="alert">{state.modelsError}</span>
-            <Button onClick={() => void setup.loadModels(true)}>
-              Try again
-            </Button>
-          </>
-        )}
+            defaultModel={providerDefaultModel("", state.models)}
+            defaultLabel={providerDefaultLabel("", state.models)}
+            onConfigure={onConfigure}
+            onChange={(model) => {
+              try {
+                defaults.save({ model });
+                setError("");
+              } catch (reason) {
+                setError(String(reason));
+              }
+            }}
+          />
+        </ModelDiscoveryRecovery>
         {error && <span role="alert">{error}</span>}
       </>
     );

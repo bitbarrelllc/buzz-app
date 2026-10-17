@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -872,3 +873,55 @@ it("refreshes the Settings model and thinking after saving provider credentials"
   );
   await waitFor(() => expect(efforts.mock.calls.length).toBeGreaterThan(reads));
 });
+
+for (const host of ["defaults", "create"] as const) {
+  it(`keeps keyboard recovery through Goose ${host} discovery failure and success`, async () => {
+    const fake = fakeSpawn({
+      providers: PROVIDERS,
+      defaults: { providerId: "databricks", modelId: "goose-claude" },
+    });
+    const setup = new GooseSetup(fake.spawn);
+    let settle!: (value: { id: string; label: string }[]) => void;
+    let fail!: (reason: Error) => void;
+    vi.spyOn(setup, "models")
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementation(
+        () =>
+          new Promise((resolve, reject) => {
+            settle = resolve;
+            fail = reject;
+          }),
+      );
+    const { DefaultControl, CreateModel } = createTabs({ setup, ...unused });
+    render(
+      host === "defaults" ? (
+        <DefaultControl onConfigure={vi.fn()} />
+      ) : (
+        <CreateModel
+          config={DEFAULT_CONFIG}
+          onChange={vi.fn()}
+          disabled={false}
+        />
+      ),
+    );
+    await screen.findByRole("alert");
+    const retry = screen.getByRole("button", { name: "Try again" });
+    const user = userEvent.setup();
+    retry.focus();
+    await user.keyboard("{Enter}");
+    expect(retry).toHaveFocus();
+    expect(retry).not.toHaveAttribute("disabled");
+    expect(retry).toHaveAttribute("aria-disabled", "true");
+    await act(async () => fail(new Error("still offline")));
+    expect(retry).toHaveFocus();
+    expect(screen.getByRole("alert")).toHaveTextContent("still offline");
+    await user.keyboard("{Enter}");
+    await act(async () => settle([{ id: "goose-claude", label: "Claude" }]));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(
+      screen.getByRole("button", {
+        name: host === "defaults" ? /^Goose default model:/ : /^Goose model:/,
+      }),
+    ).toHaveFocus();
+  });
+}

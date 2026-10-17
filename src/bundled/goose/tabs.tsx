@@ -1,3 +1,4 @@
+import { ModelDiscoveryRecovery } from "../../features/agents/ModelDiscoveryRecovery";
 // goose's New agent choices and agent settings. Providers, their keys and
 // their models are goose's own: listed from it, and saved into its config.
 import {
@@ -152,45 +153,47 @@ export function createTabs({
     const [error, setError] = useState("");
     return (
       <>
-        <ModelPicker
-          includeDefault={false}
-          compact
-          groupByFamily
-          label="Goose default model"
-          models={models.value ?? []}
-          value={
-            current?.model ||
-            listing.value?.providers.find((item) => item.id === id)
-              ?.defaultModel ||
-            ""
-          }
-          modelLabelPrefixes={
-            id.startsWith("databricks") ? ["databricks-", "goose-"] : undefined
-          }
-          defaultLabel="Provider default"
-          disabled={saving || !id}
+        <ModelDiscoveryRecovery
+          error={models.status === "error" ? models.error : undefined}
           loading={models.status === "loading"}
-          onConfigure={onConfigure}
-          onChange={(model) => {
-            setSaving(true);
-            void setup
-              .saveDefaults({ provider: id, model })
-              .then(
-                () => {
-                  setError("");
-                  reload();
-                },
-                (reason) => setError(String(reason)),
-              )
-              .finally(() => setSaving(false));
-          }}
-        />
-        {models.status === "error" && (
-          <>
-            <span role="alert">{models.error}</span>
-            <Button onClick={reloadModels}>Try again</Button>
-          </>
-        )}
+          retry={reloadModels}
+        >
+          <ModelPicker
+            includeDefault={false}
+            compact
+            groupByFamily
+            label="Goose default model"
+            models={models.value ?? []}
+            value={
+              current?.model ||
+              listing.value?.providers.find((item) => item.id === id)
+                ?.defaultModel ||
+              ""
+            }
+            modelLabelPrefixes={
+              id.startsWith("databricks")
+                ? ["databricks-", "goose-"]
+                : undefined
+            }
+            defaultLabel="Provider default"
+            disabled={saving || !id}
+            loading={models.status === "loading"}
+            onConfigure={onConfigure}
+            onChange={(model) => {
+              setSaving(true);
+              void setup
+                .saveDefaults({ provider: id, model })
+                .then(
+                  () => {
+                    setError("");
+                    reload();
+                  },
+                  (reason) => setError(String(reason)),
+                )
+                .finally(() => setSaving(false));
+            }}
+          />
+        </ModelDiscoveryRecovery>
         {error && <span role="alert">{error}</span>}
       </>
     );
@@ -1063,40 +1066,47 @@ export function createTabs({
     }));
     return (
       <>
-        <ModelPicker
-          compact
-          groupByFamily
-          includeDefault={false}
-          resetLabel="Use Goose default"
-          allowCustomModel
-          label="Goose model"
-          appearance={modelAppearance === "subtle" ? "subtle" : "outlined"}
-          models={choices}
-          value={current.model}
-          defaultModel={fallback}
-          defaultLabel={modelLabel(provider, fallback) || "Choose model"}
-          effort={current.effort}
-          effortLabel={
-            thinking.value?.levels.length
-              ? current.effort
-                ? current.effort.charAt(0).toUpperCase() +
-                  current.effort.slice(1)
-                : "Automatic"
-              : undefined
-          }
-          modelLabelPrefixes={
-            provider.startsWith("databricks")
-              ? ["databricks-", "goose-"]
-              : undefined
-          }
-          disabled={disabled}
+        <ModelDiscoveryRecovery
+          error={models.status === "error" ? models.error : undefined}
           loading={models.status === "loading"}
-          onConfigure={() => setOpen(true)}
-          onChange={(model) => onChange({ ...current, model, effort: "" })}
-          onEffortChange={(model, effort) =>
-            onChange({ ...current, model, effort })
-          }
-        />
+          retry={reloadModels}
+          disabled={disabled}
+        >
+          <ModelPicker
+            compact
+            groupByFamily
+            includeDefault={false}
+            resetLabel="Use Goose default"
+            allowCustomModel
+            label="Goose model"
+            appearance={modelAppearance === "subtle" ? "subtle" : "outlined"}
+            models={choices}
+            value={current.model}
+            defaultModel={fallback}
+            defaultLabel={modelLabel(provider, fallback) || "Choose model"}
+            effort={current.effort}
+            effortLabel={
+              thinking.value?.levels.length
+                ? current.effort
+                  ? current.effort.charAt(0).toUpperCase() +
+                    current.effort.slice(1)
+                  : "Automatic"
+                : undefined
+            }
+            modelLabelPrefixes={
+              provider.startsWith("databricks")
+                ? ["databricks-", "goose-"]
+                : undefined
+            }
+            disabled={disabled}
+            loading={models.status === "loading"}
+            onConfigure={() => setOpen(true)}
+            onChange={(model) => onChange({ ...current, model, effort: "" })}
+            onEffortChange={(model, effort) =>
+              onChange({ ...current, model, effort })
+            }
+          />
+        </ModelDiscoveryRecovery>
         {open && (
           <ChooseDialog
             value={current}
