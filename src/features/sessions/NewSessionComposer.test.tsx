@@ -2465,6 +2465,42 @@ it("uploads files as soon as they are attached to a new chat, then sends them", 
   );
 });
 
+it("a file dropped anywhere on the new chat page attaches to its composer", async () => {
+  const test = setup();
+  const uploadForNewChat = vi.fn(async () => ({
+    name: "notes.txt",
+    url: `https://relay.test/media/${"f".repeat(64)}.txt`,
+    type: "text/plain",
+    size: 5,
+    sha256: "f".repeat(64),
+  }));
+  Object.assign(test.session, {
+    attachments: { upload: vi.fn(), uploadForNewChat },
+  });
+  render(
+    <NewSessionComposer
+      standalone
+      personal
+      session={test.session}
+      scope="test"
+      onStarted={vi.fn()}
+    />,
+  );
+  const page = screen.getByRole("region", { name: "New chat" });
+  const dataTransfer = {
+    types: ["Files"],
+    files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+    dropEffect: "uninitialized",
+  };
+  fireEvent.dragEnter(page, { dataTransfer });
+  expect(
+    await screen.findByText("Drop files into this conversation"),
+  ).toBeInTheDocument();
+  fireEvent.drop(page, { dataTransfer });
+  await waitFor(() => expect(uploadForNewChat).toHaveBeenCalledOnce());
+  expect(screen.queryByText("Drop files into this conversation")).toBeNull();
+});
+
 it("a failed upload blocks a new chat before anything is created", async () => {
   const test = setup(),
     onStarted = vi.fn(),
