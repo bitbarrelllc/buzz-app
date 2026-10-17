@@ -6957,13 +6957,6 @@ describe("Delete as a recoverable archive", () => {
       await vi.waitFor(() =>
         expect(g.runtime.sessions(bot)[0]?.busy).toBe(false),
       );
-      console.log(
-        "SPARSE SETTINGS OBSERVED",
-        JSON.stringify({
-          view: shown.model,
-          commands: g.process.geese[0]?.configured,
-        }),
-      );
       expect.soft(shown.model).not.toBe("model-c");
       expect
         .soft(
