@@ -148,6 +148,8 @@ export type ChannelTimelineProps = {
     | undefined;
   /** Draft context starts at the returned tail, never reads/writes canonical scroll. */
   transient?: boolean | undefined;
+  /** False: viewing rows marks nothing read; the owner decides what was read. */
+  marksRead?: boolean | undefined;
   navigation?: PageNavigation | undefined;
   onOpenThread?(
     messageId: string,
@@ -189,6 +191,7 @@ function Timeline({
   revealMessageId,
   inlineTarget,
   transient = false,
+  marksRead = true,
   navigation,
   onOpenThread,
   onOpenMediaReview,
@@ -504,6 +507,7 @@ function Timeline({
     latestMessageId: window.rows
       .filter((row) => !row.membership && !row.huddle)
       .at(-1)?.id,
+    enabled: marksRead,
   });
   const prepend =
     !!edges.current.first &&
