@@ -1165,7 +1165,8 @@ export class CodexRuntime {
         settings,
         workspace,
         request,
-        request.syncedEffort,
+        // A pinned thread runs on its pin, not the synced copy's effort.
+        pin === undefined ? request.syncedEffort : undefined,
       );
       active.model = model;
       active.effort = effort;

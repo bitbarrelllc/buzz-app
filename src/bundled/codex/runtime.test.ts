@@ -1034,6 +1034,27 @@ it("keeps a thread on its pinned config until Restart to apply, across a reload"
   await vi.waitFor(() => expect(restarts()).toHaveLength(2));
   expect(restarts()[1]).toContain("SYNCED B");
 });
+it("checks a synced effort only for a thread that will run on it", async () => {
+  const f = fixture();
+  const root = "a".repeat(64);
+  const carrying = (content: string, model: string, effort: string) => {
+    const delivery = f.delivery(content, root);
+    return {
+      ...delivery,
+      config: { ...(delivery.config as object), model, effort },
+      synced: { effort },
+    };
+  };
+  const starts = () => f.starts().map((start) => start.params);
+  await f.runtime.run(carrying("@Codex one", "test-model", "low"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(1));
+  f.complete(0, "ONE");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  // A remote edit to a model the pinned one lacks the effort of.
+  await f.runtime.run(carrying("@Codex two", "deep-model", "xhigh"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(2));
+  expect(starts()[1]).toMatchObject({ model: "test-model", effort: "low" });
+});
 it("leaves a thread unpinned when a local save lands while its turn starts", async () => {
   const f = fixture();
   const root = "a".repeat(64);
