@@ -219,16 +219,19 @@ it("shows exact declared access and changes before an enabled update", async () 
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   fireEvent.click(screen.getByRole("button", { name: "Browse plugin folder" }));
   await screen.findByRole("region", { name: "Computer access" });
-  expect(screen.getByText("Run example-cli")).toBeVisible();
-  expect(screen.getByText("Start example-worker")).toBeVisible();
-  expect(screen.getByText("Provide tools to local agents")).toBeVisible();
+  expect(screen.getByText(/^Run example-cli/)).toBeVisible();
+  expect(screen.getByText(/^Start example-worker/)).toBeVisible();
+  expect(screen.getByText(/^Provide tools to local agents/)).toBeVisible();
   expect(
     screen.getByRole("region", { name: "Plugin safety" }),
   ).toHaveTextContent("Plugins aren’t sandboxed");
-  expect(screen.getByText(/plugin’s configured arguments/)).toBeVisible();
-  expect(screen.getByText(/account’s full access/)).toBeVisible();
-  expect(screen.getByText(/HTTPS requests to this address/)).toBeVisible();
-  expect(screen.getByText(/Buzz’s local MCP server/)).toBeVisible();
+  const scopes = within(
+    screen.getByRole("region", { name: "Declared scopes" }),
+  );
+  expect(scopes.getByText(/plugin’s configured arguments/)).toBeVisible();
+  expect(scopes.getByText(/account’s full access/)).toBeVisible();
+  expect(scopes.getByText(/HTTPS requests to this address/)).toBeVisible();
+  expect(scopes.getByText(/Buzz’s local MCP server/)).toBeVisible();
   expect(screen.getByText(/This list does not limit everything/)).toBeVisible();
   expect(
     screen.getByText(/Computer access changes with this update/),
@@ -238,18 +241,23 @@ it("shows exact declared access and changes before an enabled update", async () 
     "data-variant",
     "prominent",
   );
+  fireEvent.click(screen.getByRole("button", { name: /^Run example-cli/ }));
   fireEvent.click(
-    screen.getByRole("button", { name: "View exact access declarations" }),
+    screen.getByRole("button", {
+      name: /^Connect to https:\/\/api.example.com/,
+    }),
   );
-  const command = screen
-    .getAllByText(/^Command check:/, { selector: "p" })[0]
-    ?.closest("li");
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Removed: Run example-cli/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Removed: Connect to/ }));
+  const command = screen.getByRole("region", { name: "Command check details" });
   expect(command).toBeVisible();
   expect(command).toHaveTextContent(
     /new or changed.*example-cli.*status.*--json/,
   );
   expect(
-    screen.getAllByText(/^HTTPS origin:/)[0]?.closest("li"),
+    screen.getByRole("region", { name: "HTTPS origin details" }),
   ).toHaveTextContent(/new or changed.*https:\/\/api.example.com/);
   expect(
     screen.getByRole("region", { name: "Removed declarations" }),
@@ -537,17 +545,16 @@ it.each([
     const access = within(
       await screen.findByRole("region", { name: "Computer access" }),
     );
-    fireEvent.click(
-      access.getByRole("button", { name: "View exact access declarations" }),
-    );
-    const grant = access
-      .getAllByText(/^Command /, { selector: "p" })[0]
-      ?.closest("li");
+    fireEvent.click(access.getByRole("button", { name: /^Run agent-tools/ }));
+    const grant = access.getByRole("region", { name: "Command tools details" });
     expect(
       screen.queryByRole("region", { name: "Package content" }),
     ).not.toBeInTheDocument();
     expect(grant).toHaveTextContent(allowance(next));
     if (changed) {
+      fireEvent.click(
+        access.getByRole("button", { name: /^Removed: Run agent-tools/ }),
+      );
       expect(grant).toHaveTextContent("(new or changed)");
       expect(
         access.getByRole("region", { name: "Removed declarations" }),

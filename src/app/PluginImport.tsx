@@ -66,6 +66,9 @@ function hostDeclarations(manifest: PluginManifest) {
     ...(manifest.host?.commands ?? []).map((command) => ({
       signature: `Command ${command.id}: ${JSON.stringify([command.program, ...command.args])} · input: ${command.maxInputBytes === undefined ? "none" : `up to ${command.maxInputBytes} bytes`} · output: up to ${command.maxOutputBytes ?? 4096} bytes`,
       title: `Command ${command.id}:`,
+      label: `Run ${command.program}`,
+      hint: "Buzz can run this program on your computer with the plugin’s configured arguments.",
+      icon: TerminalWindowIcon,
       details: (
         <>
           <ProgramDetails program={command.program} args={command.args} />
@@ -84,11 +87,17 @@ function hostDeclarations(manifest: PluginManifest) {
     ...(manifest.host?.networkOrigins ?? []).map((origin) => ({
       signature: `HTTPS origin: ${origin}`,
       title: "HTTPS origin:",
+      label: `Connect to ${origin}`,
+      hint: "Buzz can make HTTPS requests to this address for the plugin.",
+      icon: GlobeIcon,
       details: <code className="break-words">{origin}</code>,
     })),
     ...(manifest.host?.processes ?? []).map((process) => ({
       signature: `Process ${process.id}: ${JSON.stringify([process.program, ...(process.args ?? [])])}${process.bundled ? " (bundled with Buzz)" : ""} and any further arguments · stdin, full user access`,
       title: `Process ${process.id}:`,
+      label: `Start ${process.program}`,
+      hint: "Can start a background process with additional arguments, using your account’s full access.",
+      icon: TerminalWindowIcon,
       details: (
         <>
           <ProgramDetails program={process.program} args={process.args ?? []} />
@@ -106,6 +115,9 @@ function hostDeclarations(manifest: PluginManifest) {
             signature:
               "MCP servers: tools served to local agents over loopback HTTP",
             title: "MCP servers:",
+            label: "Provide tools to local agents",
+            hint: "Exposes plugin tools through Buzz’s local MCP server.",
+            icon: PlugIcon,
             details: (
               <p className="m-0">
                 Tools served to local agents over loopback HTTP.
@@ -284,6 +296,47 @@ export function PluginImport({
   const previousDetails = existing ? hostDeclarations(existing.manifest) : [];
   const declaredGrants = declaredDetails.map((grant) => grant.signature);
   const previousGrants = previousDetails.map((grant) => grant.signature);
+  const removedDetails = previousDetails.filter(
+    (grant) => !declaredGrants.includes(grant.signature),
+  );
+  function scopeItem(
+    grant: ReturnType<typeof hostDeclarations>[number],
+    removed = false,
+  ) {
+    const changed =
+      !!existing && !removed && !previousGrants.includes(grant.signature);
+    const Icon = grant.icon;
+    return {
+      value: grant.signature,
+      title: (
+        <span className="flex items-start gap-3 text-left text-body-sm break-words">
+          <Icon size={20} aria-hidden="true" className="shrink-0 text-muted" />
+          <span className="min-w-0">
+            <span className="block font-medium">
+              {removed ? "Removed: " : ""}
+              {grant.label}
+              {changed ? " (new or changed)" : ""}
+            </span>
+            <span className="block text-muted">{grant.hint}</span>
+          </span>
+        </span>
+      ),
+      content: (
+        <section
+          aria-label={`${removed ? "Removed " : ""}${grant.title.slice(0, -1)} details`}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: Scroll owner supports keyboard access to long command details.
+          tabIndex={0}
+          className={styles.technicalDetails}
+        >
+          <p className="m-0 font-medium">
+            {grant.title}
+            {changed ? " (new or changed)" : ""}
+          </p>
+          {grant.details}
+        </section>
+      ),
+    };
+  }
   const addButton = (
     <Button
       ref={trigger}
@@ -610,105 +663,6 @@ export function PluginImport({
                       </p>
                     </section>
                     <p className="m-0 font-medium">Computer access</p>
-                    {declaredGrants.length ? (
-                      <>
-                        <p className="m-0">This plugin asks Buzz to:</p>
-                        <ul
-                          // biome-ignore lint/a11y/noRedundantRoles: Preserve WebKit list semantics when icons replace markers.
-                          role="list"
-                          className="my-3 list-none space-y-3 break-words p-0"
-                        >
-                          {candidate.manifest.host?.commands?.map((command) => (
-                            <li
-                              key={command.id}
-                              className="flex items-start gap-3"
-                            >
-                              <TerminalWindowIcon
-                                size={20}
-                                aria-hidden="true"
-                                className="shrink-0 text-muted"
-                              />
-                              <div className="min-w-0">
-                                <p className="m-0 font-medium">
-                                  Run {command.program}
-                                </p>
-                                <p className="m-0 text-muted">
-                                  Buzz can run this program on your computer
-                                  with the plugin’s configured arguments.
-                                </p>
-                              </div>
-                            </li>
-                          ))}
-                          {candidate.manifest.host?.processes?.map(
-                            (process) => (
-                              <li
-                                key={process.id}
-                                className="flex items-start gap-3"
-                              >
-                                <TerminalWindowIcon
-                                  size={20}
-                                  aria-hidden="true"
-                                  className="shrink-0 text-muted"
-                                />
-                                <div className="min-w-0">
-                                  <p className="m-0 font-medium">
-                                    Start {process.program}
-                                  </p>
-                                  <p className="m-0 text-muted">
-                                    Can start a background process with
-                                    additional arguments, using your account’s
-                                    full access.
-                                  </p>
-                                </div>
-                              </li>
-                            ),
-                          )}
-                          {candidate.manifest.host?.networkOrigins?.map(
-                            (origin) => (
-                              <li
-                                key={origin}
-                                className="flex items-start gap-3"
-                              >
-                                <GlobeIcon
-                                  size={20}
-                                  aria-hidden="true"
-                                  className="shrink-0 text-muted"
-                                />
-                                <div className="min-w-0">
-                                  <p className="m-0 font-medium">
-                                    Connect to {origin}
-                                  </p>
-                                  <p className="m-0 text-muted">
-                                    Buzz can make HTTPS requests to this address
-                                    for the plugin.
-                                  </p>
-                                </div>
-                              </li>
-                            ),
-                          )}
-                          {candidate.manifest.host?.mcp && (
-                            <li className="flex items-start gap-3">
-                              <PlugIcon
-                                size={20}
-                                aria-hidden="true"
-                                className="shrink-0 text-muted"
-                              />
-                              <div className="min-w-0">
-                                <p className="m-0 font-medium">
-                                  Provide tools to local agents
-                                </p>
-                                <p className="m-0 text-muted">
-                                  Exposes plugin tools through Buzz’s local MCP
-                                  server.
-                                </p>
-                              </div>
-                            </li>
-                          )}
-                        </ul>
-                      </>
-                    ) : (
-                      <p className="m-0">No computer access declared.</p>
-                    )}
                     {existing &&
                       (declaredGrants.some(
                         (grant) => !previousGrants.includes(grant),
@@ -716,89 +670,36 @@ export function PluginImport({
                         previousGrants.some(
                           (grant) => !declaredGrants.includes(grant),
                         )) && (
-                        <p className="m-0">
-                          Computer access changes with this update. Review the
-                          exact declarations below.
+                        <p className="my-2">
+                          Computer access changes with this update. Expand a
+                          scope to review its exact declaration.
                         </p>
                       )}
-                    {(declaredGrants.length > 0 ||
-                      previousGrants.length > 0) && (
-                      <>
-                        <p className="mb-1 mt-4 text-caption text-muted">
-                          Inspect exact commands, arguments, network addresses
-                          and limits. Viewing them grants no access and runs
-                          nothing.
-                        </p>
+                    {declaredDetails.length ? (
+                      <section aria-label="Declared scopes">
+                        <p className="m-0">This plugin asks Buzz to:</p>
                         <Accordion
                           key={selected}
-                          items={[
-                            {
-                              value: "host-access",
-                              title: "View exact access declarations",
-                              content: (
-                                <section
-                                  aria-label="Plugin technical details"
-                                  // biome-ignore lint/a11y/noNoninteractiveTabindex: Scroll owner supports keyboard access to long command details.
-                                  tabIndex={0}
-                                  className={styles.technicalDetails}
-                                >
-                                  {declaredDetails.length > 0 && (
-                                    <ul className="m-0 list-none space-y-4 p-0">
-                                      {declaredDetails.map((grant) => (
-                                        <li key={grant.signature}>
-                                          <p className="m-0 font-medium">
-                                            {grant.title}
-                                            {existing &&
-                                            !previousGrants.includes(
-                                              grant.signature,
-                                            )
-                                              ? " (new or changed)"
-                                              : ""}
-                                          </p>
-                                          {grant.details}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  )}
-                                  {existing &&
-                                    previousDetails.some(
-                                      (grant) =>
-                                        !declaredGrants.includes(
-                                          grant.signature,
-                                        ),
-                                    ) && (
-                                      <section
-                                        aria-label="Removed declarations"
-                                        className="mt-4"
-                                      >
-                                        <p className="mb-2 mt-0 font-medium">
-                                          Removed:
-                                        </p>
-                                        <ul className="m-0 list-none space-y-4 p-0">
-                                          {previousDetails
-                                            .filter(
-                                              (grant) =>
-                                                !declaredGrants.includes(
-                                                  grant.signature,
-                                                ),
-                                            )
-                                            .map((grant) => (
-                                              <li key={grant.signature}>
-                                                <p className="m-0 font-medium">
-                                                  {grant.title}
-                                                </p>
-                                                {grant.details}
-                                              </li>
-                                            ))}
-                                        </ul>
-                                      </section>
-                                    )}
-                                </section>
-                              ),
-                            },
-                          ]}
+                          items={declaredDetails.map((grant) =>
+                            scopeItem(grant),
+                          )}
                         />
-                      </>
+                      </section>
+                    ) : (
+                      <p className="m-0">No computer access declared.</p>
+                    )}
+                    {removedDetails.length > 0 && (
+                      <section
+                        aria-label="Removed declarations"
+                        className="mt-4"
+                      >
+                        <p className="m-0 font-medium">Removed:</p>
+                        <Accordion
+                          items={removedDetails.map((grant) =>
+                            scopeItem(grant, true),
+                          )}
+                        />
+                      </section>
                     )}
                   </section>
                 )}

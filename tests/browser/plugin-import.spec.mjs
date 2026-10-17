@@ -766,20 +766,16 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   ).toHaveCount(0);
   const access = dialog.getByRole("region", { name: "Computer access" });
   await expect(access.getByText("Run python3")).toBeVisible();
-  const summaryList = access
-    .getByRole("list")
-    .filter({ hasText: "Run python3" });
+  const summaryList = access.getByRole("region", { name: "Declared scopes" });
   await expect(
     access.getByRole("region", { name: "Plugin safety" }),
   ).toContainText("Plugins aren’t sandboxed");
-  await expect(
-    access.getByText(/Viewing them grants no access and runs nothing/),
-  ).toBeVisible();
-  await expect(summaryList.getByRole("listitem")).toHaveCount(2);
+  await expect(access.getByText(/Inspect exact commands/)).toHaveCount(0);
+  await expect(summaryList.getByRole("button")).toHaveCount(2);
   await expect(summaryList).toContainText("Connect to https://api.example.com");
   await expect(access.getByText(/^Command status:/)).toHaveCount(0);
   const details = access.getByRole("button", {
-    name: "View exact access declarations",
+    name: /^Run python3/,
   });
   await details.focus();
   await details.press("Enter");
@@ -795,8 +791,14 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
     /monospace/,
   );
   const codeRegion = access.getByRole("region", {
-    name: "Plugin technical details",
+    name: "Command status details",
   });
+  await expect(
+    access.getByRole("button", { name: /^Connect to/ }),
+  ).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    access.getByRole("region", { name: "HTTPS origin details" }),
+  ).toHaveCount(0);
   for (const [width, mode] of [
     [900, "light"],
     [480, "dark"],
@@ -835,9 +837,11 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
     await codeRegion.evaluate((node) => {
       node.scrollTop = 0;
     });
-    await dialog.screenshot({
-      path: info.outputPath(`plugin-technical-details-${mode}.png`),
-    });
+    await details
+      .locator("xpath=ancestor::*[contains(@class, 'buzz-accordion-item')][1]")
+      .screenshot({
+        path: info.outputPath(`plugin-scope-details-${mode}.png`),
+      });
   }
   await details.press("Enter");
   await expect(details).toHaveAttribute("aria-expanded", "false");
