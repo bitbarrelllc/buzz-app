@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Agents } from "../../features/agents/service";
 import { Button } from "../../shared/design-system/ui/Button";
 
@@ -24,15 +24,26 @@ export function DeletedAgentsSettings({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
+  /** The agent last asked to recover, until its row leaves the list. */
+  const recovering = useRef("");
   const deleted = state.running.filter((agent) => agent.lifecycle);
+  const gone =
+    recovering.current &&
+    !deleted.some((agent) => agent.pubkey === recovering.current);
+  useEffect(() => {
+    if (!gone) return;
+    // Recovered, now or on a later reconnect: its row, with Recover, is gone.
+    recovering.current = "";
+    setError("");
+    if (document.activeElement === document.body) heading.current?.focus();
+  }, [gone]);
   const recover = async (pubkey: string) => {
     if (!active() || busy) return;
     setBusy(pubkey);
     setError("");
+    recovering.current = pubkey;
     try {
       await agents.recover(pubkey);
-      // Its row, with the focused Recover, is gone.
-      heading.current?.focus();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {

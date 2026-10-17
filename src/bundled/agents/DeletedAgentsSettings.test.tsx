@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Agent, AgentsSnapshot } from "../../features/agents/service";
@@ -128,4 +128,68 @@ it("moves focus to the list's heading once a recovered agent leaves it", async (
   expect(document.activeElement).toBe(
     screen.getByRole("heading", { name: "Deleted agents" }),
   );
+});
+
+it("moves focus to the heading and clears the error when a held recovery finishes after reconnect", async () => {
+  let state = fake([agent("Gone", "archived")]).snapshot();
+  const listeners = new Set<() => void>();
+  const set = (running: Agent[]) => {
+    state = { ...state, running };
+    for (const listener of listeners) listener();
+  };
+  const agents = {
+    snapshot: () => state,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    recover: vi.fn(async () => {
+      set([agent("Gone", "recovering")]);
+      throw new Error(
+        "Gone isn't recovered yet; it keeps trying while connected.",
+      );
+    }),
+  };
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  screen.getByRole("button", { name: "Recover" }).focus();
+  await userEvent.keyboard("{Enter}");
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Recover" })).toHaveFocus();
+  act(() => set([]));
+  expect(screen.getByRole("heading", { name: "Deleted agents" })).toHaveFocus();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("leaves focus where the user moved it when a held recovery finishes later", async () => {
+  let state = fake([agent("Gone", "archived")]).snapshot();
+  const listeners = new Set<() => void>();
+  const set = (running: Agent[]) => {
+    state = { ...state, running };
+    for (const listener of listeners) listener();
+  };
+  const agents = {
+    snapshot: () => state,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    recover: vi.fn(async () => {
+      set([agent("Gone", "recovering")]);
+      throw new Error(
+        "Gone isn't recovered yet; it keeps trying while connected.",
+      );
+    }),
+  };
+  render(
+    <>
+      <DeletedAgentsSettings agents={agents} active={() => true} />
+      <button type="button">Elsewhere</button>
+    </>,
+  );
+  screen.getByRole("button", { name: "Recover" }).focus();
+  await userEvent.keyboard("{Enter}");
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  screen.getByRole("button", { name: "Elsewhere" }).focus();
+  act(() => set([]));
+  expect(screen.getByRole("button", { name: "Elsewhere" })).toHaveFocus();
 });
