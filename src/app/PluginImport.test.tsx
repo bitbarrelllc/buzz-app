@@ -242,18 +242,18 @@ it("shows exact declared access and changes before an enabled update", async () 
     screen.getByRole("button", { name: "View exact access declarations" }),
   );
   const command = screen
-    .getByText(/^Command check:/, { selector: "li code" })
-    .closest("li");
+    .getAllByText(/^Command check:/, { selector: "p" })[0]
+    ?.closest("li");
   expect(command).toBeVisible();
   expect(command).toHaveTextContent(
-    /example-cli.*status.*--json.*new or changed/,
+    /new or changed.*example-cli.*status.*--json/,
   );
-  expect(screen.getByText(/^HTTPS origin:/).closest("li")).toHaveTextContent(
-    /https:\/\/api.example.com.*new or changed/,
-  );
-  expect(screen.getByText(/^Removed:/)).toHaveTextContent(
-    /--brief.*https:\/\/old.example.com/,
-  );
+  expect(
+    screen.getAllByText(/^HTTPS origin:/)[0]?.closest("li"),
+  ).toHaveTextContent(/new or changed.*https:\/\/api.example.com/);
+  expect(
+    screen.getByRole("region", { name: "Removed declarations" }),
+  ).toHaveTextContent(/--brief.*https:\/\/old.example.com/);
   expect(screen.queryByRole("region", { name: "Package content" })).toBeNull();
   expect(
     screen.getByText(
@@ -462,8 +462,8 @@ it.each([
     const limit = kind === "input" ? "maxInputBytes" : "maxOutputBytes";
     const allowance = (value: number | undefined) =>
       kind === "input" && value === undefined
-        ? "input: none"
-        : `${kind}: up to ${value ?? 4096} bytes`;
+        ? "Input: none"
+        : `${kind === "input" ? "Input" : "Output"}: up to ${value ?? 4096} bytes`;
     const command = {
       id: "tools",
       program: "agent-tools",
@@ -541,17 +541,17 @@ it.each([
       access.getByRole("button", { name: "View exact access declarations" }),
     );
     const grant = access
-      .getByText(/^Command /, { selector: "li code" })
-      .closest("li");
+      .getAllByText(/^Command /, { selector: "p" })[0]
+      ?.closest("li");
     expect(
       screen.queryByRole("region", { name: "Package content" }),
     ).not.toBeInTheDocument();
     expect(grant).toHaveTextContent(allowance(next));
     if (changed) {
       expect(grant).toHaveTextContent("(new or changed)");
-      expect(access.getByText(/^Removed:/)).toHaveTextContent(
-        allowance(previous),
-      );
+      expect(
+        access.getByRole("region", { name: "Removed declarations" }),
+      ).toHaveTextContent(allowance(previous));
     } else {
       expect(grant).not.toHaveTextContent("(new or changed)");
       expect(access.queryByText(/^Removed:/)).not.toBeInTheDocument();

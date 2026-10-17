@@ -29,21 +29,90 @@ function importLocation(preview: ImportPreview, path: string | undefined) {
   return `${source}${separator}${path.replaceAll("/", separator)}`;
 }
 
-function hostGrants(manifest: PluginManifest): string[] {
+function ProgramDetails({
+  program,
+  args,
+}: {
+  program: string;
+  args: readonly string[];
+}) {
+  return (
+    <>
+      <p className="mb-2 mt-1">
+        Program: <code>{program}</code>
+      </p>
+      <p className="mb-1 mt-0">Arguments{args.length ? ":" : ": none"}</p>
+      {args.length > 0 && (
+        <ol className="m-0 list-decimal space-y-2 pl-6">
+          {args.map((argument, index) => (
+            <li
+              // biome-ignore lint/suspicious/noArrayIndexKey: Argument position is its identity; repeated values are valid.
+              key={index}
+              aria-label={`Argument ${index + 1}`}
+            >
+              <pre className="m-0 whitespace-pre-wrap break-words">
+                <code>{argument}</code>
+              </pre>
+            </li>
+          ))}
+        </ol>
+      )}
+    </>
+  );
+}
+
+function hostDeclarations(manifest: PluginManifest) {
   return [
-    ...(manifest.host?.commands ?? []).map(
-      (command) =>
-        `Command ${command.id}: ${JSON.stringify([command.program, ...command.args])} · input: ${command.maxInputBytes === undefined ? "none" : `up to ${command.maxInputBytes} bytes`} · output: up to ${command.maxOutputBytes ?? 4096} bytes`,
-    ),
-    ...(manifest.host?.networkOrigins ?? []).map(
-      (origin) => `HTTPS origin: ${origin}`,
-    ),
-    ...(manifest.host?.processes ?? []).map(
-      (process) =>
-        `Process ${process.id}: ${JSON.stringify([process.program, ...(process.args ?? [])])}${process.bundled ? " (bundled with Buzz)" : ""} and any further arguments · stdin, full user access`,
-    ),
+    ...(manifest.host?.commands ?? []).map((command) => ({
+      signature: `Command ${command.id}: ${JSON.stringify([command.program, ...command.args])} · input: ${command.maxInputBytes === undefined ? "none" : `up to ${command.maxInputBytes} bytes`} · output: up to ${command.maxOutputBytes ?? 4096} bytes`,
+      title: `Command ${command.id}:`,
+      details: (
+        <>
+          <ProgramDetails program={command.program} args={command.args} />
+          <p className="mb-0 mt-2">
+            Input:{" "}
+            {command.maxInputBytes === undefined
+              ? "none"
+              : `up to ${command.maxInputBytes} bytes`}
+          </p>
+          <p className="m-0">
+            Output: up to {command.maxOutputBytes ?? 4096} bytes
+          </p>
+        </>
+      ),
+    })),
+    ...(manifest.host?.networkOrigins ?? []).map((origin) => ({
+      signature: `HTTPS origin: ${origin}`,
+      title: "HTTPS origin:",
+      details: <code className="break-words">{origin}</code>,
+    })),
+    ...(manifest.host?.processes ?? []).map((process) => ({
+      signature: `Process ${process.id}: ${JSON.stringify([process.program, ...(process.args ?? [])])}${process.bundled ? " (bundled with Buzz)" : ""} and any further arguments · stdin, full user access`,
+      title: `Process ${process.id}:`,
+      details: (
+        <>
+          <ProgramDetails program={process.program} args={process.args ?? []} />
+          {process.bundled && <p className="mb-0 mt-2">Bundled with Buzz.</p>}
+          <p className="mb-0 mt-2">
+            Allows further arguments and standard input, with your account’s
+            full access.
+          </p>
+        </>
+      ),
+    })),
     ...(manifest.host?.mcp
-      ? ["MCP servers: tools served to local agents over loopback HTTP"]
+      ? [
+          {
+            signature:
+              "MCP servers: tools served to local agents over loopback HTTP",
+            title: "MCP servers:",
+            details: (
+              <p className="m-0">
+                Tools served to local agents over loopback HTTP.
+              </p>
+            ),
+          },
+        ]
       : []),
   ];
 }
@@ -211,8 +280,10 @@ export function PluginImport({
         : existing?.previous || existing?.revision !== candidate?.revision
           ? "You can still roll back."
           : "There is no earlier revision to roll back to.";
-  const declaredGrants = candidate ? hostGrants(candidate.manifest) : [];
-  const previousGrants = existing ? hostGrants(existing.manifest) : [];
+  const declaredDetails = candidate ? hostDeclarations(candidate.manifest) : [];
+  const previousDetails = existing ? hostDeclarations(existing.manifest) : [];
+  const declaredGrants = declaredDetails.map((grant) => grant.signature);
+  const previousGrants = previousDetails.map((grant) => grant.signature);
   const addButton = (
     <Button
       ref={trigger}
@@ -671,35 +742,56 @@ export function PluginImport({
                                   tabIndex={0}
                                   className={styles.technicalDetails}
                                 >
-                                  {declaredGrants.length > 0 && (
-                                    <ul className="m-0 break-all">
-                                      {declaredGrants.map((grant) => (
-                                        <li key={grant}>
-                                          <code>{grant}</code>
-                                          {existing &&
-                                          !previousGrants.includes(grant)
-                                            ? " (new or changed)"
-                                            : ""}
+                                  {declaredDetails.length > 0 && (
+                                    <ul className="m-0 list-none space-y-4 p-0">
+                                      {declaredDetails.map((grant) => (
+                                        <li key={grant.signature}>
+                                          <p className="m-0 font-medium">
+                                            {grant.title}
+                                            {existing &&
+                                            !previousGrants.includes(
+                                              grant.signature,
+                                            )
+                                              ? " (new or changed)"
+                                              : ""}
+                                          </p>
+                                          {grant.details}
                                         </li>
                                       ))}
                                     </ul>
                                   )}
                                   {existing &&
-                                    previousGrants.filter(
+                                    previousDetails.some(
                                       (grant) =>
-                                        !declaredGrants.includes(grant),
-                                    ).length > 0 && (
-                                      <p className="m-0 break-all">
-                                        Removed:{" "}
-                                        <code>
-                                          {previousGrants
+                                        !declaredGrants.includes(
+                                          grant.signature,
+                                        ),
+                                    ) && (
+                                      <section
+                                        aria-label="Removed declarations"
+                                        className="mt-4"
+                                      >
+                                        <p className="mb-2 mt-0 font-medium">
+                                          Removed:
+                                        </p>
+                                        <ul className="m-0 list-none space-y-4 p-0">
+                                          {previousDetails
                                             .filter(
                                               (grant) =>
-                                                !declaredGrants.includes(grant),
+                                                !declaredGrants.includes(
+                                                  grant.signature,
+                                                ),
                                             )
-                                            .join(", ")}
-                                        </code>
-                                      </p>
+                                            .map((grant) => (
+                                              <li key={grant.signature}>
+                                                <p className="m-0 font-medium">
+                                                  {grant.title}
+                                                </p>
+                                                {grant.details}
+                                              </li>
+                                            ))}
+                                        </ul>
+                                      </section>
                                     )}
                                 </section>
                               ),

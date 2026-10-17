@@ -783,9 +783,13 @@ test("Add keeps a rejected install reachable and retries the same preview", asyn
   });
   await details.focus();
   await details.press("Enter");
-  await expect(access.getByText(/^Command status:/)).toContainText(
-    "plugin status",
+  await expect(access.getByText(/^Command status:/)).toBeVisible();
+  const script = access.getByLabel("Argument 2").locator("code");
+  expect(await script.textContent()).toBe(
+    "print('plugin status')\n".repeat(80),
   );
+  await expect(script.locator("..")).toHaveCSS("white-space", "pre-wrap");
+  await expect(script).toHaveCSS("word-break", "normal");
   await expect(access.locator("code").first()).toHaveCSS(
     "font-family",
     /monospace/,
