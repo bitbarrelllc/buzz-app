@@ -412,7 +412,14 @@ test("folder/Git preview selects the exact subfolder, installs disabled and warn
   );
   await openPlugins(page, app.origin);
   await button(page, "Add").click();
-  await page.getByRole("dialog").screenshot({
+  const sourceDialog = page.getByRole("dialog");
+  await expect(sourceDialog).toHaveCSS("opacity", "1");
+  await sourceDialog.evaluate(async (node) => {
+    await Promise.all(
+      node.getAnimations().map((animation) => animation.finished),
+    );
+  });
+  await sourceDialog.screenshot({
     path: info.outputPath("plugin-source.png"),
   });
   await button(page, "Browse plugin folder").click();
