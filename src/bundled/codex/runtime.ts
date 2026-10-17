@@ -541,6 +541,9 @@ export class CodexRuntime {
   async run(delivery: Delivery) {
     delivery.signal.throwIfAborted();
     const { trigger, agent } = delivery;
+    // Read with `delivery.config`, before any wait: a Save during a read
+    // below must not pin these settings under its newer count.
+    const restarts = this.restarts.get(agent.pubkey) ?? 0;
     // Watches and timers come as standalone turns (`runOnce`).
     if (trigger.type !== "mention") return delivery.ignored?.();
     const reads = this.reads(agent.pubkey);
@@ -559,7 +562,6 @@ export class CodexRuntime {
     const channelId = delivery.channelId;
     if (!channelId) throw new Error("The event has no unambiguous channel");
     const settings = this.resolveConfig(delivery.config);
-    const restarts = this.restarts.get(agent.pubkey) ?? 0;
     const channel = await reads.channel(channelId);
     const topLevel = await reads.meChat(
       agent.owner,

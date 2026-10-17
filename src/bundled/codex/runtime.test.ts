@@ -19,6 +19,20 @@ import type { Wire } from "./rpc";
 
 // The plugin registers only in the Mac/Linux desktop app.
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => true }));
+const ownerGate = vi.hoisted(() => ({
+  hold: undefined as (() => Promise<void>) | undefined,
+}));
+vi.mock("../../features/agents/owner-attestation", async (actual) => {
+  const real =
+    await actual<typeof import("../../features/agents/owner-attestation")>();
+  return {
+    ...real,
+    fromOwner: async (...args: Parameters<typeof real.fromOwner>) => {
+      await ownerGate.hold?.();
+      return real.fromOwner(...args);
+    },
+  };
+});
 
 const owner = "a".repeat(64);
 const pubkey = "b".repeat(64);
@@ -3506,3 +3520,144 @@ it("a first turn held at startup cannot undo a local Save", async () => {
     turn.resolve();
   }
 });
+
+it("fences a Save made while the owner check is held", async () => {
+  const f = fixture();
+  const gate = deferred<void>();
+  const entered = deferred<void>();
+  ownerGate.hold = async () => {
+    entered.resolve();
+    await gate.promise;
+  };
+  const carrying = (text: string, instructions: string) => {
+    const d = f.delivery(text);
+    return { ...d, config: { ...(d.config as object), instructions } };
+  };
+  try {
+    const first = f.runtime.run(carrying("first", "OLD BEFORE CHECK"));
+    await entered.promise;
+    ownerGate.hold = undefined;
+    f.runtime.sync([{ pubkey, saves: 1 } as Agent]);
+    gate.resolve();
+    await first;
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.complete(0, "ONE");
+    await f.runtime.run(carrying("next", "NEW AFTER SAVE"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(JSON.stringify(f.starts()[1]?.params)).toContain("NEW AFTER SAVE");
+    expect(JSON.stringify(f.starts()[1]?.params)).not.toContain(
+      "OLD BEFORE CHECK",
+    );
+    await f.complete(1, "TWO");
+  } finally {
+    ownerGate.hold = undefined;
+    gate.resolve();
+  }
+});
+
+it("fences a Save before the first entry exists during a held channel read", async () => {
+  const f = fixture();
+  const gate = deferred<void>();
+  const entered = deferred<void>();
+  const reads = ownerReads(
+    { snapshot: () => f.snapshot } as unknown as RelayData,
+    pubkey,
+  );
+  if (!reads) throw new Error("no reads");
+  const channel = reads.channel;
+  const seam = {
+    ...reads,
+    channel: async (id: string) => {
+      entered.resolve();
+      await gate.promise;
+      return channel(id);
+    },
+  };
+  const runtime = f.runtime as unknown as {
+    reads: (key: string) => typeof seam;
+  };
+  runtime.reads = () => seam;
+  const carrying = (text: string, instructions: string) => {
+    const d = f.delivery(text);
+    return { ...d, config: { ...(d.config as object), instructions } };
+  };
+  try {
+    const first = f.runtime.run(carrying("first", "OLD BEFORE ENTRY"));
+    await entered.promise;
+    f.runtime.sync([{ pubkey, saves: 1 } as Agent]);
+    gate.resolve();
+    await first;
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.complete(0, "ONE");
+    await f.runtime.run(carrying("next", "NEW AFTER SAVE"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(JSON.stringify(f.starts()[1]?.params)).toContain("NEW AFTER SAVE");
+    expect(JSON.stringify(f.starts()[1]?.params)).not.toContain(
+      "OLD BEFORE ENTRY",
+    );
+    await f.complete(1, "TWO");
+  } finally {
+    gate.resolve();
+  }
+});
+
+it.each(["reload", "entry recreation"])(
+  "retains invalid synced pin provenance across %s and clears it on Save",
+  async (mode) => {
+    const f = fixture();
+    const carrying = (
+      which: ReturnType<typeof fixture>,
+      text: string,
+      effort = "xhigh",
+    ) => {
+      const d = which.delivery(text);
+      return {
+        ...d,
+        config: { ...(d.config as object), effort },
+        synced: { effort },
+      };
+    };
+    await f.runtime.run({ ...carrying(f, "first"), model: "deep-model" });
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.complete(0, "ONE");
+    const stored = [...f.storage.values()].map((value) => JSON.parse(value));
+    expect(
+      stored.some((rows) =>
+        Object.values(rows).some(
+          (v) =>
+            !!v &&
+            typeof v === "object" &&
+            "synced" in v &&
+            v.synced === "xhigh",
+        ),
+      ),
+    ).toBe(true);
+    let restored = f;
+    if (mode === "reload") {
+      f.runtime.dispose();
+      await f.exits.promise;
+      restored = fixture();
+      for (const [key, value] of f.storage) restored.storage.set(key, value);
+    } else {
+      f.runtime.sync([{ pubkey: "z".repeat(64) } as Agent]);
+      f.runtime.sync([{ pubkey } as Agent]);
+    }
+    const before = restored.starts().length;
+    await restored.runtime.run(carrying(restored, "unpicked", "low"));
+    await vi.waitFor(() =>
+      expect(JSON.stringify(restored.publish.mock.calls)).toContain(
+        "synced effort",
+      ),
+    );
+    expect(restored.starts()).toHaveLength(before);
+    restored.runtime.sync([{ pubkey, saves: 1 } as Agent]);
+    expect([...restored.storage.values()].join()).not.toContain('"synced"');
+    await restored.runtime.run(carrying(restored, "after Save", "low"));
+    await vi.waitFor(() => expect(restored.starts()).toHaveLength(before + 1));
+    expect(restored.starts().at(-1)?.params).toMatchObject({
+      model: "test-model",
+      effort: "low",
+    });
+    await restored.complete(before, "DONE");
+  },
+);
