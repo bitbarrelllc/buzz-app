@@ -118,6 +118,7 @@ import {
   type ConfigBase,
   type ConfigJournals,
   communityConfig,
+  content as sideContent,
   type Side,
   storedBinding,
 } from "./community-config";
@@ -1930,9 +1931,8 @@ export class AgentsService extends Service implements Agents {
       base,
     );
     const failures: string[] = [];
-    for (const [side, result] of Object.entries(saved) as [Side, Saved][])
-      if (result.status === "saved") this.stripLocal(identity.pubkey, side);
-      else failures.push(saveProblem(result));
+    for (const result of Object.values(saved) as Saved[])
+      if (result.status !== "saved") failures.push(saveProblem(result));
     this.update();
     if (failures.length) throw new Error(failures.join(" "));
   }
@@ -2927,7 +2927,8 @@ export class AgentsService extends Service implements Agents {
         store: this.configStore,
         journals: this.configJournals,
         info: (signal) => nativeRelayInfo(origin, signal),
-        strip: (pubkey, side) => this.stripLocal(pubkey, side),
+        strip: (pubkey, side, accepted) =>
+          this.stripLocal(pubkey, side, accepted),
         changed: () => {
           this.showTeams();
           this.update();
@@ -2959,11 +2960,23 @@ export class AgentsService extends Service implements Agents {
         ?.syncedSettings?.schema,
     };
   }
-  /** Retires a side's local field once its exact value is the synced head. */
-  private stripLocal(pubkey: string, side: Side) {
+  /** Retires a side's local field once its exact value is the synced head:
+   * `accepted`, when this device's save just became it. */
+  private stripLocal(pubkey: string, side: Side, accepted?: RelayEvent) {
     const identity = this.live(pubkey);
     if (!identity) return;
     const record = this.recordOf(identity);
+    // A newer local edit than the accepted save stays a draft.
+    if (
+      accepted &&
+      sideContent(
+        side,
+        this.configAgent(identity, record.config as object),
+        record.config as object,
+        accepted,
+      ) !== accepted.content
+    )
+      return;
     const config = { ...(record.config as Record<string, unknown>) };
     const fields =
       side === "instructions"

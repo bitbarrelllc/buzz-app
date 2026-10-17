@@ -112,6 +112,7 @@ async function setup({
   jev = undefined as ClassifierNative | undefined,
   binding = undefined as ((agent: Agent) => ConfigBinding) | undefined,
   models = async () => {},
+  extraType = undefined as AgentType | undefined,
 } = {}) {
   const ctx = new Context();
   ctx.provide("pluginStatus", {
@@ -202,6 +203,7 @@ async function setup({
     ...(runOnce ? { runOnce } : {}),
   };
   plugin.agents.register(type);
+  if (extraType) plugin.agents.register(extraType);
   await vi.waitFor(() => expect(service.snapshot().status).toBe("ready"));
   return {
     activity,
@@ -6006,7 +6008,8 @@ describe("Delete as a recoverable archive", () => {
     /** While set, no config channel can be made. */
     const offline = { value: false };
     /** While set, the relay takes each revision only once it settles. */
-    const held: { value?: Promise<void> } = {};
+    const held: { value?: Promise<void> | undefined } = {};
+    const publishing = vi.fn();
     const addMember = vi.fn(async (id: string, pubkey: string) => {
       const found = [...channels.values()].find((c) => c.id === id);
       if (found && !found.members.includes(pubkey)) found.members.push(pubkey);
@@ -6085,6 +6088,7 @@ describe("Delete as a recoverable archive", () => {
           writer: {
             sign: async (template) => signed(owner, template),
             async publish(event) {
+              publishing(event);
               await held.value;
               const head = heads.get(key(event));
               const prev = event.tags.find(([name]) => name === "prev")?.[1];
@@ -6132,7 +6136,16 @@ describe("Delete as a recoverable archive", () => {
       heads.set(key(head), head);
       return channelId;
     };
-    return { opens, heads, addMember, channels, offline, held, remoteTeam };
+    return {
+      opens,
+      heads,
+      addMember,
+      channels,
+      offline,
+      held,
+      remoteTeam,
+      publishing,
+    };
   }
   const mentionAlder = (f: Awaited<ReturnType<typeof setup>>, id: string) =>
     f.emit({
@@ -6580,6 +6593,219 @@ describe("Delete as a recoverable archive", () => {
       expect.objectContaining({ pubkey: hostedKey }),
     );
     await f.ctx.fiber.dispose();
+  });
+
+  async function syncedGoose() {
+    const { GooseRuntime, DEFAULT_CONFIG } = await import(
+      "../../bundled/goose/runtime"
+    );
+    const { gooseRun } = await import("../../bundled/goose/run");
+    const { fakeSpawn } = await import("../../bundled/goose/goose-testing");
+    const relay = configRelay();
+    communityFake.value = relay.opens;
+    const storage = memoryStorage();
+    const process = fakeSpawn();
+    let relayData: ReturnType<typeof fakeRelay>["relay"] | undefined;
+    const runtime = new GooseRuntime(
+      { spawn: process.spawn, serveMcp: process.serve } as never,
+      () => relayData,
+      async () => null,
+      storage,
+    );
+    const f = await setup({
+      storage,
+      identities: [{ ...here(bot), type: "example/goose" }],
+      extraType: {
+        id: "goose",
+        title: "Goose",
+        defaults: () => ({
+          config: {
+            ...DEFAULT_CONFIG,
+            workspace: "/tmp/review-goose",
+            instructions: "CONFIG A",
+            model: "model-a",
+          },
+        }),
+        ...gooseRun(runtime),
+      },
+    });
+    relayData = f.relay;
+    Object.assign(f.session, {
+      profiles: { ensure: async () => {}, snapshot: () => new Map() },
+      names: { resolve: () => "Owner" },
+    });
+    const sync = () =>
+      runtime.sync(
+        f.service.snapshot().running.filter((a) => a.type === "example/goose"),
+      );
+    const off = f.service.subscribe(sync);
+    sync();
+    await vi.waitFor(() =>
+      expect(f.service.find(bot)?.configBase?.instructions).toBeTruthy(),
+    );
+    await relay.opens.mock.results[0]?.value.reconnected();
+    const first = event("1".repeat(64), {
+      pubkey: viewer,
+      tags: [
+        ["h", channel],
+        ["p", bot],
+      ],
+      created_at: Math.floor(Date.now() / 1000) + 1,
+    });
+    const deliver = (id: string) =>
+      f.emit({
+        events: [
+          {
+            ...first,
+            id: id.padEnd(64, "0"),
+            tags: [...first.tags, ["e", first.id, "", "reply"]],
+          },
+        ],
+        channelId: channel,
+      });
+    f.emit({ events: [first], channelId: channel });
+    await vi.waitFor(() => expect(process.geese[0]?.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(runtime.sessions(bot)[0]?.busy).toBe(false));
+    expect(
+      process.geese[0]?.prompts.get(
+        process.geese[0]?.turns[0]?.sessionId ?? "",
+      ),
+    ).toContain("CONFIG A");
+    const save = (model = "model-b", instructions = "CONFIG B") => {
+      const agent = f.service.find(bot);
+      if (!agent) throw new Error("no agent");
+      return f.service.save(bot, {
+        config: {
+          ...(agent.config as object),
+          instructions,
+          model,
+        },
+        ...(agent.configBase ? { base: agent.configBase } : {}),
+      });
+    };
+    return {
+      f,
+      relay,
+      storage,
+      runtime,
+      process,
+      deliver,
+      save,
+      close: async () => {
+        off();
+        runtime.dispose();
+        await f.ctx.fiber.dispose();
+      },
+    };
+  }
+
+  it("applies an accepted synced Save through the real Goose subscription and next turn", async () => {
+    const g = await syncedGoose();
+    let accept!: () => void;
+    g.relay.held.value = new Promise((resolve) => {
+      accept = resolve;
+    });
+    try {
+      const before = g.relay.publishing.mock.calls.length;
+      const saving = g.save();
+      await vi.waitFor(() =>
+        expect(g.relay.publishing.mock.calls.length).toBeGreaterThan(before),
+      );
+      accept();
+      await saving;
+      g.deliver("2".repeat(64));
+      await vi.waitFor(() => expect(g.process.geese[0]?.turns).toHaveLength(2));
+      expect(
+        g.process.geese[0]?.prompts.get(
+          g.process.geese[0]?.turns[1]?.sessionId ?? "",
+        ),
+      ).toContain("CONFIG B");
+      expect(g.runtime.outdated(bot, g.f.service.find(bot)?.config)).toBe(
+        false,
+      );
+    } finally {
+      accept();
+      await g.close();
+    }
+  });
+
+  it("keeps a newer local draft when an earlier Save is accepted", async () => {
+    const g = await syncedGoose();
+    let accept!: () => void;
+    g.relay.held.value = new Promise((resolve) => {
+      accept = resolve;
+    });
+    try {
+      const before = g.relay.publishing.mock.calls.length;
+      const savingB = g.save("model-a");
+      await vi.waitFor(() =>
+        expect(g.relay.publishing.mock.calls.length).toBeGreaterThan(before),
+      );
+      // Edited again while B is unconfirmed, from the same opened head.
+      const savingC = g.save("model-a", "CONFIG C");
+      const refusal = expect(savingC).rejects.toThrow("kept as a draft");
+      accept();
+      await savingB;
+      await refusal;
+      // B is the head now, but C is still this device's stored draft.
+      expect(g.storage.getItem("buzz.agents.v1")).toContain("CONFIG C");
+    } finally {
+      accept();
+      g.relay.held.value = undefined;
+      await g.close();
+    }
+  });
+
+  it("does not consume more local-save tokens on settled reconnects", async () => {
+    const g = await syncedGoose();
+    try {
+      await g.save();
+      const accepted = g.f.service.find(bot)?.saves;
+      const config = g.relay.opens.mock.results[0]?.value;
+      await config.reconnected();
+      await config.reconnected();
+      expect(g.f.service.find(bot)?.saves).toBe(accepted);
+    } finally {
+      await g.close();
+    }
+  });
+
+  it("applies a held synced Save to an existing Goose conversation when reconnect accepts it", async () => {
+    const g = await syncedGoose();
+    let reject!: (error: Error) => void;
+    g.relay.held.value = new Promise((_, no) => {
+      reject = no;
+    });
+    try {
+      const before = g.relay.publishing.mock.calls.length;
+      const saving = g.save("model-a");
+      const refusal = expect(saving).rejects.toThrow();
+      await vi.waitFor(() =>
+        expect(g.relay.publishing.mock.calls.length).toBeGreaterThan(before),
+      );
+      reject(new Error("connection lost before acceptance"));
+      await refusal;
+      g.relay.held.value = undefined;
+      const config = g.relay.opens.mock.results[0]?.value;
+      await config.reconnected();
+      const accepted = g.f.service.find(bot)?.config as
+        | { instructions?: string }
+        | undefined;
+      expect(accepted?.instructions).toBe("CONFIG B");
+      g.deliver("3".repeat(64));
+      await vi.waitFor(() => expect(g.process.geese[0]?.turns).toHaveLength(2));
+      expect(
+        g.process.geese[0]?.prompts.get(
+          g.process.geese[0]?.turns[1]?.sessionId ?? "",
+        ),
+      ).toContain("CONFIG B");
+      expect(g.runtime.outdated(bot, g.f.service.find(bot)?.config)).toBe(
+        false,
+      );
+    } finally {
+      g.relay.held.value = undefined;
+      await g.close();
+    }
   });
 
   it("with config sync on, advances an agent's local-save token once the relay accepts its Save", async () => {

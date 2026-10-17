@@ -86,7 +86,7 @@ const TITLE: Record<Side, string> = {
 
 /** The artifact content each side publishes from a config, over `head`'s
  * fields and settings this client doesn't know (NIP-AP "Editing"). */
-function content(
+export function content(
   side: Side,
   agent: ConfigAgent,
   config: object,
@@ -195,8 +195,9 @@ export type CommunityConfigInput = Readonly<{
   journals: ConfigJournals;
   /** The relay's NIP-11 document. */
   info(signal: AbortSignal): Promise<unknown>;
-  /** Removes a side's local field once its exact value is the synced head. */
-  strip(pubkey: string, side: Side): void;
+  /** Removes a side's local field once its exact value is the synced head;
+   * given `accepted`, only if the local value is exactly that head. */
+  strip(pubkey: string, side: Side, accepted?: RelayEvent): void;
   /** Reports each binding change, so starts and the UI re-resolve. */
   changed(): void;
   enabled?: boolean;
@@ -262,7 +263,7 @@ export function agentConfigs(
     lifecycle: LifecycleJournal;
     owner: string;
     community: string;
-    strip(pubkey: string, side: Side): void;
+    strip(pubkey: string, side: Side, accepted?: RelayEvent): void;
     changed(): void;
     dispose?(): void;
   }>,
@@ -331,7 +332,7 @@ export function agentConfigs(
             title: TITLE[side],
             content: () =>
               content(side, agent, configs.get(agent.pubkey)?.config ?? {}),
-            strip: () => input.strip(agent.pubkey, side),
+            strip: (accepted) => input.strip(agent.pubkey, side, accepted),
           },
         ];
       }),
@@ -549,6 +550,7 @@ export function agentConfigs(
         results[side] = await save(
           deps,
           {
+            ...sidesOf.get(agent.pubkey)?.get(side),
             subject: local.subject,
             title: TITLE[side],
             expected: {

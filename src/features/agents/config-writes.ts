@@ -183,9 +183,15 @@ export type LocalSide = Readonly<{
   extra?: readonly (readonly string[])[];
   /** The local value as artifact content, read fresh each time. */
   content(): string;
-  /** Removes this type's local field once its exact value is the head. */
-  strip(): void;
+  /** Removes this type's local field once its exact value is the head;
+   * given `accepted`, only if the local value is exactly that head. */
+  strip(accepted?: RelayEvent): void;
 }>;
+
+/** A side a save is sent for; with `strip`, this device's own accepted save
+ * retires the local field it came from. */
+type Sending = Pick<LocalSide, "subject" | "expected"> &
+  Partial<Pick<LocalSide, "strip">>;
 
 /** Definitive refusals are retried this many times before `failed`. */
 const ATTEMPTS = 3;
@@ -453,7 +459,7 @@ function carried(
  * the base head's client tags. The signed event is held until it resolves. */
 export function save(
   deps: WriteDeps,
-  side: Pick<LocalSide, "subject" | "expected" | "title">,
+  side: Sending & Pick<LocalSide, "title">,
   content: string,
   extra?: readonly (readonly string[])[],
   base?: string | null,
@@ -473,14 +479,14 @@ export function save(
  * restore), with the same conflict check, hold and send as an edit. */
 export const revise = (
   deps: WriteDeps,
-  side: Pick<LocalSide, "subject" | "expected">,
+  side: Sending,
   template: ReturnType<typeof artifactTemplate>,
   base: string,
 ) => write(deps, side, base, () => template);
 
 async function write(
   deps: WriteDeps,
-  side: Pick<LocalSide, "subject" | "expected">,
+  side: Sending,
   base: string | null | undefined,
   template: (
     head: RelayEvent | undefined,
@@ -503,15 +509,10 @@ async function write(
 }
 
 /** Resends a held save's identical bytes; undefined when none is held. */
-export const resume = (
-  deps: WriteDeps,
-  side: Pick<LocalSide, "subject" | "expected">,
-) => deps.journal.serially(side.subject, () => resend(deps, side));
+export const resume = (deps: WriteDeps, side: Sending) =>
+  deps.journal.serially(side.subject, () => resend(deps, side));
 
-async function resend(
-  deps: WriteDeps,
-  side: Pick<LocalSide, "subject" | "expected">,
-) {
+async function resend(deps: WriteDeps, side: Sending) {
   const held = deps.journal.unsaved(side.subject);
   return (
     held &&
@@ -523,7 +524,7 @@ async function resend(
  * refusal now proves it wasn't (§3.5). */
 async function send(
   deps: WriteDeps,
-  side: Pick<LocalSide, "subject" | "expected">,
+  side: Sending,
   held: Held,
   capture: ReturnType<AgentConfigStore["capture"]>,
   replay: boolean,
@@ -594,6 +595,9 @@ async function send(
     capture,
     checkedHead(after.head, side.expected),
   );
+  // Fresh and replayed sends alike: once installed, a local value that is
+  // exactly the accepted head retires; a newer draft stays.
+  if (after.status === "current") side.strip?.(after.head);
   return done(
     after.status === "current"
       ? { status: "saved", head: after.head }
