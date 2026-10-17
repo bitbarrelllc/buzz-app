@@ -17,6 +17,7 @@ import {
   MODE,
   migrate,
   resume,
+  revise,
   edited,
   save,
 } from "./config-writes";
@@ -484,4 +485,44 @@ describe("saves as revisions", () => {
     expect(f.sent[3]?.id).toBe(f.sent[1]?.id);
     expect(restarted.journal.unsaved(subject)).toBeUndefined();
   });
+});
+
+it("serializes Save and History revise and recovers the queue after failed signing", async () => {
+  const f = await setup();
+  await migrate(f.deps, f.side);
+  const head = f.store.state(subject).head;
+  if (!head) throw new Error("no head");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const sign = f.writer.sign;
+  let signing = 0;
+  f.writer.sign = vi.fn(async (template, signal) => {
+    if (++signing === 1) {
+      await held;
+      throw new Error("sign failed");
+    }
+    return sign(template, signal);
+  });
+  const first = save(f.deps, f.side, body("FAIL"));
+  const failure = expect(first).rejects.toThrow("sign failed");
+  const second = revise(
+    f.deps,
+    f.side,
+    artifactTemplate({
+      ...f.side.expected,
+      op: "update",
+      prev: head.id,
+      title: f.side.title,
+      content: body("RESTORE"),
+    }),
+    head.id,
+  );
+  await vi.waitFor(() => expect(signing).toBe(1));
+  release();
+  await failure;
+  expect((await second).status).toBe("saved");
+  expect(f.journal.unsaved(subject)).toBeUndefined();
+  expect(f.store.instructions(subject)).toEqual({ ok: true, text: "RESTORE" });
 });

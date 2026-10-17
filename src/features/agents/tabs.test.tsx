@@ -208,3 +208,47 @@ it("adds History only while the agent's config syncs, and reverts through it", a
     expect(revise).toHaveBeenCalledWith("instructions", expect.anything()),
   );
 });
+
+it("labels settings and instructions History regions independently", () => {
+  const channel = "9b353519-f4fe-4757-aef4-bec6cc0ae54c";
+  const history = {
+    read: async () => [],
+    revise: async () => ({ status: "accepted" }),
+    sides: [
+      {
+        side: "settings",
+        expected: { channel, d: "settings", type: "buzz.agent.settings" },
+        version: 0,
+      },
+      {
+        side: "instructions",
+        expected: {
+          channel,
+          d: "instructions",
+          type: "buzz.agent.instructions",
+        },
+        version: 0,
+      },
+    ],
+  };
+  const agents = {
+    subscribe: () => () => {},
+    snapshot: () => EMPTY,
+    classifier: () => "available",
+    configHistory: () => history,
+  } as unknown as Agents;
+  const tab = agentSections({
+    agents,
+    agent,
+    type: undefined,
+    channels: [],
+    memories: undefined,
+  }).find((tab) => tab.value === "agent:history");
+  render(<div>{tab?.render()}</div>);
+  expect(
+    screen.getByRole("region", { name: "Settings history" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("region", { name: "Instructions history" }),
+  ).toBeInTheDocument();
+});
