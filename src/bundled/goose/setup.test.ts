@@ -387,3 +387,13 @@ it("invalidates inherited sessions when a fresh check finds external defaults ch
   await goose.check();
   expect(changed).toHaveBeenCalledTimes(1);
 });
+
+it("retains the stored provider model when a defaults save omits the model", async () => {
+  const { setup: goose } = setup();
+  await goose.saveDefaults({ provider: "ollama", model: "llama4" });
+  await goose.saveDefaults({ provider: "ollama", model: "" });
+  expect((await goose.providers()).defaults).toEqual({
+    provider: "ollama",
+    model: "llama4",
+  });
+});

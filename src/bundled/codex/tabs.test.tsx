@@ -1283,3 +1283,21 @@ it.each(["Identity", "Settings"])(
     });
   },
 );
+
+it("keeps the recommended model inherited when only effort changes", async () => {
+  const f = fixture();
+  await f.provider.check();
+  render(<f.tabs.DefaultControl onConfigure={vi.fn()} />);
+  const control = screen.getByRole("button", { name: /^Codex default model:/ });
+  expect(control).toHaveTextContent("Model A · Default");
+  fireEvent.click(control);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Other" }));
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Model A" }),
+  );
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "High" }));
+  expect(f.provider.snapshot().defaults).toMatchObject({
+    model: "",
+    effort: "high",
+  });
+});

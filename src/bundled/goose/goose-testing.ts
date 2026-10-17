@@ -114,6 +114,10 @@ export function fakeSpawn(
   }> = {},
 ) {
   let defaults = options.defaults;
+  // Stored provider models are distinct from catalog defaultModel metadata.
+  const providerModels = new Map<string, string>();
+  if (defaults?.providerId && defaults.modelId)
+    providerModels.set(defaults.providerId, defaults.modelId);
   const processes: FakeGoose[] = [];
   const servers: FakeMcpServer[] = [];
   const serve = async (handler: McpHandler): Promise<HostMcpServer> => {
@@ -358,12 +362,18 @@ export function fakeSpawn(
           });
         case "_goose/unstable/defaults/read":
           return reply(id, defaults ?? {});
-        case "_goose/unstable/defaults/save":
-          defaults = {
-            providerId: String(params.providerId),
+        case "_goose/unstable/defaults/save": {
+          const providerId = String(params.providerId);
+          const modelId = String(
+            params.modelId || providerModels.get(providerId) || "",
+          );
+          providerModels.set(providerId, modelId);
+          defaults = { providerId, ...(modelId ? { modelId } : {}) };
+          return reply(id, {
+            providerId,
             ...(params.modelId ? { modelId: String(params.modelId) } : {}),
-          };
-          return reply(id, defaults);
+          });
+        }
         case "_goose/unstable/providers/config/read": {
           const set = options.saved?.get(String(params.providerId));
           return reply(id, {

@@ -436,7 +436,12 @@ export function createTabs({
               setError(String(reason));
             }
           }}
-          value={providerDefaultModel(saved.model, state.models) ?? saved.model}
+          value={
+            saved.model
+              ? (providerDefaultModel(saved.model, state.models) ?? saved.model)
+              : ""
+          }
+          defaultModel={providerDefaultModel("", state.models)}
           defaultLabel={providerDefaultLabel("", state.models)}
           onConfigure={onConfigure}
           onChange={(model) => {

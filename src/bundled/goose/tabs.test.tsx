@@ -806,3 +806,69 @@ it("retries Goose default model discovery", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });
+
+it("preserves Goose model inheritance when only thinking changes", async () => {
+  const fake = fakeSpawn({
+    providers: PROVIDERS,
+    defaults: { providerId: "databricks", modelId: "goose-claude" },
+    supported: ["goose-claude"],
+    thinking: { "goose-claude": { current: "low", levels: ["low", "high"] } },
+  });
+  const { CreateModel } = createTabs({
+    setup: new GooseSetup(fake.spawn),
+    ...unused,
+  });
+  const onChange = vi.fn();
+  render(
+    <CreateModel
+      config={DEFAULT_CONFIG}
+      onChange={onChange}
+      disabled={false}
+    />,
+  );
+  await waitFor(() =>
+    expect(modelButton()).toHaveTextContent("claude · Default"),
+  );
+  await waitFor(() => expect(modelButton()).toBeEnabled());
+  fireEvent.click(modelButton());
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Claude" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "claude" }));
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "High" }));
+  expect(onChange).toHaveBeenCalledWith(
+    expect.objectContaining({ model: "", effort: "high" }),
+  );
+});
+
+it("refreshes the Settings model and thinking after saving provider credentials", async () => {
+  const saved = new Map<string, Set<string>>();
+  const fake = fakeSpawn({
+    providers: PROVIDERS,
+    saved,
+    thinking: { "": { current: "low", levels: ["low", "high"] } },
+  });
+  const setup = new GooseSetup(fake.spawn);
+  const efforts = vi.spyOn(setup, "efforts");
+  const { SettingsTab } = createTabs({ setup, ...unused });
+  const agent = {
+    pubkey: "c".repeat(64),
+    name: "Gander",
+    type: "buzz.goose/goose",
+    owner: "a".repeat(64),
+    config: { ...DEFAULT_CONFIG, provider: "anthropic" },
+  } as Agent<Config>;
+  render(<SettingsTab agent={agent} save={vi.fn()} />);
+  const key = await screen.findByLabelText("API key", {
+    selector: "input:not([aria-hidden])",
+  });
+  await waitFor(() => expect(efforts).toHaveBeenCalled());
+  const reads = efforts.mock.calls.length;
+  expect(screen.queryByRole("button", { name: /^Model:/ })).toBeNull();
+  await userEvent.setup().type(key, "test-key");
+  fireEvent.click(screen.getByRole("button", { name: "Save to goose" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /^Model:/ })).toHaveTextContent(
+      "claude-sonnet-5-5 · Default",
+    ),
+  );
+  await waitFor(() => expect(efforts.mock.calls.length).toBeGreaterThan(reads));
+});

@@ -198,8 +198,9 @@ export function ModelPicker({
       label: prefix ? model.label.slice(prefix.length) : model.label,
     };
   });
-  const selected = shown.find((model) => model.id === value) ?? fallback;
-  const inherited = includeDefault && selected.id === "";
+  const selected =
+    shown.find((model) => model.id === (value || defaultModel)) ?? fallback;
+  const inherited = value === "";
   const selectedLabel = inherited
     ? `${selected.label} · Default`
     : selected.label;
@@ -220,7 +221,16 @@ export function ModelPicker({
             resetLabel={resetLabel}
             effort={effort}
             effortLabel={effortLabel}
-            onEffortChange={onEffortChange}
+            onEffortChange={
+              onEffortChange
+                ? (model, level) =>
+                    onEffortChange(
+                      inherited && model === defaultModel ? "" : model,
+                      level,
+                    )
+                : undefined
+            }
+            inherited={!loading && inherited}
             label={label}
             compact={compact}
             onConfigure={onConfigure}

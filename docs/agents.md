@@ -784,3 +784,8 @@ guidance. Keep the selected model and effort accessible, preserve compact chip
 appearance and truncation, and offer a trailing action to restore inheritance
 without duplicating the current model as the first option. Provider selection
 continues to use a searchable Combobox.
+
+Provider dropdowns are intentionally text-only. The model control shows the
+selected model family icon, not the Goose runtime or Databricks/provider mark,
+as explicitly confirmed by the product owner. Goose device defaults have no
+reset action: omitting a model in Goose retains its stored provider model.

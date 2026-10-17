@@ -448,9 +448,8 @@ export function createTabs(
               setError(String(reason));
             }
           }}
-          value={
-            state.defaults.model || catalogModel("", state.data)?.model || ""
-          }
+          value={state.defaults.model}
+          defaultModel={catalogModel("", state.data)?.model}
           defaultLabel={providerDefaultLabel("", state.data)}
           onConfigure={onConfigure}
           onChange={(model) => {

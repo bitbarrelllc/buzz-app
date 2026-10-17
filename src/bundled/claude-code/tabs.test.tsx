@@ -69,6 +69,8 @@ const CATALOG = [
   },
   {
     value: "opus",
+    supportsEffort: true,
+    supportedEffortLevels: ["low", "high"],
     resolvedModel: "claude-opus-5-5",
     displayName: "Opus",
     description: "Opus 5.5 · Best for everyday, complex tasks",
@@ -1107,4 +1109,25 @@ it("retries failed model discovery from the defaults row", async () => {
     ).toHaveTextContent("Opus 5.5"),
   );
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("keeps the model inherited when changing the default model's effort", async () => {
+  const Control = installed().type.provider?.DefaultControl;
+  if (!Control) throw new Error("Missing default control");
+  render(<Control onConfigure={vi.fn()} />);
+  const control = await screen.findByRole("button", {
+    name: /^Claude default model:/,
+  });
+  await waitFor(() => expect(control).toHaveTextContent("Opus 5.5 · Default"));
+  fireEvent.click(control);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Claude" }));
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Opus 5.5" }),
+  );
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "High" }));
+  expect(new ClaudeDefaults(localStorage).snapshot()).toMatchObject({
+    model: "",
+    effort: "high",
+  });
+  expect(control).toHaveTextContent("· Default");
 });

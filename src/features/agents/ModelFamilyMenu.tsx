@@ -36,6 +36,7 @@ export function modelFamily(model: ModelChoice): string {
 
 export function ModelFamilyMenu({
   leading,
+  inherited = false,
   appearance = "outlined",
   resetLabel,
   label,
@@ -53,6 +54,7 @@ export function ModelFamilyMenu({
   onCustom,
 }: {
   leading?: ReactNode;
+  inherited?: boolean;
   appearance?: "outlined" | "subtle";
   resetLabel?: string | undefined;
   label: string;
@@ -74,6 +76,7 @@ export function ModelFamilyMenu({
     const family = modelFamily(model);
     families.set(family, [...(families.get(family) ?? []), model]);
   }
+  const selectedLabel = `${selected.label}${inherited ? " · Default" : ""}`;
   const menu = (
     <MenuRoot>
       <MenuTrigger
@@ -84,11 +87,14 @@ export function ModelFamilyMenu({
             variant={appearance === "subtle" ? "subtle" : "outline"}
             shape="control"
             size="sm"
-            aria-label={`${label}: ${selected.label}${effortLabel ? `, ${effortLabel}` : ""}`}
-            title={selected.label}
+            aria-label={`${label}: ${selectedLabel}${effortLabel ? `, ${effortLabel}` : ""}`}
+            title={selectedLabel}
           >
             {leading ?? <ModelIcon model={selected.id || selected.label} />}
-            <span className="buzz-select-value">{selected.label}</span>
+            <span className="buzz-select-value">
+              {selected.label}
+              {inherited && <span className="text-subtle"> · Default</span>}
+            </span>
             {effortLabel && (
               <span className="text-body-sm text-subtle">{effortLabel}</span>
             )}
@@ -99,7 +105,7 @@ export function ModelFamilyMenu({
       <MenuPopup aria-label={label}>
         {defaultChoice && (
           <MenuRadioGroup
-            value={selected.id}
+            value={inherited ? "" : selected.id}
             onValueChange={(id) => onChange(id)}
           >
             <MenuRadioItem value="" closeOnClick>

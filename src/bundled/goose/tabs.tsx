@@ -154,7 +154,6 @@ export function createTabs({
       <>
         <ModelPicker
           includeDefault={false}
-          resetLabel="Use provider default"
           compact
           groupByFamily
           label="Goose default model"
@@ -281,6 +280,7 @@ export function createTabs({
     hideModel = deviceDefaults,
     keyDraft,
     rows = false,
+    revision = 0,
   }: Readonly<{
     deviceDefaults?: boolean;
     hideModel?: boolean;
@@ -292,8 +292,13 @@ export function createTabs({
     onChange(value: Choice): void;
     disabled?: boolean;
     rows?: boolean;
+    revision?: number;
   }>) {
-    const [listing, reload] = useRead(() => setup.providers(), "providers");
+    const [listing, reload] = useRead(
+      () => setup.providers(),
+      `providers:${revision}`,
+      "providers",
+    );
     // A new key or host can offer other models, so each save reads them again.
     const [saves, setSaves] = useState(0);
     const [providerSearch, setProviderSearch] = useState("");
@@ -306,7 +311,7 @@ export function createTabs({
         provider?.configured
           ? setup.models(id)
           : Promise.resolve([] as ModelChoice[]),
-      `${id}:${provider?.configured ?? false}:${saves}`,
+      `${id}:${provider?.configured ?? false}:${saves}:${revision}`,
       id,
     );
     const named = (key: string | undefined) =>
@@ -433,11 +438,7 @@ export function createTabs({
             models={models.value ?? []}
             loading={models.status === "loading"}
             value={value.model}
-            defaultLabel={
-              modelDefault
-                ? `Provider default (${modelLabel(id, modelDefault)})`
-                : "Provider default"
-            }
+            defaultLabel={modelLabel(id, modelDefault) || "Provider model"}
             {...(models.status === "error"
               ? { description: `Could not list models: ${models.error}` }
               : {})}
@@ -450,7 +451,10 @@ export function createTabs({
   }
 
   /** The agent's provider's key, and a test that it answers. */
-  function ProviderSetup({ choice }: Readonly<{ choice: Choice }>) {
+  function ProviderSetup({
+    choice,
+    onSaved,
+  }: Readonly<{ choice: Choice; onSaved(): void }>) {
     const [listing, reload] = useRead(() => setup.providers(), "providers");
     const id = choice.provider || listing.value?.defaults.provider;
     const provider = listing.value?.providers.find((item) => item.id === id);
@@ -469,7 +473,10 @@ export function createTabs({
             key={provider.id}
             provider={provider}
             disabled={false}
-            onSaved={reload}
+            onSaved={() => {
+              reload();
+              onSaved();
+            }}
           />
         )}
         <TestConnection choice={choice} disabled={false} />
@@ -516,17 +523,19 @@ export function createTabs({
   /** The thinking level turns run on: goose's default, or one goose offers
    * for the provider and model. */
   function ThinkingField({
+    revision = 0,
     choice,
     value,
     onChange,
   }: Readonly<{
     choice: Choice;
+    revision?: number;
     value: string;
     onChange(effort: string): void;
   }>) {
     const [efforts] = useRead(
       () => setup.efforts(choice),
-      `${choice.provider}\u0000${choice.model.trim()}`,
+      `${choice.provider}\u0000${choice.model.trim()}:${revision}`,
     );
     const levels = efforts.value?.levels ?? [];
     const named = (level: string) =>
@@ -1063,8 +1072,9 @@ export function createTabs({
           label="Goose model"
           appearance={modelAppearance === "subtle" ? "subtle" : "outlined"}
           models={choices}
-          value={current.model || fallback}
-          defaultLabel="Choose model"
+          value={current.model}
+          defaultModel={fallback}
+          defaultLabel={modelLabel(provider, fallback) || "Choose model"}
           effort={current.effort}
           effortLabel={
             thinking.value?.levels.length
@@ -1116,6 +1126,7 @@ export function createTabs({
     settingsContent,
   }: AgentViewProps<Config>) {
     const form = useId();
+    const [providerRevision, setProviderRevision] = useState(0);
     const saved = readConfig(agent.config);
     const [draft, setDraft] = useState(saved);
     const [saving, setSaving] = useState(false);
@@ -1164,11 +1175,13 @@ export function createTabs({
             <SettingsGroup>
               {settingsHost?.typeControl?.(configChanged)}
               <ProviderFields
+                revision={providerRevision}
                 rows
                 value={draft}
                 onChange={(choice) => setDraft({ ...draft, ...choice })}
               />
               <ThinkingField
+                revision={providerRevision}
                 choice={draft}
                 value={draft.effort}
                 onChange={(effort) => setDraft({ ...draft, effort })}
@@ -1183,7 +1196,10 @@ export function createTabs({
         )}
         {settingsSection !== "identity" && (
           <>
-            <ProviderSetup choice={draft} />
+            <ProviderSetup
+              choice={draft}
+              onSaved={() => setProviderRevision((value) => value + 1)}
+            />
             <Field
               label="Workspace"
               description="The folder goose works in. Use ~/ for your home folder."
