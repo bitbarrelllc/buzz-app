@@ -5,6 +5,7 @@ import {
 } from "./navigation.mjs";
 import { test, expect } from "./fixture.mjs";
 import { open, anchor, expectAnchor } from "./timeline.mjs";
+import { wcagRatio } from "../../scripts/design-system/apca.mjs";
 
 test.use({ historyCounts: { alpha: 20, beta: 1 }, launchAnimation: true });
 const key = "buzz-appearance.v1";
@@ -259,6 +260,111 @@ test("Appearance changes and restores both modes, shared keyboard controls, dial
   await expect(dark).toBeChecked();
 });
 
+// Browser-only boundary: the actual shared slider's painted track/thumb,
+// pointer snapping and native keyboard steps inside Appearance. The token guard
+// owns the full accent/level matrix; these samples catch incorrect role wiring.
+test("Vibe level has visible marks without focus and snaps by pointer and keyboard", async ({
+  page,
+  app,
+}, testInfo) => {
+  await page.goto(app.origin);
+  await settings(page);
+  const slider = page.getByRole("slider", { name: "Vibe level" });
+  const root = page.locator(".buzz-step-slider");
+  const thumb = root.locator(".buzz-step-slider-thumb");
+  const control = root.locator(".buzz-step-slider-control");
+  const track = root.locator(".buzz-step-slider-track");
+  const palette = button(page, "Chartreuse accent color");
+  for (const [mode, width, level, name] of [
+    ["Light", 1280, "touch", "Hummin’"],
+    ["Dark", 390, "full", "Buzzin’"],
+  ]) {
+    await page.setViewportSize({ width, height: 844 });
+    await chooseColorMode(page, mode);
+    await slider.focus();
+    await page.keyboard.press("Home");
+    if (level === "full") await page.keyboard.press("End");
+    else await page.keyboard.press("ArrowRight");
+    await expect(slider).toHaveAttribute("aria-valuetext", name);
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-color-level",
+      level,
+    );
+    // Move focus away: a keyboard ring must not hide an invisible resting mark.
+    await palette.click();
+    await page.mouse.move(0, 0);
+    await expect(slider).not.toBeFocused();
+    await expect(thumb).toHaveCSS("outline-style", "none");
+    const colors = await root.evaluate((node) => {
+      const rgb = (value) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d");
+        context.fillStyle = value;
+        context.fillRect(0, 0, 1, 1);
+        return (
+          "#" +
+          [...context.getImageData(0, 0, 1, 1).data]
+            .slice(0, 3)
+            .map((v) => v.toString(16).padStart(2, "0"))
+            .join("")
+        );
+      };
+      const paint = (selector) =>
+        rgb(getComputedStyle(node.querySelector(selector)).backgroundColor);
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--surface-panel)";
+      node.append(probe);
+      const panel = rgb(getComputedStyle(probe).backgroundColor);
+      probe.remove();
+      return {
+        thumb: paint(".buzz-step-slider-thumb"),
+        selected: paint(".buzz-step-slider-indicator"),
+        track: paint(".buzz-step-slider-track"),
+        panel,
+      };
+    });
+    expect(
+      wcagRatio(colors.thumb, colors.panel),
+      `thumb on panel in ${mode}`,
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      wcagRatio(colors.selected, colors.track),
+      `selected track in ${mode}`,
+    ).toBeGreaterThanOrEqual(3);
+    await root.screenshot({
+      path: testInfo.outputPath(`vibe-marks-${mode}.png`),
+    });
+    // Click the first visible stop and drag to the last; real hit testing and
+    // pointer capture cannot be established in a DOM emulator.
+    const box = await track.boundingBox();
+    if (!box) throw new Error("Slider track is not visible");
+    await page.mouse.click(box.x, box.y + box.height / 2);
+    await expect(slider).toHaveAttribute("aria-valuetext", "Snoozin’");
+    const start = await thumb.boundingBox();
+    if (!start) throw new Error("Slider thumb is not visible");
+    await page.mouse.move(
+      start.x + start.width / 2,
+      start.y + start.height / 2,
+    );
+    await page.mouse.down();
+    try {
+      const destination = await control.boundingBox();
+      if (!destination) throw new Error("Slider control is not visible");
+      await page.mouse.move(
+        destination.x + destination.width - 8,
+        destination.y + destination.height / 2,
+      );
+      await expect(slider).toHaveAttribute("aria-valuetext", "Buzzin’");
+    } finally {
+      await page.mouse.up();
+    }
+  }
+  expect(
+    await page.evaluate(() => localStorage.getItem("buzz-color-level.v1")),
+  ).toBe("full");
+});
+
 test("System appearance follows computer changes and keeps the selected choice after reload", async ({
   page,
   app,
@@ -503,6 +609,28 @@ test("compiled host preserves compatibility utility meanings", async ({
         return color;
       }),
     );
+    const legacy = await page.locator("#old-primary").evaluate((node) => {
+      const style = getComputedStyle(node);
+      const hex = (color) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d");
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return (
+          "#" +
+          [...context.getImageData(0, 0, 1, 1).data]
+            .slice(0, 3)
+            .map((v) => v.toString(16).padStart(2, "0"))
+            .join("")
+        );
+      };
+      return { ink: hex(style.color), fill: hex(style.backgroundColor) };
+    });
+    expect(
+      wcagRatio(legacy.ink, legacy.fill),
+      `legacy primary ink in ${mode}`,
+    ).toBeGreaterThanOrEqual(4.5);
     await expect(page.locator("#old-primary")).toHaveCSS(
       "border-radius",
       "12px",

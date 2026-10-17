@@ -150,43 +150,41 @@ describe("semantic contrast contract", () => {
     },
   );
 
-  it("checks each color amount, not only the neutral role layer", () => {
-    const marker = '[data-color-level="full"] .light {';
-    const start = tokens.indexOf(marker);
-    expect(start).toBeGreaterThan(0);
-    const end = tokens.indexOf("}", start);
-    const level = tokens.slice(start, end);
-    expect(level).toContain("--text-subtle: var(--accent-11);");
+  it("checks shared color groups at every applicable level", () => {
+    const from = "--text-subtle: var(--accent-11);";
+    expect(tokens).toContain(from);
     const result = check(
-      tokens.slice(0, start) +
-        level.replace(
-          "--text-subtle: var(--accent-11);",
-          "--text-subtle: var(--accent-6);",
-        ) +
-        tokens.slice(end),
+      tokens.replaceAll(from, "--text-subtle: var(--accent-6);"),
     );
     expect(result.status, result.output).toBe(1);
-    expect(result.output).toContain("chartreuse/full/light --text-subtle");
+    for (const level of ["full"])
+      expect(result.output).toContain(
+        `chartreuse/${level}/light --text-subtle`,
+      );
   });
 
   it("rejects a gray role left on an accent ground", () => {
-    const marker = '[data-color-level="more"] .light {';
-    const start = tokens.indexOf(marker);
-    expect(start).toBeGreaterThan(0);
-    const end = tokens.indexOf("}", start);
-    const level = tokens.slice(start, end);
-    expect(level).toContain("--text-subtle: var(--accent-11);");
+    const from = "--text-chrome-subtle: var(--accent-11);";
+    expect(tokens).toContain(from);
     const result = check(
-      tokens.slice(0, start) +
-        level.replace(
-          "--text-subtle: var(--accent-11);",
-          "--text-subtle: var(--neutral-10);",
-        ) +
-        tokens.slice(end),
+      tokens.replaceAll(from, "--text-chrome-subtle: var(--neutral-10);"),
     );
     expect(result.status, result.output).toBe(1);
     expect(result.output).toContain(
-      "chartreuse/more/light: --text-subtle #525252 is gray on --bg-app",
+      "chartreuse/more/light: --text-chrome-subtle #525252 is gray on --affordance-chrome",
+    );
+  });
+
+  it("rejects a slider mark that disappears into the unfilled track", () => {
+    const from = "--affordance-subtle-pressed: var(--neutral-4);";
+    expect(tokens).toContain(from);
+    // A gray middle step still contrasts on white, but not on this track.
+    const result = check(
+      tokens.replace(from, "--affordance-subtle-pressed: var(--neutral-12);"),
+    );
+    expect(result.status, result.output).toBe(1);
+    expect(result.output).toContain(
+      "step-slider --affordance-prominent-mark on --affordance-subtle-pressed",
     );
   });
 

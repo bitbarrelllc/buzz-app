@@ -136,7 +136,12 @@ const PAIRS = [
     "--bg-app",
   ]),
   ["--text-standard", "--affordance-popover-selected"],
+  ...["--affordance-chrome", "--affordance-chrome-hover"].flatMap((fill) => [
+    ["--text-chrome-subtle", fill],
+    ["--text-standard", fill],
+  ]),
   ...["--affordance-row-hover", "--affordance-selected"].flatMap((fill) => [
+    ["--text-row", fill],
     ["--text-row-subtle", fill],
     ["--text-row-metadata", fill],
   ]),
@@ -235,8 +240,10 @@ function declarationsByMode(
       continue;
     const family = /\[data-accent="([a-z]+)"\]/.exec(selector)?.[1];
     if (family && family !== accent) continue;
-    const blockLevel = /\[data-color-level="([a-z]+)"\]/.exec(selector)?.[1];
-    if (blockLevel && blockLevel !== level) continue;
+    const blockLevels = [
+      ...selector.matchAll(/\[data-color-level="([a-z]+)"\]/g),
+    ].map((match) => match[1]);
+    if (blockLevels.length && !blockLevels.includes(level)) continue;
     // Dark starts from the light value and is overridden by dark owners.
     const isDark =
       owner.endsWith(".dark") || selector.includes('[data-color-mode="dark"]');
@@ -321,6 +328,21 @@ function audit(mode, map, baseline) {
     boundaryFailures.push(
       `${mode}: --border-floating-control on --surface-popover — ${floatingBoundary === null ? "unresolved color" : `${floatingBoundary.toFixed(3)}:1`}, needs 3:1`,
     );
+  }
+  // A step slider's selected track meets the unfilled track, and its thumb
+  // sits on both the track and panel. These are standalone marks, not button
+  // fills with paired ink; keyboard focus is not their resting boundary.
+  for (const surfaceRole of [
+    "--affordance-subtle-pressed",
+    "--surface-panel",
+  ]) {
+    const mark = resolve(map, "--affordance-prominent-mark");
+    const surface = resolve(map, surfaceRole);
+    const ratio = mark && surface ? wcagRatio(mark, surface) : null;
+    if (ratio === null || ratio < 3)
+      boundaryFailures.push(
+        `${mode}: step-slider --affordance-prominent-mark on ${surfaceRole} — ${ratio === null ? "unresolved color" : `${ratio.toFixed(3)}:1`}, needs 3:1`,
+      );
   }
   for (const role of BOUNDARY_ROLES) {
     const surfaces =
@@ -473,7 +495,12 @@ const on = (foregrounds, grounds) =>
   grounds.flatMap((ground) => foregrounds.map((fg) => [fg, ground]));
 const GROUNDED = [
   ...on(
-    ["--text-standard", "--text-row-subtle", "--text-row-metadata"],
+    [
+      "--text-standard",
+      "--text-row",
+      "--text-row-subtle",
+      "--text-row-metadata",
+    ],
     [
       "--affordance-row-hover",
       "--affordance-panel-hover",
@@ -506,14 +533,17 @@ const GROUNDED = [
     ],
   ),
   ...on(
-    // Navigation text lives in the sidebar pane, not on the shell.
-    [
-      "--text-standard",
-      "--text-subtle",
-      "--text-metadata",
-      "--texture-dots-color",
-    ],
+    // Only ink-strength icons and the chrome capsule sit directly on the shell.
+    ["--text-standard", "--texture-dots-color", "--affordance-chrome"],
     ["--bg-app"],
+  ),
+  ...on(
+    ["--text-standard", "--text-chrome-subtle"],
+    [
+      "--affordance-chrome",
+      "--affordance-chrome-hover",
+      "--bg-chrome-selected",
+    ],
   ),
   ...on(
     [

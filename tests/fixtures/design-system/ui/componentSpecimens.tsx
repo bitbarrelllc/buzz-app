@@ -1581,7 +1581,7 @@ function StepSliderSpecimen() {
     />
   )}
 />
-<StepSlider aria-label="Vibe level" steps={steps} value="more" disabled />`}
+<StepSlider aria-label="Vibe level" steps={steps} value="full" disabled />`}
     >
       <div className="component-specimen-stack">
         <SettingsGroup>
@@ -1600,7 +1600,7 @@ function StepSliderSpecimen() {
         <StepSlider
           aria-label="Disabled vibe level"
           steps={STEPS}
-          value="more"
+          value="full"
           onValueChange={() => {}}
           disabled
         />

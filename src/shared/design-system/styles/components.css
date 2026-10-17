@@ -739,7 +739,7 @@
 
   .buzz-tabs[data-variant="chrome"],
   .chrome-navigation {
-    background: var(--affordance-subtle);
+    background: var(--affordance-chrome);
   }
 
   .buzz-tabs[data-variant="chrome"] {
@@ -760,12 +760,12 @@
     height: 2rem;
     border-radius: var(--radius-pill);
     padding: 0 var(--space-4);
-    color: var(--text-subtle);
+    color: var(--text-chrome-subtle);
   }
 
   /* Selection and hover occupy the same box; a selected tab does not hover. */
   .buzz-tabs[data-variant="chrome"] .buzz-tabs-tab:hover:not([data-selected]) {
-    background: var(--affordance-subtle-hover);
+    background: var(--affordance-chrome-hover);
     color: var(--text-standard);
   }
 
@@ -1063,12 +1063,12 @@
     height: 2rem;
     padding: 0 var(--space-4);
     border-radius: var(--radius-pill);
-    color: var(--text-subtle);
+    color: var(--text-chrome-subtle);
     @apply text-label;
   }
   .chrome-navigation
     .navigation-item[data-variant="pill"]:hover:not([data-selected]) {
-    background: var(--affordance-subtle-hover);
+    background: var(--affordance-chrome-hover);
     color: var(--text-standard);
   }
   .chrome-navigation .navigation-item[data-variant="pill"][data-selected],
@@ -1774,7 +1774,8 @@
 
   /* A few ordered steps read as stops, not a continuous range: each step is a
      visible dot, filled up to the choice, and the choice's name follows the
-     thumb. Fill and thumb share the Switch's prominent pair. */
+     thumb. Track selection and thumb are standalone marks, not filled buttons;
+     use the contrasting mark role even when prominent buttons are bright. */
   .buzz-step-slider {
     display: flex;
     flex-direction: column;
@@ -1801,7 +1802,7 @@
   }
   .buzz-step-slider-indicator {
     border-radius: var(--radius-pill);
-    background: var(--affordance-prominent);
+    background: var(--affordance-prominent-mark);
   }
   .buzz-step-slider-stop {
     position: absolute;
@@ -1817,24 +1818,15 @@
     pointer-events: none;
   }
   .buzz-step-slider-stop[data-filled] {
-    background: var(--affordance-prominent);
+    background: var(--affordance-prominent-mark);
   }
   .buzz-step-slider-thumb {
     inline-size: var(--space-4);
     block-size: var(--space-4);
     border: 2px solid var(--surface-panel);
     border-radius: var(--radius-pill);
-    background: var(--affordance-prominent);
+    background: var(--affordance-prominent-mark);
     box-shadow: var(--shadow-xs);
-    transition: background-color var(--duration-state) var(--easing-state);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .buzz-step-slider-control:hover .buzz-step-slider-thumb {
-      background: var(--affordance-prominent-hover);
-    }
-  }
-  .buzz-step-slider-thumb[data-dragging] {
-    background: var(--affordance-prominent-pressed);
   }
   html[data-keyboard-navigation] .buzz-step-slider-thumb:has(:focus-visible) {
     outline: 2px solid var(--text-standard);

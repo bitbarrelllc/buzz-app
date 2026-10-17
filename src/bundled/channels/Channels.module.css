@@ -1013,3 +1013,10 @@ html[data-keyboard-navigation]
   flex-direction: column;
   min-height: 0;
 }
+
+/* Hovered and selected rows take the row's paired ink, so navigation text
+   follows the fill instead of staying gray on an accent row. */
+.sidebar [data-variant="row"]:is(:hover, [data-selected]),
+.sidebar :is(:hover, [data-selected]) > * > [data-variant="row"] {
+  color: var(--text-row);
+}

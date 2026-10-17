@@ -298,8 +298,7 @@ export const ROLE_GROUPS: RoleGroup[] = [
       {
         token: "bg-surface-message-own",
         variable: "--surface-message-own",
-        pointsAt:
-          "bubble-neutral at Neutral; accent 4, 6 (dark 5) or 9 as the color amount rises",
+        pointsAt: "accent step 4 at Hummin’; step 9 at Buzzin’",
         use: "Own message bubbles; pair with --text-message-own.",
         status: "core",
       },
@@ -346,6 +345,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         status: "core",
       },
       {
+        token: "text-row",
+        variable: "--text-row",
+        pointsAt: "text-navigation; accent step 12 once rows take the accent",
+        use: "Primary navigation text on a hovered or selected row; follows the row's fill.",
+        status: "proposed",
+      },
+      {
         token: "text-row-subtle",
         variable: "--text-row-subtle",
         pointsAt: "text-subtle; accent step 11 once rows take the accent",
@@ -357,6 +363,13 @@ export const ROLE_GROUPS: RoleGroup[] = [
         variable: "--text-row-metadata",
         pointsAt: "text-metadata; accent step 11 once rows take the accent",
         use: "Metadata on a hovered or selected row; follows the row's fill.",
+        status: "proposed",
+      },
+      {
+        token: "text-chrome-subtle",
+        variable: "--text-chrome-subtle",
+        pointsAt: "text-subtle; accent step 11 once the shell takes the accent",
+        use: "Inactive labels in the chrome capsule on the app shell.",
         status: "proposed",
       },
       {
@@ -623,7 +636,7 @@ export const ROLE_GROUPS: RoleGroup[] = [
       {
         token: "bg-affordance-prominent",
         variable: "--affordance-prominent",
-        pointsAt: "neutral-12 at Snoozin'; accent step 9 from Hummin'",
+        pointsAt: "accent step 9 at either vibe level",
         use: "The main action fill.",
         status: "core",
       },
@@ -711,6 +724,22 @@ export const ROLE_GROUPS: RoleGroup[] = [
         pointsAt:
           "affordance-subtle; accent step 2 light / 3 dark once rows take the accent",
         use: "A list or navigation row under the pointer, separate from resting quiet control fills.",
+        status: "proposed",
+      },
+      {
+        token: "bg-affordance-chrome",
+        variable: "--affordance-chrome",
+        pointsAt:
+          "affordance-subtle; accent step 3 once the shell takes the accent",
+        use: "The grouped chrome capsule on the app shell, such as Solo and Multiplayer.",
+        status: "proposed",
+      },
+      {
+        token: "bg-affordance-chrome-hover",
+        variable: "--affordance-chrome-hover",
+        pointsAt:
+          "affordance-subtle-hover; accent step 4 once the shell takes the accent",
+        use: "An inactive chrome capsule item under the pointer.",
         status: "proposed",
       },
       {

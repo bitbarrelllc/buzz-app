@@ -144,6 +144,15 @@ test("an open image gallery follows host appearance while retaining its dark sta
     await expect(
       thread.getByRole("link", { name: "Open image attachment", exact: true }),
     ).toBeFocused();
+    // The app can go fully colorful without tinting the media canvas. Shared
+    // controls and surrounding surfaces remain themed; only media roles stay fixed.
+    const vibe = other.getByRole("slider", { name: "Vibe level" });
+    await vibe.focus();
+    await vibe.press("End");
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-color-level",
+      "full",
+    );
     await chooseColorMode(other, "Dark");
     await expect(page.locator("html")).toHaveAttribute(
       "data-color-mode",
@@ -153,7 +162,8 @@ test("an open image gallery follows host appearance while retaining its dark sta
     await thread
       .getByRole("link", { name: "Open image attachment", exact: true })
       .press("Enter");
-    await expect(comments).toHaveCSS("background-color", "rgb(26, 26, 26)");
+    // Buzzin’ themes the comments pane but the image stage remains pure black.
+    await expect(comments).toHaveCSS("background-color", "rgb(23, 23, 12)");
     await expect(dialog.locator("[data-review-stage]")).toHaveCSS(
       "background-color",
       "rgb(0, 0, 0)",
@@ -180,8 +190,8 @@ test("an open image gallery follows host appearance while retaining its dark sta
       "data-color-mode",
       "light",
     );
-    await expect(comments).toHaveCSS("background-color", "rgb(255, 255, 255)");
-    await expect(composer).toHaveCSS("color", "rgb(15, 15, 15)");
+    await expect(comments).toHaveCSS("background-color", "rgb(253, 254, 244)");
+    await expect(composer).toHaveCSS("color", "rgb(48, 48, 5)");
     await expect(composer).toBeVisible();
     await expect(
       dialog.getByRole("heading", { name: "Image", exact: true }),

@@ -401,10 +401,10 @@ it("saves the color amount, recovers from denied storage, and follows other wind
   app.setColorLevel("full");
   expect(b.values.get(COLOR_LEVEL_KEY)).toBe("full");
   expect(app.snapshot().colorLevelError).toBeNull();
-  b.values.set(COLOR_LEVEL_KEY, "neutral");
+  b.values.set(COLOR_LEVEL_KEY, "touch");
   b.change(COLOR_LEVEL_KEY);
-  expect(b.root.dataset.colorLevel).toBe("neutral");
+  expect(b.root.dataset.colorLevel).toBe("touch");
   app.dispose();
-  app.setColorLevel("more");
-  expect(b.root.dataset.colorLevel).toBe("neutral");
+  app.setColorLevel("full");
+  expect(b.root.dataset.colorLevel).toBe("touch");
 });

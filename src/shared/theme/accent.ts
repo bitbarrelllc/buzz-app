@@ -1,8 +1,7 @@
 import type { CSSProperties } from "react";
 
 // One device-local accent family; the vibe level decides how much it paints.
-// Chartreuse is the brand default. There is no neutral accent: Snoozin' is how
-// the app goes gray, so the two controls never describe the same result.
+// Chartreuse is the brand default; the vibe level decides how much it paints.
 export const ACCENTS = [
   "chartreuse",
   "flame",
@@ -40,7 +39,7 @@ export function parseLegacyBubbleColor(value: unknown): Accent {
   );
 }
 
-/** How much of the app the accent colors, from all gray to all accent. */
+/** How much of the app the accent colors, from neutral to full. */
 export const COLOR_LEVELS = ["neutral", "touch", "more", "full"] as const;
 export type ColorLevel = (typeof COLOR_LEVELS)[number];
 export const DEFAULT_COLOR_LEVEL: ColorLevel = "touch";
