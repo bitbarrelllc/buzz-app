@@ -42,6 +42,7 @@ export class DiscoveryState {
   overflowRevision = 0;
   private rosters = new Map<string, RelayEvent>();
   private metadata = new Map<string, RelayEvent>();
+  private creations = new Map<string, RelayEvent>();
   constructor(
     readonly viewer: string,
     readonly relayAuthor: string,
@@ -49,6 +50,14 @@ export class DiscoveryState {
   ) {}
   /** Returns whether visible state changed. Events from other authors are ignored, not trusted. */
   accept(event: RelayEvent, cached = false): boolean {
+    if (event.kind === 9007) {
+      const id = tag(event, "h");
+      const metadata = id && this.metadata.get(id);
+      if (!id || !metadata || !huddleCreation(event, metadata)) return false;
+      if (this.creations.get(id)?.id === event.id) return false;
+      this.creations.set(id, event);
+      return true;
+    }
     if (
       event.pubkey !== this.relayAuthor ||
       (event.kind !== 39000 && event.kind !== 39002)
@@ -227,24 +236,16 @@ export class DiscoveryState {
         ? type
         : undefined;
     const parentId = event && sessionMetadata(tag(event, "about"))?.parentId;
+    const creation = this.creations.get(id);
     const huddle =
-      event && this.isPrivate(id) && huddleParent(tag(event, "about"));
-    // Early desktop trials and legacy clients omitted the parent marker. Match
-    // their generated name plus signed ephemeral metadata, never a name alone.
-    const ttl = event && Number(tag(event, "ttl"));
-    const legacyHuddle =
-      event &&
-      this.isPrivate(id) &&
-      channelType === "stream" &&
-      Number.isSafeInteger(ttl) &&
-      Number(ttl) > 0 &&
-      (this.name(id) === "Huddle" ||
-        this.name(id) === `huddle-${id.slice(0, 8)}`);
+      event && creation && huddleCreation(creation, event)
+        ? huddleParent(tag(creation, "about"))
+        : undefined;
     const identity = event && channelIdentity(event);
     const ttlSeconds = event && channelTtl(event);
     return {
       id,
-      ...(huddle || legacyHuddle ? { huddle: true as const } : {}),
+      ...(huddle ? { huddle: true as const } : {}),
       ...(huddle ? { parentChannelId: huddle } : {}),
       ...(!this.authorized(id) || this.cached.has(id)
         ? { readOnly: true as const }
@@ -314,6 +315,7 @@ export class DiscoveryState {
       // Clearing must allow a fresh identical signed roster to regrant access.
       this.rosters.delete(id);
       this.metadata.delete(id);
+      this.creations.delete(id);
     }
     this.cached.clear();
   }
@@ -321,7 +323,10 @@ export class DiscoveryState {
     return [...this.rosters.entries()].flatMap(([id, roster]) => {
       if (!this.authorized(id) || this.cached.has(id)) return [];
       const metadata = this.metadata.get(id);
-      return metadata ? [roster, metadata] : [roster];
+      const creation = this.creations.get(id);
+      return metadata
+        ? [roster, metadata, ...(creation ? [creation] : [])]
+        : [roster];
     });
   }
   /** Every roster channel get() serves, system channels included. Membership,
@@ -341,4 +346,23 @@ export class DiscoveryState {
       .filter((channel) => channel.channelType !== "system")
       .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   }
+}
+
+/** A signed creation receipt must agree with the relay's immutable identity facts. */
+export function huddleCreation(
+  creation: RelayEvent,
+  metadata: RelayEvent,
+): boolean {
+  const identity = channelIdentity(metadata);
+  const coordinates = creation.tags.filter(([name]) => name === "h");
+  return (
+    creation.kind === 9007 &&
+    coordinates.length === 1 &&
+    coordinates[0]?.length === 2 &&
+    coordinates[0]?.[1] === tag(metadata, "d") &&
+    creation.pubkey === identity.creator &&
+    tag(creation, "visibility") === "private" &&
+    tag(creation, "channel_type") === "stream" &&
+    !!huddleParent(tag(creation, "about"))
+  );
 }

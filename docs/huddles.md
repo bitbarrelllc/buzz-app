@@ -247,3 +247,17 @@ matching relay end. Room invitations expire after 60 seconds. Invited outsiders
 cannot receive the private parent's end event, so their prompt may remain until
 that deadline; stored metadata does not reflect every automatic archive. Joining
 still rechecks current room access on the relay.
+
+## Room classification
+
+Only a signed kind-9007 creation receipt with the exact room ID, matching the
+creator recorded in relay-signed metadata, establishes a Huddle. The receipt
+must declare a private stream with the Huddle parent marker. Later edits to the
+name, description or lifetime cannot turn an ordinary channel into a Huddle or
+change an established Huddle's parent. Receipts are retained with signed discovery
+metadata in the local cache.
+
+Rooms without that evidence, including legacy Huddles whose creation events did
+not include their room ID, remain accessible as ordinary channels. A missing or
+failed receipt lookup never removes channel access. Relays without creator
+identity metadata also use this fallback.

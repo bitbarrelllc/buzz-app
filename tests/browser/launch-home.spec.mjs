@@ -281,7 +281,7 @@ test("launch retains plugin-configuration recovery without Home", async ({
 });
 
 for (const huddle of [false, true]) {
-  test(`exact destinations wait for classification (${huddle ? "Huddle" : "ordinary"})`, async ({
+  test(`exact destinations wait for classification (${huddle ? "unproven legacy Huddle" : "ordinary"})`, async ({
     page,
     app,
   }) => {
@@ -353,15 +353,13 @@ for (const huddle of [false, true]) {
     expect(reads).toHaveLength(0);
     release();
     if (huddle) {
+      // Mutable metadata without a creation receipt remains an ordinary channel.
+      await expect(messages(page)).toBeVisible();
       await expect
         .poll(() =>
           page.evaluate(() => window.fixtureNavigation.snapshot().status),
         )
-        .toBe("failed");
-      await expect(
-        page.getByRole("textbox", { name: /^Message #/ }),
-      ).toHaveCount(0);
-      expect(reads).toHaveLength(0);
+        .toBe("opened");
     } else {
       await expect(
         page.getByRole("button", { name: "Retry navigation", exact: true }),

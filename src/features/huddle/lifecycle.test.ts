@@ -43,12 +43,40 @@ it("projects actual Huddle history cards and marked room metadata through the re
         metadata(relay, room, "Huddle", 30, [
           ["private"],
           ["about", huddleDescription(parent)],
+          ["P", author.pubkey],
         ]),
       ]);
     await flush();
     expect(
-      owner.session.channels.list().channels.find((c) => c.id === room),
-    ).toMatchObject({ huddle: true, parentChannelId: parent });
+      owner.session.channels.list().channels.find((c) => c.id === room)?.huddle,
+    ).toBeUndefined();
+    await vi.waitFor(() =>
+      expect(
+        wire.pending.some((r) => r.filters[0]?.kinds?.includes(9007)),
+      ).toBe(true),
+    );
+    const proofIndex = wire.pending.findIndex((r) =>
+      r.filters[0]?.kinds?.includes(9007),
+    );
+    wire.pending.splice(proofIndex, 1)[0]?.respond([
+      signed(author, {
+        kind: 9007,
+        created_at: 10,
+        content: "",
+        tags: [
+          ["h", room],
+          ["visibility", "private"],
+          ["channel_type", "stream"],
+          ["about", huddleDescription(parent)],
+        ],
+      }),
+    ]);
+    await flush();
+    await vi.waitFor(() =>
+      expect(
+        owner.session.channels.list().channels.find((c) => c.id === room),
+      ).toMatchObject({ huddle: true, parentChannelId: parent }),
+    );
     owner.session.channels.ensure(parent);
     const head = wire.next();
     expect(head.filters[0]?.kinds).toEqual(
@@ -227,11 +255,172 @@ it("resolves missing metadata for an already authorized Huddle", async () => {
         metadata(relay, room, "Huddle", 30, [
           ["private"],
           ["about", huddleDescription(parent)],
+          ["P", author.pubkey],
         ]),
       ]);
     await retry;
-    expect(owner.session.channels.get?.(room)?.huddle).toBe(true);
+    await vi.waitFor(() =>
+      expect(
+        wire.pending.some((r) => r.filters[0]?.kinds?.includes(9007)),
+      ).toBe(true),
+    );
+    wire.next().respond([
+      signed(author, {
+        kind: 9007,
+        created_at: 10,
+        content: "",
+        tags: [
+          ["h", room],
+          ["visibility", "private"],
+          ["channel_type", "stream"],
+          ["about", huddleDescription(parent)],
+        ],
+      }),
+    ]);
+    await vi.waitFor(() =>
+      expect(owner.session.channels.get?.(room)?.huddle).toBe(true),
+    );
   } finally {
     owner.dispose();
   }
+});
+
+it("fetches creation evidence in bounded batches after startup membership commits", async () => {
+  const wire = scriptedTransport(author.pubkey, relay.pubkey);
+  const owner = createRelaySession(wire.transport);
+  const rooms = Array.from(
+    { length: 5 },
+    (_, i) => `00000000-0000-4000-8000-00000000000${i + 2}`,
+  );
+  try {
+    owner.session.channels.ensureList();
+    wire
+      .next()
+      .respond(
+        rooms.flatMap((id) => [
+          roster(relay, id, [author.pubkey]),
+          metadata(relay, id, "Huddle", 30, [
+            ["P", author.pubkey],
+            ["private"],
+            ["about", huddleDescription(parent)],
+          ]),
+        ]),
+      );
+    for (const count of [4, 1]) {
+      await vi.waitFor(() =>
+        expect(
+          wire.pending.some((r) => r.filters[0]?.kinds?.includes(9007)),
+        ).toBe(true),
+      );
+      const index = wire.pending.findIndex((r) =>
+        r.filters[0]?.kinds?.includes(9007),
+      );
+      const request = wire.pending.splice(index, 1)[0];
+      if (!request) throw new Error("Missing receipt request");
+      expect(request.filters).toHaveLength(count);
+      request.respond(
+        request.filters.map((filter) =>
+          signed(author, {
+            kind: 9007,
+            created_at: 10,
+            content: "",
+            tags: [
+              ["h", filter["#h"]?.[0] ?? ""],
+              ["visibility", "private"],
+              ["channel_type", "stream"],
+              ["about", huddleDescription(parent)],
+            ],
+          }),
+        ),
+      );
+    }
+    await vi.waitFor(() =>
+      expect(
+        owner.session.channels.list().channels.filter((c) => c.huddle),
+      ).toHaveLength(5),
+    );
+  } finally {
+    owner.dispose();
+  }
+});
+
+it.each(["missing", "failed"])(
+  "keeps ordinary access when creation evidence is %s",
+  async (result) => {
+    const wire = scriptedTransport(author.pubkey, relay.pubkey);
+    const owner = createRelaySession(wire.transport);
+    try {
+      owner.session.channels.ensureList();
+      wire
+        .next()
+        .respond([
+          roster(relay, room, [author.pubkey]),
+          metadata(relay, room, "Huddle", 30, [
+            ["P", author.pubkey],
+            ["private"],
+            ["about", huddleDescription(parent)],
+          ]),
+        ]);
+      await vi.waitFor(() =>
+        expect(
+          wire.pending.some((r) => r.filters[0]?.kinds?.includes(9007)),
+        ).toBe(true),
+      );
+      const index = wire.pending.findIndex((r) =>
+        r.filters[0]?.kinds?.includes(9007),
+      );
+      const request = wire.pending.splice(index, 1)[0];
+      if (result === "failed") request?.fail(new Error("Receipt unavailable"));
+      else request?.respond([]);
+      await flush();
+      expect(owner.session.channels.get?.(room)).toMatchObject({
+        id: room,
+        name: "Huddle",
+      });
+      expect(owner.session.channels.get?.(room)?.huddle).toBeUndefined();
+    } finally {
+      owner.dispose();
+    }
+  },
+);
+
+it("does not publish late creation evidence after session disposal", async () => {
+  const wire = scriptedTransport(author.pubkey, relay.pubkey);
+  const owner = createRelaySession(wire.transport);
+  owner.session.channels.ensureList();
+  wire
+    .next()
+    .respond([
+      roster(relay, room, [author.pubkey]),
+      metadata(relay, room, "Huddle", 30, [["P", author.pubkey], ["private"]]),
+    ]);
+  await vi.waitFor(() =>
+    expect(wire.pending.some((r) => r.filters[0]?.kinds?.includes(9007))).toBe(
+      true,
+    ),
+  );
+  const index = wire.pending.findIndex((r) =>
+    r.filters[0]?.kinds?.includes(9007),
+  );
+  const request = wire.pending.splice(index, 1)[0];
+  if (!request) throw new Error("Missing receipt request");
+  owner.dispose();
+  expect(request.signal?.aborted).toBe(true);
+  request.respond([
+    signed(author, {
+      kind: 9007,
+      created_at: 10,
+      content: "",
+      tags: [
+        ["h", room],
+        ["visibility", "private"],
+        ["channel_type", "stream"],
+        ["about", huddleDescription(parent)],
+      ],
+    }),
+  ]);
+  await flush();
+  expect(owner.session.channels.list().channels.some((c) => c.huddle)).toBe(
+    false,
+  );
 });

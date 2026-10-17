@@ -1560,8 +1560,23 @@ it.each([true, false])(
       h.emit([
         metadata(h.relayKey, "room", "Huddle", 100, [
           ["private"],
+          ["P", h.viewer.pubkey],
           ["about", huddleDescription("00000000-0000-4000-8000-000000000001")],
         ]),
+        signed(h.viewer, {
+          kind: 9007,
+          created_at: 1,
+          content: "",
+          tags: [
+            ["h", "room"],
+            ["visibility", "private"],
+            ["channel_type", "stream"],
+            [
+              "about",
+              huddleDescription("00000000-0000-4000-8000-000000000001"),
+            ],
+          ],
+        }),
       ]),
     );
     await waitFor(() =>

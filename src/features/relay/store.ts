@@ -908,7 +908,7 @@ export function createChannelStore(
         saved.savedAt > now() ||
         now() - saved.savedAt > 86_400_000 ||
         !Array.isArray(saved.events) ||
-        saved.events.length > 2048 ||
+        saved.events.length > 3072 ||
         byteSize(saved) > 8 * 1024 * 1024
       )
         return;
@@ -950,6 +950,60 @@ export function createChannelStore(
     } catch {
       // Missing, corrupt or unavailable device storage never blocks fresh reads.
     }
+  }
+  // One bounded receipt lookup per metadata version; no content access is granted.
+  const creationReads = new Map<string, string>();
+  function readCreations(events: readonly RelayEvent[]) {
+    if (!transport || !discovery || options.cachedOnly) return;
+    const filters = events.flatMap((event) => {
+      const id = tag(event, "d");
+      const identity = channelIdentity(event);
+      if (
+        event.kind !== 39000 ||
+        event.pubkey !== transport.relayAuthor ||
+        !id ||
+        discovery.metadataVersion(id)?.id !== event.id ||
+        discovery.get(id)?.huddle ||
+        !identity.creator ||
+        creationReads.get(id) === event.id
+      )
+        return [];
+      creationReads.set(id, event.id);
+      return [
+        {
+          kinds: [9007],
+          authors: [identity.creator],
+          "#h": [id],
+          limit: 1,
+        },
+      ];
+    });
+    if (!filters.length) return;
+    const generation = epoch;
+    const controller = new AbortController();
+    controllers.add(controller);
+    const reader = transport;
+    void (async () => {
+      // The shared reader accepts at most four filters per request.
+      for (let offset = 0; offset < filters.length; offset += 4) {
+        const receipts = await reader.read(filters.slice(offset, offset + 4), {
+          signal: controller.signal,
+        });
+        if (disposed || generation !== epoch || controller.signal.aborted)
+          return;
+        applyDiscovery(receipts.filter((event) => event.kind === 9007));
+      }
+    })()
+      .catch(() => {
+        // Unavailable proof leaves an ordinary channel. A later metadata refresh
+        // may retry; never turn a failed proof read into loss of channel access.
+        for (const event of events) {
+          const id = tag(event, "d");
+          if (id && creationReads.get(id) === event.id)
+            creationReads.delete(id);
+        }
+      })
+      .finally(() => controllers.delete(controller));
   }
   function applyDiscovery(
     events: readonly RelayEvent[],
@@ -1046,6 +1100,7 @@ export function createChannelStore(
         if (windows.has(channel.id)) queries.ensure(channel.id);
       }
     }
+    if (!cached && !disposed) readCreations(events);
     return !disposed && appliedEpoch === epoch;
   }
   /** Apply roster authority as soon as it succeeds; names are a separate,
@@ -1908,6 +1963,7 @@ export function createChannelStore(
   }
   async function clearCache() {
     epoch++;
+    creationReads.clear();
     hydration = undefined;
     revealHydration?.();
     initialHydration = new Promise<void>((resolve) => {
@@ -2535,6 +2591,7 @@ export function createChannelStore(
   ) {
     const hadHydration = hydration !== undefined;
     epoch++;
+    creationReads.clear();
     revokedEpoch = epoch;
     hydration = undefined;
     revealHydration?.();
@@ -2617,6 +2674,7 @@ export function createChannelStore(
     unsubscribeLocal?.();
     unsubscribeProfiles();
     epoch++;
+    creationReads.clear();
     media.dispose();
     for (const controller of controllers) controller.abort();
     for (const state of windows.values()) {
