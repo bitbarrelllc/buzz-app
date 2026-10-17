@@ -353,3 +353,60 @@ it("rings a slightly future-dated start when the recipient clock catches up", ()
   vi.advanceTimersByTime(2000);
   expect(h.get()?.room).toBe(room);
 });
+
+it("retries transient invitation metadata failures without another relay event", async () => {
+  const h = harness();
+  h.rooms([]);
+  h.resolve.mockRejectedValueOnce(new Error("offline"));
+  h.resolve.mockImplementationOnce(async () => {
+    h.rooms([invitedRoom]);
+  });
+  h.publish(invitation());
+  await vi.advanceTimersByTimeAsync(999);
+  expect(h.resolve).toHaveBeenCalledTimes(1);
+  expect(h.get()).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(h.resolve).toHaveBeenCalledTimes(2);
+  expect(h.get()?.room).toBe(room);
+  h.requests.refresh();
+  expect(h.resolve).toHaveBeenCalledTimes(2);
+});
+
+it("bounds failed recovery attempts even with repeated refreshes", async () => {
+  const h = harness();
+  h.rooms([]);
+  h.resolve.mockRejectedValue(new Error("offline"));
+  h.publish(invitation());
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(h.resolve).toHaveBeenCalledTimes(2);
+  h.requests.refresh();
+  expect(h.resolve).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(h.resolve).toHaveBeenCalledTimes(3);
+  h.requests.refresh();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(h.resolve).toHaveBeenCalledTimes(3);
+});
+
+it.each(["dispose", "replace", "expire"])(
+  "does not retry after %s",
+  async (end) => {
+    const h = harness();
+    h.rooms([]);
+    let reject!: (reason: Error) => void;
+    h.resolve.mockImplementation(
+      () =>
+        new Promise<void>((_, fail) => {
+          reject = fail;
+        }),
+    );
+    h.publish(invitation());
+    if (end === "dispose") h.requests.dispose();
+    if (end === "replace") h.replace();
+    if (end === "expire") await vi.advanceTimersByTimeAsync(60_000);
+    reject(new Error("offline"));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(h.resolve).toHaveBeenCalledTimes(1);
+    expect(h.get()).toBeUndefined();
+  },
+);

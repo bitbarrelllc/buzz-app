@@ -28,6 +28,7 @@ export function createHuddleRequests(
   let disposed = false;
   let recovery = new AbortController();
   const resolvedNotices = new Set<string>();
+  const retries = new Map<string, { attempts: number; at: number }>();
   function publish(next: HuddleRequest | undefined) {
     if (
       selected?.room === next?.room &&
@@ -98,15 +99,28 @@ export function createHuddleRequests(
           event.tags.some(
             ([key, value]) => key === "h" && value === notice.channel_id,
           ) &&
-          !resolvedNotices.has(event.id)
+          !resolvedNotices.has(event.id) &&
+          (retries.get(event.id)?.at ?? 0) <= now
         ) {
           resolvedNotices.add(event.id);
+          const signal = recovery.signal;
+          const attempts = (retries.get(event.id)?.attempts ?? 0) + 1;
+          retries.delete(event.id);
           void session.channels
             .resolve?.([notice.channel_id], {
-              signal: recovery.signal,
+              signal,
               consistency: "strong",
             })
-            .catch(() => {});
+            .catch(() => {
+              if (signal.aborted) return;
+              resolvedNotices.delete(event.id);
+              // Two retries, after one and two seconds, within the notice lifetime.
+              retries.set(event.id, {
+                attempts,
+                at: attempts < 3 ? Date.now() / 1000 + attempts : Infinity,
+              });
+              refresh();
+            });
         }
         const room = session.channels
           .list()
@@ -187,6 +201,12 @@ export function createHuddleRequests(
         : 3600;
       deadline = Math.min(deadline ?? Infinity, next.startedAt + lifetime);
     }
+    for (const event of snapshot.events) {
+      const retry = retries.get(event.id);
+      if (retry && retry.at > now && retry.at < event.created_at + 60) {
+        deadline = Math.min(deadline ?? Infinity, retry.at);
+      }
+    }
     if (deadline !== undefined) {
       timer = setTimeout(refresh, (deadline - now) * 1000);
     }
@@ -263,6 +283,7 @@ export function createHuddleRequests(
     recovery.abort();
     recovery = new AbortController();
     resolvedNotices.clear();
+    retries.clear();
     dismissed.clear();
     connection = undefined;
     publish(undefined);
