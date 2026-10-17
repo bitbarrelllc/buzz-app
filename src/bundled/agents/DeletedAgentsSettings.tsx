@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import type { Agents } from "../../features/agents/service";
 import { Button } from "../../shared/design-system/ui/Button";
 
@@ -23,6 +23,7 @@ export function DeletedAgentsSettings({
   );
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const heading = useRef<HTMLHeadingElement>(null);
   const deleted = state.running.filter((agent) => agent.lifecycle);
   const recover = async (pubkey: string) => {
     if (!active() || busy) return;
@@ -30,6 +31,8 @@ export function DeletedAgentsSettings({
     setError("");
     try {
       await agents.recover(pubkey);
+      // Its row, with the focused Recover, is gone.
+      heading.current?.focus();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
@@ -39,7 +42,9 @@ export function DeletedAgentsSettings({
   return (
     <div data-buzz-ui="" className="flex flex-col items-start gap-4">
       <div>
-        <h2 className="text-heading text-primary">Deleted agents</h2>
+        <h2 ref={heading} tabIndex={-1} className="text-heading text-primary">
+          Deleted agents
+        </h2>
         <p className="mt-2 text-body-sm text-secondary">
           Deleting an agent archives its config channel and stops it. Its key
           and config history are kept, so it can be recovered here.
@@ -61,11 +66,14 @@ export function DeletedAgentsSettings({
                   </span>
                 )}
               </span>
-              {agent.lifecycle === "archived" && (
+              {/* Kept while it recovers, so a refusal leaves focus on it. */}
+              {agent.lifecycle !== "archiving" && (
                 <Button
                   size="compact"
-                  loading={busy === agent.pubkey}
-                  disabled={!!busy}
+                  loading={
+                    busy === agent.pubkey || agent.lifecycle === "recovering"
+                  }
+                  disabled={!!busy && busy !== agent.pubkey}
                   onClick={() => void recover(agent.pubkey)}
                 >
                   Recover
