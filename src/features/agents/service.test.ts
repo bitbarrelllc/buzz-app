@@ -34,6 +34,7 @@ import {
   type Delivery,
   type Trigger,
   fromOwner,
+  localKey,
   teamPrompt,
 } from "./service";
 import type { ClassifierNative } from "./classifier";
@@ -6004,6 +6005,8 @@ describe("Delete as a recoverable archive", () => {
     };
     /** While set, no config channel can be made. */
     const offline = { value: false };
+    /** While set, the relay takes each revision only once it settles. */
+    const held: { value?: Promise<void> } = {};
     const addMember = vi.fn(async (id: string, pubkey: string) => {
       const found = [...channels.values()].find((c) => c.id === id);
       if (found && !found.members.includes(pubkey)) found.members.push(pubkey);
@@ -6082,6 +6085,7 @@ describe("Delete as a recoverable archive", () => {
           writer: {
             sign: async (template) => signed(owner, template),
             async publish(event) {
+              await held.value;
               const head = heads.get(key(event));
               const prev = event.tags.find(([name]) => name === "prev")?.[1];
               if (!head || prev === head.id) heads.set(key(event), event);
@@ -6128,7 +6132,7 @@ describe("Delete as a recoverable archive", () => {
       heads.set(key(head), head);
       return channelId;
     };
-    return { opens, heads, addMember, channels, offline, remoteTeam };
+    return { opens, heads, addMember, channels, offline, held, remoteTeam };
   }
   const mentionAlder = (f: Awaited<ReturnType<typeof setup>>, id: string) =>
     f.emit({
@@ -6575,6 +6579,49 @@ describe("Delete as a recoverable archive", () => {
     expect(remote.remove).toHaveBeenCalledWith(
       expect.objectContaining({ pubkey: hostedKey }),
     );
+    await f.ctx.fiber.dispose();
+  });
+
+  it("with config sync on, advances an agent's local-save token once the relay accepts its Save", async () => {
+    const relay = configRelay();
+    communityFake.value = relay.opens;
+    const f = await setup({ identities: [here(alder)] });
+    await vi.waitFor(() =>
+      expect(f.service.find(alder)?.configBase).toBeDefined(),
+    );
+    /** Each view a runtime's sync would see: its local-save token and the
+     * instructions it would run on. */
+    const seen: [string, unknown][] = [];
+    const unsubscribe = f.service.subscribe(() => {
+      const agent = f.service.find(alder);
+      if (agent)
+        seen.push([
+          localKey(agent),
+          (agent.config as { instructions?: unknown }).instructions,
+        ]);
+    });
+    const agent = f.service.find(alder);
+    if (!agent?.configBase) throw new Error("not synced");
+    const before = (agent.config as { instructions?: unknown }).instructions;
+    let accept!: () => void;
+    relay.held.value = new Promise((resolve) => {
+      accept = resolve;
+    });
+    const saving = f.service.save(alder, {
+      config: { ...(agent.config as object), instructions: "SAVED HERE" },
+      base: agent.configBase,
+    });
+    await settle();
+    accept();
+    await saving;
+    unsubscribe();
+    expect(seen.at(-1)?.[1]).toBe("SAVED HERE");
+    // The token the saved config arrives with is not one a runtime already
+    // used up on the old config.
+    const spent = seen
+      .filter(([, instructions]) => instructions === before)
+      .map(([key]) => key);
+    expect(spent).not.toContain(seen.at(-1)?.[0]);
     await f.ctx.fiber.dispose();
   });
 

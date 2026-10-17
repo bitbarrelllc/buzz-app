@@ -2970,6 +2970,9 @@ export class AgentsService extends Service implements Agents {
         ? ["instructions"]
         : Object.keys(this.configAgent(identity, config).schema ?? {});
     for (const field of fields) delete config[field];
+    // The agent now shows the saved value: runtimes take it as a local save,
+    // not the earlier token they spent on the old head while it was sent.
+    this.saves.set(pubkey, (this.saves.get(pubkey) ?? 0) + 1);
     this.write({ ...record, config });
   }
 
