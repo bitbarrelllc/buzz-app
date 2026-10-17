@@ -193,3 +193,119 @@ it("leaves focus where the user moved it when a held recovery finishes later", a
   act(() => set([]));
   expect(screen.getByRole("button", { name: "Elsewhere" })).toHaveFocus();
 });
+
+it("restores focus when the first of two pending Recover rows disappears", async () => {
+  let state = fake([
+    agent("First", "archived"),
+    agent("Second", "archived"),
+  ]).snapshot();
+  const listeners = new Set<() => void>();
+  const set = (running: Agent[]) => {
+    state = { ...state, running };
+    for (const fn of listeners) fn();
+  };
+  const agents = {
+    snapshot: () => state,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+    recover: vi.fn(async (key: string) => {
+      set(
+        state.running.map((a) =>
+          a.pubkey === key ? { ...a, lifecycle: "recovering" } : a,
+        ),
+      );
+      throw new Error(`${key} keeps trying while connected`);
+    }),
+  };
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  screen.getAllByRole("button", { name: "Recover" })[0]?.focus();
+  await userEvent.keyboard("{Enter}");
+  await screen.findByRole("alert");
+  screen.getAllByRole("button", { name: "Recover" })[1]?.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("alert")).toHaveTextContent("Second");
+  // Both are pending in the service, but the owner returns focus to First.
+  screen.getAllByRole("button", { name: "Recover" })[0]?.focus();
+  act(() => set([agent("Second", "recovering")]));
+  expect(screen.getByRole("heading", { name: "Deleted agents" })).toHaveFocus();
+  // Completion of First must not erase Second's still-pending message.
+  expect(screen.getByRole("alert")).toHaveTextContent("Second");
+});
+
+it("does not focus the heading when the recovered row did not own body focus", async () => {
+  let state = fake([agent("First", "archived")]).snapshot();
+  const listeners = new Set<() => void>();
+  const set = (running: Agent[]) => {
+    state = { ...state, running };
+    for (const fn of listeners) fn();
+  };
+  const agents = {
+    snapshot: () => state,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+    recover: vi.fn(async () => {
+      set([agent("First", "recovering")]);
+      throw new Error("First keeps trying");
+    }),
+  };
+  render(
+    <>
+      <DeletedAgentsSettings agents={agents} active={() => true} />
+      <button type="button">Elsewhere</button>
+    </>,
+  );
+  screen.getByRole("button", { name: "Recover" }).focus();
+  await userEvent.keyboard("{Enter}");
+  await screen.findByRole("alert");
+  screen.getByRole("button", { name: "Elsewhere" }).focus();
+  screen.getByRole("button", { name: "Elsewhere" }).blur();
+  expect(document.body).toHaveFocus();
+  act(() => set([]));
+  expect(document.body).toHaveFocus();
+});
+
+it("announces a held recovery that finishes while other rows remain", async () => {
+  let state = fake([
+    agent("First", "archived"),
+    agent("Second", "archived"),
+  ]).snapshot();
+  const listeners = new Set<() => void>();
+  const set = (running: Agent[]) => {
+    state = { ...state, running };
+    for (const fn of listeners) fn();
+  };
+  const agents = {
+    snapshot: () => state,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+    recover: vi.fn(async () => {
+      set([agent("First", "recovering"), agent("Second", "archived")]);
+      throw new Error("First keeps trying while connected");
+    }),
+  };
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  const status = screen.getByRole("status");
+  expect(status).toHaveTextContent("");
+  const recover = screen.getAllByRole("button", { name: "Recover" })[1];
+  screen.getAllByRole("button", { name: "Recover" })[0]?.focus();
+  await userEvent.keyboard("{Enter}");
+  await screen.findByRole("alert");
+  recover?.focus();
+  act(() => set([agent("Second", "archived")]));
+  // The same live region announces it, and focus stays where the owner is.
+  expect(screen.getByRole("status")).toBe(status);
+  expect(status).toHaveTextContent("Recovered First.");
+  expect(recover).toHaveFocus();
+});

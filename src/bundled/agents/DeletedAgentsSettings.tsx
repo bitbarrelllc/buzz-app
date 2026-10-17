@@ -23,25 +23,43 @@ export function DeletedAgentsSettings({
   );
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [recovered, setRecovered] = useState("");
   const heading = useRef<HTMLHeadingElement>(null);
-  /** The agent last asked to recover, until its row leaves the list. */
+  /** The agent last asked to recover: owns `error` until its row leaves. */
   const recovering = useRef("");
+  /** Agents this card asked to recover, announced when their row leaves. */
+  const requested = useRef(new Set<string>());
+  /** The row holding keyboard focus, kept when its removal drops it. */
+  const owner = useRef("");
   const deleted = state.running.filter((agent) => agent.lifecycle);
-  const gone =
-    recovering.current &&
-    !deleted.some((agent) => agent.pubkey === recovering.current);
+  const shown = useRef(deleted);
   useEffect(() => {
-    if (!gone) return;
+    const left = shown.current.filter(
+      (row) => !deleted.some((agent) => agent.pubkey === row.pubkey),
+    );
+    shown.current = deleted;
+    if (!left.length) return;
     // Recovered, now or on a later reconnect: its row, with Recover, is gone.
-    recovering.current = "";
-    setError("");
-    if (document.activeElement === document.body) heading.current?.focus();
-  }, [gone]);
+    const pubkeys = new Set(left.map((row) => row.pubkey));
+    if (pubkeys.has(recovering.current)) {
+      recovering.current = "";
+      setError("");
+    }
+    const done = left.filter((row) => requested.current.delete(row.pubkey));
+    if (done.length && deleted.length)
+      setRecovered(`Recovered ${done.map((row) => row.name).join(", ")}.`);
+    if (pubkeys.has(owner.current)) {
+      owner.current = "";
+      if (document.activeElement === document.body) heading.current?.focus();
+    }
+  });
   const recover = async (pubkey: string) => {
     if (!active() || busy) return;
     setBusy(pubkey);
     setError("");
     recovering.current = pubkey;
+    requested.current.add(pubkey);
+    setRecovered("");
     try {
       await agents.recover(pubkey);
     } catch (failure) {
@@ -61,14 +79,23 @@ export function DeletedAgentsSettings({
           and config history are kept, so it can be recovered here.
         </p>
       </div>
-      {deleted.length === 0 ? (
-        <p role="status" className="text-body-sm text-secondary">
-          No deleted agents.
-        </p>
-      ) : (
+      <p role="status" className="m-0 text-body-sm text-secondary">
+        {deleted.length === 0 ? "No deleted agents." : recovered}
+      </p>
+      {deleted.length > 0 && (
         <ul className="m-0 flex w-full list-none flex-col gap-2 p-0">
           {deleted.map((agent) => (
-            <li key={agent.pubkey} className="flex items-center gap-3">
+            <li
+              key={agent.pubkey}
+              className="flex items-center gap-3"
+              onFocus={() => {
+                owner.current = agent.pubkey;
+              }}
+              onBlur={(event) => {
+                // A removed row's blur keeps it the owner of the lost focus.
+                if (event.target.isConnected) owner.current = "";
+              }}
+            >
               <span className="flex-1 text-body">
                 {agent.name}
                 {agent.lifecycle !== "archived" && (
