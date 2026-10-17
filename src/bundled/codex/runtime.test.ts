@@ -12,7 +12,8 @@ import { keypair, signed } from "../../features/relay/testing";
 import type { HostProcessOptions } from "../../features/host/service";
 import { BUZZ_PROMPT, TOP_LEVEL_PROMPT } from "../../buzz-mcp/prompt";
 import { CodexRuntime, codexStep, programs } from "./runtime";
-import { config } from "./config";
+import { config, type Config } from "./config";
+import { codexRun } from "./run";
 import type { AddedTool } from "../../buzz-mcp/session-tools";
 import { wake } from "../../features/agent-harness/wakes";
 import type { Wire } from "./rpc";
@@ -3661,3 +3662,40 @@ it.each(["reload", "entry recreation"])(
     await restored.complete(before, "DONE");
   },
 );
+
+it("fences a Save while the registered Codex readiness wrapper waits", async () => {
+  const f = fixture();
+  const gate = deferred<void>();
+  const entered = deferred<void>();
+  let firstReady = true;
+  const type = codexRun(f.runtime, async () => {
+    if (!firstReady) return;
+    firstReady = false;
+    entered.resolve();
+    await gate.promise;
+  });
+  const run = type.run;
+  if (!run) throw new Error("no run");
+  const carrying = (text: string, instructions: string) => {
+    const d = f.delivery(text);
+    return { ...d, config: { ...(d.config as Config), instructions } };
+  };
+  try {
+    const first = run(carrying("first", "OLD BEFORE READY"));
+    await entered.promise;
+    f.runtime.sync([{ pubkey, saves: 1 } as Agent]);
+    gate.resolve();
+    await first;
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+    await f.complete(0, "ONE");
+    await run(carrying("next", "NEW AFTER SAVE"));
+    await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+    expect(JSON.stringify(f.starts()[1]?.params)).toContain("NEW AFTER SAVE");
+    expect(JSON.stringify(f.starts()[1]?.params)).not.toContain(
+      "OLD BEFORE READY",
+    );
+    await f.complete(1, "TWO");
+  } finally {
+    gate.resolve();
+  }
+});

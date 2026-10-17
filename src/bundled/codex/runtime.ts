@@ -538,12 +538,14 @@ export class CodexRuntime {
     this.save(request, entry, key, { ...saved, at: Date.now() });
     for (const listener of this.listeners) listener();
   }
-  async run(delivery: Delivery) {
+  /** The agent's restart count, read with `delivery.config` before anything
+   * waits: a pin is written only if no Save or restart has happened since. */
+  fence(pubkey: string) {
+    return this.restarts.get(pubkey) ?? 0;
+  }
+  async run(delivery: Delivery, restarts = this.fence(delivery.agent.pubkey)) {
     delivery.signal.throwIfAborted();
     const { trigger, agent } = delivery;
-    // Read with `delivery.config`, before any wait: a Save during a read
-    // below must not pin these settings under its newer count.
-    const restarts = this.restarts.get(agent.pubkey) ?? 0;
     // Watches and timers come as standalone turns (`runOnce`).
     if (trigger.type !== "mention") return delivery.ignored?.();
     const reads = this.reads(agent.pubkey);
