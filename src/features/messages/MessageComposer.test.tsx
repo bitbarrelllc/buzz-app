@@ -7663,3 +7663,47 @@ it.each([
     setRememberAgentsPreference(true);
   },
 );
+
+it("withholds recording tools while a message edit cannot take attachments", async () => {
+  const empty: readonly never[] = [];
+  const tools: readonly Contribution<ComposerTool>[] = [
+    {
+      id: "capture",
+      key: "test/capture",
+      pluginId: "test",
+      revision: "1",
+      title: "Capture",
+      component: ({ capture }) =>
+        capture ? <button type="button">Start recording</button> : null,
+    },
+  ];
+  const extensions = {
+    tools: { snapshot: () => tools, subscribe: () => () => {} },
+    inline: { snapshot: () => empty, subscribe: () => () => {} },
+    completions: { snapshot: () => empty, subscribe: () => () => {} },
+  };
+  const h = await mountUploadComposer({ editable: true, extensions });
+  h.unmount();
+  const viewer = h.owner.session.viewer;
+  if (!viewer) throw new Error("Expected upload viewer");
+  const view = render(
+    <MessageComposer
+      session={h.owner.session}
+      scope={h.scope}
+      channelId="channel"
+      channelName="General"
+      extensions={extensions}
+      editMessages={[editableMessage({ authorId: viewer })]}
+    />,
+    { wrapper: ToastProvider },
+  );
+  const input = within(view.container).getByRole("textbox");
+  expect(screen.getByRole("button", { name: "Start recording" })).toBeVisible();
+  fireEvent.keyDown(input, { key: "ArrowUp" });
+  expect(input).toHaveAccessibleName("Edit message");
+  expect(screen.queryByRole("button", { name: "Start recording" })).toBeNull();
+  fireEvent.click(
+    within(view.container).getByRole("button", { name: "Cancel edit" }),
+  );
+  expect(screen.getByRole("button", { name: "Start recording" })).toBeVisible();
+});

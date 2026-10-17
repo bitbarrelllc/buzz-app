@@ -1910,7 +1910,9 @@ function Composer({
                 {extensions ? (
                   <ComposerTools
                     registry={extensions.tools}
-                    capture={voice.begin}
+                    {...(canAttach && !editing.target
+                      ? { capture: voice.begin }
+                      : {})}
                     renderLeading={renderLeadingTools}
                     session={session}
                     scope={scope}
