@@ -1,4 +1,5 @@
 import { test, expect } from "./fixture.mjs";
+import { expectMessageActionsHidden } from "./message-actions.mjs";
 import { open } from "./timeline.mjs";
 import { generateSecretKey, finalizeEvent, getPublicKey } from "nostr-tools";
 
@@ -218,20 +219,7 @@ test("message activity opens a grouped preview and the agent's profile without l
       await bubble.focus();
       // Native top-layer message actions must step aside for the activity
       // portal, including when its trigger retains keyboard focus.
-      await expect(messageActions).toHaveCSS("visibility", "hidden");
-      await expect
-        .poll(() =>
-          messageActions.evaluate((bar) => {
-            const box = bar.getBoundingClientRect();
-            return bar.contains(
-              document.elementFromPoint(
-                box.x + box.width / 2,
-                box.y + box.height / 2,
-              ),
-            );
-          }),
-        )
-        .toBe(false);
+      await expectMessageActionsHidden(messageActions);
       await expect(
         popup.getByRole("button", { name: /^View activity for/ }),
       ).toHaveCount(2);

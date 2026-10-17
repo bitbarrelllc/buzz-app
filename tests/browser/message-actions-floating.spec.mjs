@@ -1,4 +1,5 @@
 import { test, expect } from "./fixture.mjs";
+import { expectMessageActionsHidden as hidden } from "./message-actions.mjs";
 import { open, settle, virtuaIdle, wheel } from "./timeline.mjs";
 
 test.use({
@@ -14,29 +15,6 @@ const shown = (actions) =>
   expect
     .poll(() => actions.evaluate((bar) => bar.matches(":popover-open")))
     .toBe(true);
-const hidden = (actions) =>
-  expect
-    .poll(() =>
-      actions.evaluate((bar) => {
-        const style = getComputedStyle(bar);
-        const rect = bar.getBoundingClientRect();
-        return {
-          painted:
-            rect.width > 0 &&
-            rect.height > 0 &&
-            style.visibility !== "hidden" &&
-            Number(style.opacity) > 0,
-          takesPointer: bar.contains(
-            document.elementFromPoint(
-              rect.x + rect.width / 2,
-              rect.y + rect.height / 2,
-            ),
-          ),
-        };
-      }),
-    )
-    .toEqual({ painted: false, takesPointer: false });
-
 // Browser-only: measured space, real top-layer hit testing, and responsive
 // placement cannot be established in a DOM emulator.
 for (const own of [true, false]) {
