@@ -54,6 +54,8 @@ function fixture(
   const sent: Wire[] = [];
   /** Methods the server answers with a JSON-RPC error instead of a result. */
   const failing = new Set<string>();
+  /** Methods whose answer waits for the promise set here. */
+  const held = new Map<string, Promise<void>>();
   const toolCalls = new Map<
     number | string,
     { threadId: string | undefined; turnId: string; callId: string }
@@ -89,6 +91,7 @@ function fixture(
         });
         return;
       }
+      if (request.method) await held.get(request.method);
       const params = request.params as Record<string, unknown>;
       let result: unknown = {};
       if (request.method === "model/list")
@@ -529,6 +532,7 @@ function fixture(
     process,
     sent,
     failing,
+    held,
     emit,
     publish,
     read,
@@ -1029,6 +1033,37 @@ it("keeps a thread on its pinned config until Restart to apply, across a reload"
   await restored.runtime.run(again("@Codex four"));
   await vi.waitFor(() => expect(restarts()).toHaveLength(2));
   expect(restarts()[1]).toContain("SYNCED B");
+});
+it("leaves a thread unpinned when a local save lands while its turn starts", async () => {
+  const f = fixture();
+  const root = "a".repeat(64);
+  const carrying = (content: string, instructions: string) => {
+    const delivery = f.delivery(content, root);
+    return {
+      ...delivery,
+      config: { ...(delivery.config as object), instructions },
+    };
+  };
+  const starts = () => f.starts().map((start) => JSON.stringify(start.params));
+  await f.runtime.run(carrying("@Codex one", "SYNCED A"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(1));
+  f.complete(0, "ONE");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(1));
+  // The second turn starts on the thread's pin while a save clears it.
+  const turn = deferred<void>();
+  f.held.set("turn/start", turn.promise);
+  await f.runtime.run(carrying("@Codex two", "SYNCED B"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(2));
+  expect(starts()[1]).toContain("SYNCED A");
+  f.runtime.restart(pubkey);
+  f.held.delete("turn/start");
+  turn.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  f.complete(1, "TWO");
+  await vi.waitFor(() => expect(f.publish).toHaveBeenCalledTimes(2));
+  await f.runtime.run(carrying("@Codex three", "SYNCED B"));
+  await vi.waitFor(() => expect(starts()).toHaveLength(3));
+  expect(starts()[2]).toContain("SYNCED B");
 });
 it.each([
   ["", "", "test-model", "medium"],

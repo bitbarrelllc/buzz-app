@@ -130,6 +130,8 @@ type Entry = {
   after: Promise<void>;
   lanes: Map<string, Lane>;
   saved: Record<string, Saved>;
+  /** Counts Restart to apply and local saves, which clear the pins. */
+  restarts: number;
   /** Standalone turns now running, for their tool calls to find. */
   onces: Set<Once>;
 };
@@ -324,7 +326,10 @@ export class CodexRuntime {
       ]),
     );
     const entry = this.entries.get(pubkey);
-    if (entry) entry.saved = saved;
+    if (entry) {
+      entry.saved = saved;
+      entry.restarts++;
+    }
     try {
       this.storage.setItem(bindings.storageKey, JSON.stringify(saved));
     } catch (error) {
@@ -418,6 +423,7 @@ export class CodexRuntime {
       abort: new AbortController(),
       after: this.stopping.get(pubkey) ?? Promise.resolve(),
       saved,
+      restarts: 0,
       lanes: new Map(),
       onces: new Set(),
     };
@@ -1103,6 +1109,7 @@ export class CodexRuntime {
     // A thread keeps the config it was pinned to; the delivery's current
     // copy reaches it only after a local save or Restart to apply.
     const pin = entry.saved[key]?.pin;
+    const restarts = entry.restarts;
     const settings =
       pin === undefined ? request.settings : this.resolveConfig(pin);
     let ready!: () => void;
@@ -1230,7 +1237,8 @@ export class CodexRuntime {
         workspace,
         at: Date.now(),
         ...(tools ? { tools } : {}),
-        pin: settings,
+        // A restart meanwhile moved the thread to the current config.
+        ...(entry.restarts === restarts ? { pin: settings } : {}),
       });
       ready();
       this.status(agent.pubkey, key, "Working");
