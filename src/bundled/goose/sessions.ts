@@ -153,6 +153,16 @@ export type SessionsOptions = Readonly<{
   onChange?(): void;
 }>;
 
+/** A local save of a choice, made while sessions ran on `before`. */
+type Chosen = { choice: Choice; before: string; after: string };
+
+/** Switches a session to a saved choice; one that ran on the config it was
+ * saved over now runs on the config saved. */
+const switchTo = (live: Live, { choice, before, after }: Chosen) => {
+  live.choice = choice;
+  if (live.snapshot === before) live.snapshot = after;
+};
+
 type Live = {
   session: GooseSession;
   process: GooseProcess;
@@ -186,6 +196,9 @@ export class AgentSessions {
    * prompted for the old one. */
   private readonly had = new Set<string>();
   private disposed = false;
+  /** The latest local save of a choice, which a session opening meanwhile
+   * read its settings before. */
+  private chosen: Chosen | undefined;
 
   constructor(private readonly options: SessionsOptions) {}
 
@@ -348,14 +361,13 @@ export class AgentSessions {
     }
   }
 
-  /** A local save of only the provider, model or thinking level: open
-   * sessions switch to it from their next turn, and now run on `snapshot`. */
-  choose(choice: Choice) {
-    const snapshot = this.options.snapshot();
-    for (const live of this.live.values()) {
-      live.choice = choice;
-      live.snapshot = snapshot;
-    }
+  /** A local save of only the provider, model or thinking level: open and
+   * opening sessions switch to it from their next turn. Those that ran on
+   * `before` now run on the config saved. */
+  choose(choice: Choice, before: string) {
+    const chosen = { choice, before, after: this.options.snapshot() };
+    this.chosen = chosen;
+    for (const live of this.live.values()) switchTo(live, chosen);
   }
 
   /** Whether a conversation's session runs on config other than `current`. */
@@ -398,6 +410,7 @@ export class AgentSessions {
     // Read before `launch` reads the settings, so it never describes newer ones.
     const fingerprint = this.options.fingerprint();
     const snapshot = this.options.snapshot();
+    const chosen = this.chosen;
     const launch = await this.options.launch();
     // Removed meanwhile: a goose started now would outlive it.
     if (this.disposed) throw new Error("goose was stopped");
@@ -453,6 +466,7 @@ export class AgentSessions {
       slot,
       at: Date.now(),
     };
+    if (this.chosen && this.chosen !== chosen) switchTo(live, this.chosen);
     if (fingerprint !== this.options.fingerprint() && !this.disposed) {
       // Settings saved while it opened: it would work with the old ones.
       void this.close(live);

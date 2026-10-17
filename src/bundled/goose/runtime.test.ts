@@ -427,6 +427,41 @@ describe("GooseRuntime", () => {
     ]);
   });
 
+  it("keeps Restart to apply for a session on an older remote copy after a local provider save", async () => {
+    const { agent, deliver, runtime } = setup();
+    const synced = (instructions: string, provider = "") => ({
+      ...DEFAULT_CONFIG,
+      scope: "thread" as const,
+      instructions,
+      provider,
+    });
+    let saves = 0;
+    const saved = (config: typeof DEFAULT_CONFIG) =>
+      runtime.sync([{ ...agent, config, saves: ++saves } as unknown as Agent]);
+    saved(synced("SYNCED A"));
+    const first = message("1", "@Gander hi");
+    await deliver(first, { config: synced("SYNCED A") } as Partial<Delivery>);
+    await flush(100);
+    // A remote edit reaches the open conversation, which stays on A.
+    const b = synced("SYNCED B");
+    await deliver(
+      message("2", "@Gander again", {
+        tags: [
+          ["h", channel],
+          ["e", first.id, "", "reply"],
+          ["p", self],
+        ],
+      }),
+      { config: b } as Partial<Delivery>,
+    );
+    await flush(100);
+    expect(runtime.outdated(self, b)).toBe(true);
+    // Saving only a provider over B leaves the session's A prompt in place.
+    const c = synced("SYNCED B", "openai");
+    saved(c);
+    expect(runtime.outdated(self, c)).toBe(true);
+  });
+
   it("switches a saved provider in the live session without restarting goose", async () => {
     const { agent, deliver, fake, runtime } = setup();
     let saves = 0;

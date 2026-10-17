@@ -86,8 +86,9 @@ const setup = (
       /** Picks a provider, model and thinking level, as saving the agent's
        * settings does. */
       choose: (next: Choice) => {
+        const before = JSON.stringify(settings);
         settings = { ...settings, choice: next };
-        sessions.choose(next);
+        sessions.choose(next, before);
         sessions.reconfigure();
       },
     };
@@ -235,6 +236,20 @@ describe("AgentSessions", () => {
       "session-1 model=gpt-4.1",
       "session-1 model=gpt-default",
       "session-1 provider=goose",
+    ]);
+  });
+
+  it("runs a session still opening on a provider saved meanwhile", async () => {
+    const { fake, sessions, choose } = setup();
+    const first = sessions.deliver("a", "one", 1);
+    choose({ provider: "openai", model: "gpt-4.1" });
+    await first;
+    await sessions.deliver("a", "two", 2);
+    const [goose] = fake.geese;
+    expect(goose?.closed).toEqual([]);
+    expect(goose?.configured).toEqual([
+      "session-1 provider=openai",
+      "session-1 model=gpt-4.1",
     ]);
   });
 

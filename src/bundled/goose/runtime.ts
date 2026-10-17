@@ -188,8 +188,9 @@ export class GooseRuntime {
         // A provider, model or thinking level alone switches in the open
         // sessions.
         if (opened(entry.config) !== opened(next)) entry.restarts++;
+        const before = snapshot(entry.config);
         entry.config = next;
-        entry.sessions.choose(choiceOf(next));
+        entry.sessions.choose(choiceOf(next), before);
       }
       entry.local = local;
       entry.name = agent.name;
