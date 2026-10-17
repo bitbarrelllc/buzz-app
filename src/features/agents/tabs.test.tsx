@@ -200,6 +200,9 @@ it("adds History only while the agent's config syncs, and reverts through it", a
   };
   const tab = sections().find((tab) => tab.value === "agent:history");
   render(<div>{tab?.render()}</div>);
+  expect(
+    screen.getByRole("region", { name: "Instructions history" }),
+  ).toBeInTheDocument();
   fireEvent.click(await screen.findByText("Revert to this"));
   await waitFor(() =>
     expect(revise).toHaveBeenCalledWith("instructions", expect.anything()),

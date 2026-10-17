@@ -197,6 +197,7 @@ function ConfigHistoryTab({
   return history.sides.map(({ side, expected, head, version }) => (
     <AgentConfigHistory
       key={side}
+      title={side === "settings" ? "Settings history" : "Instructions history"}
       expected={expected}
       head={head}
       version={version}

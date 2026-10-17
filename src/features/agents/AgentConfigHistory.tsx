@@ -57,6 +57,7 @@ export function AgentConfigHistory({
   read,
   settings,
   onRevert,
+  title = "History",
 }: {
   expected: Expected;
   /** The current head from the config store; revert builds on it. */
@@ -69,6 +70,8 @@ export function AgentConfigHistory({
   settings?: SettingsCheck;
   /** Signs and sends the revert; resolves to what the relay said. */
   onRevert(template: ReturnType<typeof revertTemplate>): Promise<RevertOutcome>;
+  /** Names the section, as which side of the config it shows. */
+  title?: string;
 }) {
   const [history, setHistory] = useState<History>(emptyHistory);
   const [loading, setLoading] = useState(false);
@@ -214,8 +217,8 @@ export function AgentConfigHistory({
 
   const all = segments(history);
   return (
-    <section className={styles.history} aria-label="History">
-      <InlineHeader title="History" />
+    <section className={styles.history} aria-label={title}>
+      <InlineHeader title={title} />
       {!history.revisions.length && !history.failed && (
         <p className="text-body-sm">
           {loading ? "Loading history…" : "No revisions returned."}
