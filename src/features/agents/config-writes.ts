@@ -76,6 +76,8 @@ export class MigrationJournal {
   private saves: Record<string, Held> = {};
   /** Saves retired from replay that may still have been accepted (§3.5). */
   private maybe: Record<string, string> = {};
+  /** Each subject's latest save or resend, which the next waits for. */
+  private writing = new Map<string, Promise<unknown>>();
   constructor(private readonly storage: Storage = localStorage) {
     try {
       const value = JSON.parse(
@@ -111,6 +113,21 @@ export class MigrationJournal {
     if (held) this.saves[migrationKey(subject)] = held;
     else delete this.saves[migrationKey(subject)];
     this.save();
+  }
+  /** Runs `run` once the subject's earlier save or resend has finished, so
+   * one held save is signed, sent and resolved at a time. */
+  serially<T>(subject: Subject, run: () => Promise<T>): Promise<T> {
+    const key = migrationKey(subject);
+    const next = (this.writing.get(key) ?? Promise.resolve()).then(run, run);
+    const done = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.writing.set(key, done);
+    void done.then(() => {
+      if (this.writing.get(key) === done) this.writing.delete(key);
+    });
+    return next;
   }
   /** The id of a save that may have been saved: never declared unaccepted,
    * only resolved by a later accepted save of the subject. */
@@ -470,21 +487,28 @@ async function write(
     prev: string | undefined,
   ) => ReturnType<typeof artifactTemplate>,
 ): Promise<Saved> {
-  if (deps.journal.unsaved(side.subject)) {
-    const earlier = await resume(deps, side);
-    if (earlier?.status === "uncertain" && !earlier.retired) return earlier;
-  }
-  const capture = deps.store.capture(side.subject);
-  const head = deps.store.state(side.subject).head;
-  const prev = base === undefined ? head?.id : (base ?? undefined);
-  if (head && head.id !== prev) return { status: "conflict", head };
-  const event = await deps.writer.sign(template(head, prev), deps.signal);
-  deps.journal.holdSave(side.subject, { event });
-  return send(deps, side, { event }, capture, false);
+  return deps.journal.serially(side.subject, async () => {
+    if (deps.journal.unsaved(side.subject)) {
+      const earlier = await resend(deps, side);
+      if (earlier?.status === "uncertain" && !earlier.retired) return earlier;
+    }
+    const capture = deps.store.capture(side.subject);
+    const head = deps.store.state(side.subject).head;
+    const prev = base === undefined ? head?.id : (base ?? undefined);
+    if (head && head.id !== prev) return { status: "conflict", head };
+    const event = await deps.writer.sign(template(head, prev), deps.signal);
+    deps.journal.holdSave(side.subject, { event });
+    return send(deps, side, { event }, capture, false);
+  });
 }
 
 /** Resends a held save's identical bytes; undefined when none is held. */
-export async function resume(
+export const resume = (
+  deps: WriteDeps,
+  side: Pick<LocalSide, "subject" | "expected">,
+) => deps.journal.serially(side.subject, () => resend(deps, side));
+
+async function resend(
   deps: WriteDeps,
   side: Pick<LocalSide, "subject" | "expected">,
 ) {

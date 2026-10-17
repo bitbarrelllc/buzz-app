@@ -416,6 +416,51 @@ describe("saves as revisions", () => {
     });
   });
 
+  it("keeps a save held for replay when another save of the subject runs at once", async () => {
+    const f = await synced();
+    f.writer.publish = async (event) => {
+      f.sent.push(event);
+      if (event.content === body("Mine")) throw new Error("socket closed");
+      throw new PublishRejected("refused", "invalid: bad tag");
+    };
+    const [mine, other] = await Promise.all([
+      save(f.deps, f.side, body("Mine")),
+      save(f.deps, f.side, body("Other")),
+    ]);
+    expect(mine).toMatchObject({ status: "uncertain", retired: false });
+    expect(other.status).toBe("uncertain");
+    expect(f.journal.unsaved(subject)?.event.content).toBe(body("Mine"));
+  });
+
+  it("keeps a new save held when a reconnect resume of an older one runs at once", async () => {
+    const f = await synced();
+    f.writer.publish = async (event) => {
+      f.sent.push(event);
+      throw new Error("socket closed");
+    };
+    expect((await save(f.deps, f.side, body("Mine"))).status).toBe("uncertain");
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The reconnect resend is refused late; any other is refused at once, and
+    // the newer save stays uncertain.
+    let resends = 0;
+    f.writer.publish = async (event) => {
+      f.sent.push(event);
+      if (event.content !== body("Mine")) throw new Error("socket closed");
+      if (resends++ === 0) await held;
+      throw new PublishRejected("refused", "invalid: bad tag");
+    };
+    const resumed = resume(f.deps, f.side);
+    const newer = save(f.deps, f.side, body("Newer"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    release();
+    await resumed;
+    expect(await newer).toMatchObject({ status: "uncertain", retired: false });
+    expect(f.journal.unsaved(subject)?.event.content).toBe(body("Newer"));
+  });
+
   it("resends a save's identical bytes after an uncertain send, across a restart", async () => {
     const f = await synced();
     const publish = f.writer.publish;
