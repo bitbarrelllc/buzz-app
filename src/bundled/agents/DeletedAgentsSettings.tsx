@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Agents } from "../../features/agents/service";
 import { Button } from "../../shared/design-system/ui/Button";
+import { useToastNotification } from "../../shared/design-system/ui/Toast";
 
 const PENDING = {
   archiving: "Deleting… it stays stopped and keeps trying while connected.",
@@ -23,11 +24,12 @@ export function DeletedAgentsSettings({
   );
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [recovered, setRecovered] = useState("");
+  const notify = useToastNotification();
   const heading = useRef<HTMLHeadingElement>(null);
   /** The agent last asked to recover: owns `error` until its row leaves. */
   const recovering = useRef("");
-  /** Agents this card asked to recover, announced when their row leaves. */
+  /** Agents this card asked to recover, announced once running as active:
+   * a row also leaves while its community is disconnected. */
   const requested = useRef(new Set<string>());
   /** The row holding keyboard focus, kept when its removal drops it. */
   const owner = useRef("");
@@ -38,6 +40,9 @@ export function DeletedAgentsSettings({
       (row) => !deleted.some((agent) => agent.pubkey === row.pubkey),
     );
     shown.current = deleted;
+    for (const agent of state.running)
+      if (!agent.lifecycle && requested.current.delete(agent.pubkey))
+        notify(`Recovered ${agent.name}.`, "success");
     if (!left.length) return;
     // Recovered, now or on a later reconnect: its row, with Recover, is gone.
     const pubkeys = new Set(left.map((row) => row.pubkey));
@@ -45,9 +50,6 @@ export function DeletedAgentsSettings({
       recovering.current = "";
       setError("");
     }
-    const done = left.filter((row) => requested.current.delete(row.pubkey));
-    if (done.length && deleted.length)
-      setRecovered(`Recovered ${done.map((row) => row.name).join(", ")}.`);
     if (pubkeys.has(owner.current)) {
       owner.current = "";
       if (document.activeElement === document.body) heading.current?.focus();
@@ -59,7 +61,6 @@ export function DeletedAgentsSettings({
     setError("");
     recovering.current = pubkey;
     requested.current.add(pubkey);
-    setRecovered("");
     try {
       await agents.recover(pubkey);
     } catch (failure) {
@@ -79,10 +80,11 @@ export function DeletedAgentsSettings({
           and config history are kept, so it can be recovered here.
         </p>
       </div>
-      <p role="status" className="m-0 text-body-sm text-secondary">
-        {deleted.length === 0 ? "No deleted agents." : recovered}
-      </p>
-      {deleted.length > 0 && (
+      {deleted.length === 0 ? (
+        <p role="status" className="text-body-sm text-secondary">
+          No deleted agents.
+        </p>
+      ) : (
         <ul className="m-0 flex w-full list-none flex-col gap-2 p-0">
           {deleted.map((agent) => (
             <li

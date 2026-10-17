@@ -4,6 +4,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Agent, AgentsSnapshot } from "../../features/agents/service";
+import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { DeletedAgentsSettings } from "./DeletedAgentsSettings";
 
 afterEach(cleanup);
@@ -42,7 +43,9 @@ it("lists only deleted agents and recovers an archived one", async () => {
     agent("Gone", "archived"),
     agent("Leaving", "archiving"),
   ]);
-  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
   expect(screen.queryByText("Live")).toBeNull();
   expect(screen.getByText(/Deleting…/)).toBeInTheDocument();
   const buttons = screen.getAllByRole("button", { name: "Recover" });
@@ -58,7 +61,9 @@ it("shows why a recovery did not finish", async () => {
       throw new Error("Gone isn't recovered yet");
     }),
   );
-  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
   await userEvent.click(screen.getByRole("button", { name: "Recover" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Gone isn't recovered yet",
@@ -105,7 +110,9 @@ function recovering(succeeds: boolean) {
 
 it("keeps keyboard focus on Recover while it runs and after it is refused", async () => {
   const { agents, finish } = recovering(false);
-  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
   screen.getByRole("button", { name: "Recover" }).focus();
   await userEvent.keyboard("{Enter}");
   expect(document.activeElement).toBe(
@@ -120,7 +127,9 @@ it("keeps keyboard focus on Recover while it runs and after it is refused", asyn
 
 it("moves focus to the list's heading once a recovered agent leaves it", async () => {
   const { agents, finish } = recovering(true);
-  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
   screen.getByRole("button", { name: "Recover" }).focus();
   await userEvent.keyboard("{Enter}");
   finish();
@@ -150,7 +159,9 @@ it("moves focus to the heading and clears the error when a held recovery finishe
       );
     }),
   };
-  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
   screen.getByRole("button", { name: "Recover" }).focus();
   await userEvent.keyboard("{Enter}");
   expect(await screen.findByRole("alert")).toBeInTheDocument();
@@ -185,6 +196,7 @@ it("leaves focus where the user moved it when a held recovery finishes later", a
       <DeletedAgentsSettings agents={agents} active={() => true} />
       <button type="button">Elsewhere</button>
     </>,
+    { wrapper: ToastProvider },
   );
   screen.getByRole("button", { name: "Recover" }).focus();
   await userEvent.keyboard("{Enter}");
@@ -221,7 +233,9 @@ it("restores focus when the first of two pending Recover rows disappears", async
       throw new Error(`${key} keeps trying while connected`);
     }),
   };
-  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
   screen.getAllByRole("button", { name: "Recover" })[0]?.focus();
   await userEvent.keyboard("{Enter}");
   await screen.findByRole("alert");
@@ -261,6 +275,7 @@ it("does not focus the heading when the recovered row did not own body focus", a
       <DeletedAgentsSettings agents={agents} active={() => true} />
       <button type="button">Elsewhere</button>
     </>,
+    { wrapper: ToastProvider },
   );
   screen.getByRole("button", { name: "Recover" }).focus();
   await userEvent.keyboard("{Enter}");
@@ -295,17 +310,95 @@ it("announces a held recovery that finishes while other rows remain", async () =
       throw new Error("First keeps trying while connected");
     }),
   };
-  render(<DeletedAgentsSettings agents={agents} active={() => true} />);
-  const status = screen.getByRole("status");
-  expect(status).toHaveTextContent("");
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
   const recover = screen.getAllByRole("button", { name: "Recover" })[1];
   screen.getAllByRole("button", { name: "Recover" })[0]?.focus();
   await userEvent.keyboard("{Enter}");
   await screen.findByRole("alert");
   recover?.focus();
-  act(() => set([agent("Second", "archived")]));
-  // The same live region announces it, and focus stays where the owner is.
-  expect(screen.getByRole("status")).toBe(status);
-  expect(status).toHaveTextContent("Recovered First.");
+  act(() => set([agent("First"), agent("Second", "archived")]));
+  // A toast announces it, and focus stays where the owner is.
+  expect(await screen.findByText("Recovered First.")).toBeInTheDocument();
   expect(recover).toHaveFocus();
+});
+
+it("does not announce recovery when the pending agent merely leaves the running community", async () => {
+  const first = { ...agent("First", "archived"), relay: "https://first.test" };
+  const second = {
+    ...agent("Second", "archived"),
+    relay: "https://second.test",
+  };
+  let state = fake([first, second]).snapshot();
+  const listeners = new Set<() => void>();
+  const set = (running: Agent[]) => {
+    state = { ...state, running };
+    for (const fn of listeners) fn();
+  };
+  const agents = {
+    snapshot: () => state,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+    recover: vi.fn(async () => {
+      set([{ ...first, lifecycle: "recovering" }, second]);
+      throw new Error("First keeps trying");
+    }),
+  };
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
+  screen.getAllByRole("button", { name: "Recover" })[0]?.focus();
+  await userEvent.keyboard("{Enter}");
+  await screen.findByRole("alert");
+  screen.getAllByRole("button", { name: "Recover" })[1]?.focus();
+  // AgentsService.running excludes a community in disconnected state even though its lifecycle journal still says recovering.
+  act(() => set([second]));
+  expect(screen.queryByText("Recovered First.")).toBeNull();
+  // The request is still pending: its real completion is announced.
+  act(() => set([agent("First"), second]));
+  expect(await screen.findByText("Recovered First.")).toBeInTheDocument();
+});
+
+it("preserves another row's error and focus when one held recovery finishes", async () => {
+  let state = fake([
+    agent("First", "archived"),
+    agent("Second", "archived"),
+  ]).snapshot();
+  const listeners = new Set<() => void>();
+  const set = (running: Agent[]) => {
+    state = { ...state, running };
+    for (const fn of listeners) fn();
+  };
+  const agents = {
+    snapshot: () => state,
+    subscribe: (fn: () => void) => {
+      listeners.add(fn);
+      return () => {
+        listeners.delete(fn);
+      };
+    },
+    recover: vi.fn(async (key: string) => {
+      if (key === "First")
+        set([agent("First", "recovering"), agent("Second", "archived")]);
+      throw new Error(`${key} keeps trying`);
+    }),
+  };
+  render(<DeletedAgentsSettings agents={agents} active={() => true} />, {
+    wrapper: ToastProvider,
+  });
+  screen.getAllByRole("button", { name: "Recover" })[0]?.focus();
+  await userEvent.keyboard("{Enter}");
+  await screen.findByRole("alert");
+  screen.getAllByRole("button", { name: "Recover" })[1]?.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("alert")).toHaveTextContent("Second keeps trying");
+  act(() => set([agent("First"), agent("Second", "archived")]));
+  expect(screen.getByRole("alert")).toHaveTextContent("Second keeps trying");
+  expect(screen.getAllByRole("button", { name: "Recover" })[0]).toHaveFocus();
+  expect(await screen.findByText("Recovered First.")).toBeInTheDocument();
 });
