@@ -352,3 +352,30 @@ it("matches authors and ids, and refuses filter keys it cannot match", async () 
     f.owner.dispose();
   }
 });
+
+it("gives a route that recovers from a reported failure a new generation", async () => {
+  const f = nativeFeed();
+  try {
+    const { eose, connection } = await bound(f);
+    const closed = vi.fn();
+    f.feed.subscribe([{ kinds: [45010], "#h": ["a"], limit: 0 }], {
+      event() {},
+      eose,
+      closed,
+    });
+    await flush();
+    f.state(connected([{ ...live, status: "error", error: "blocked" }]));
+    await flush();
+    const failed = closed.mock.lastCall?.[0];
+    expect(failed).toBe(f.feed.generation());
+    // Retry recovers the route on the same socket.
+    f.state(connected([pending]));
+    f.state(connected([live]));
+    await flush();
+    expect(f.feed.generation()).not.toBe(failed);
+    expect(eose).toHaveBeenLastCalledWith(f.feed.generation());
+    expect(connection).toHaveBeenLastCalledWith(f.feed.generation());
+  } finally {
+    f.owner.dispose();
+  }
+});

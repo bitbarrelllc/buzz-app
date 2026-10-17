@@ -2737,18 +2737,22 @@ export function createRelaySession(
         )
       )
         refreshRoster();
-      const configLive = liveSnapshot.routes.filter(
-        (route) => isConfigRoute(route.id) && route.status === "live",
-      );
+      // A config route leaving live, or recovering from a reported error,
+      // may have missed events.
+      const left = (status: LiveSnapshot["routes"][number]["status"]) =>
+        liveSnapshot.routes.some(
+          (route) =>
+            isConfigRoute(route.id) &&
+            route.status === status &&
+            !snapshot.routes.some(
+              (next) => next.id === route.id && next.status === status,
+            ),
+        );
       if (
         (snapshot.status !== "connected" &&
           liveSnapshot.status === "connected") ||
-        configLive.some(
-          ({ id }) =>
-            !snapshot.routes.some(
-              (route) => route.id === id && route.status === "live",
-            ),
-        )
+        left("live") ||
+        left("error")
       )
         configGeneration++;
       liveSnapshot = snapshot;
