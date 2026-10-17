@@ -6756,6 +6756,135 @@ describe("Delete as a recoverable archive", () => {
     }
   });
 
+  it.each([
+    ["direct", "instructions"],
+    ["reconnect", "instructions"],
+    ["direct", "settings"],
+    ["reconnect", "settings"],
+  ])(
+    "applies accepted Save B while retaining draft C on %s for %s",
+    async (mode, side) => {
+      const g = await syncedGoose();
+      let accept!: () => void;
+      let reject!: (e: Error) => void;
+      g.relay.held.value = new Promise((yes, no) => {
+        accept = yes;
+        reject = no;
+      });
+      try {
+        const before = g.relay.publishing.mock.calls.length;
+        const savingB =
+          side === "instructions"
+            ? g.save("model-a")
+            : g.save("model-b", "CONFIG A");
+        const refusalB =
+          mode === "reconnect" ? expect(savingB).rejects.toThrow() : undefined;
+        await vi.waitFor(() =>
+          expect(g.relay.publishing.mock.calls.length).toBeGreaterThan(before),
+        );
+        if (mode === "reconnect") {
+          reject(new Error("connection lost"));
+          await refusalB;
+        }
+        const savingC =
+          side === "instructions"
+            ? g.save("model-a", "CONFIG C")
+            : g.save("model-c", "CONFIG A");
+        const refusalC = expect(savingC).rejects.toThrow();
+        if (mode === "direct") accept();
+        else {
+          const beforeC = g.relay.publishing.mock.calls.length;
+          await vi.waitFor(() =>
+            expect(g.relay.publishing.mock.calls.length).toBeGreaterThan(
+              beforeC,
+            ),
+          );
+          reject(new Error("connection lost again"));
+        }
+        if (mode === "direct") await savingB;
+        await refusalC;
+        g.relay.held.value = undefined;
+        if (mode === "reconnect")
+          await g.relay.opens.mock.results[0]?.value.reconnected();
+        expect(g.storage.getItem("buzz.agents.v1")).toContain(
+          side === "instructions" ? "CONFIG C" : "model-c",
+        );
+        const shown = g.f.service.find(bot)?.config as {
+          instructions: string;
+          model: string;
+        };
+        if (side === "instructions")
+          expect(shown.instructions).toBe("CONFIG B");
+        else expect(shown.model).toBe("model-b");
+        g.deliver("4".repeat(64));
+        await vi.waitFor(() =>
+          expect(g.process.geese[0]?.turns).toHaveLength(2),
+        );
+        const prompt = g.process.geese[0]?.prompts.get(
+          g.process.geese[0]?.turns[1]?.sessionId ?? "",
+        );
+        if (side === "instructions") {
+          expect(prompt).toContain("CONFIG B");
+          expect(prompt).not.toContain("CONFIG C");
+        } else {
+          expect(
+            g.process.geese[0]?.configured.some((change) =>
+              change.endsWith("model=model-b"),
+            ),
+          ).toBe(true);
+          expect(g.runtime.outdated(bot, shown)).toBe(false);
+        }
+      } finally {
+        accept();
+        g.relay.held.value = undefined;
+        await g.close();
+      }
+    },
+  );
+
+  it("applies a History revert in an existing Goose conversation", async () => {
+    const g = await syncedGoose();
+    try {
+      const first = g.f.service
+        .configHistory(bot)
+        ?.sides.find((s) => s.side === "instructions")?.head;
+      if (!first) throw new Error("no original head");
+      await g.save("model-a");
+      g.deliver("5".repeat(64));
+      await vi.waitFor(() => expect(g.process.geese[0]?.turns).toHaveLength(2));
+      await vi.waitFor(() =>
+        expect(g.runtime.sessions(bot)[0]?.busy).toBe(false),
+      );
+      expect(
+        g.process.geese[0]?.prompts.get(
+          g.process.geese[0]?.turns[1]?.sessionId ?? "",
+        ),
+      ).toContain("CONFIG B");
+      const history = g.f.service.configHistory(bot);
+      const side = history?.sides.find((s) => s.side === "instructions");
+      if (!history || !side?.head) throw new Error("no History");
+      expect(
+        await history.revise(
+          "instructions",
+          revertTemplate(side.expected, side.head, first),
+        ),
+      ).toEqual({ status: "accepted" });
+      expect(
+        (g.f.service.find(bot)?.config as { instructions?: string } | undefined)
+          ?.instructions,
+      ).toBe("CONFIG A");
+      g.deliver("6".repeat(64));
+      await vi.waitFor(() => expect(g.process.geese[0]?.turns).toHaveLength(3));
+      expect(
+        g.process.geese[0]?.prompts.get(
+          g.process.geese[0]?.turns[2]?.sessionId ?? "",
+        ),
+      ).toContain("CONFIG A");
+    } finally {
+      await g.close();
+    }
+  });
+
   it("does not consume more local-save tokens on settled reconnects", async () => {
     const g = await syncedGoose();
     try {

@@ -2960,13 +2960,16 @@ export class AgentsService extends Service implements Agents {
         ?.syncedSettings?.schema,
     };
   }
-  /** Retires a side's local field once its exact value is the synced head:
-   * `accepted`, when this device's save just became it. */
+  /** Retires a side's local field once its exact value is the synced head.
+   * Given `accepted`, this device's save just became the head: runtimes are
+   * told either way, and a newer local edit stays a draft. */
   private stripLocal(pubkey: string, side: Side, accepted?: RelayEvent) {
     const identity = this.live(pubkey);
     if (!identity) return;
     const record = this.recordOf(identity);
-    // A newer local edit than the accepted save stays a draft.
+    // Runtimes take the accepted head as a local save, not the earlier token
+    // they spent on the old head while it was sent.
+    this.saves.set(pubkey, (this.saves.get(pubkey) ?? 0) + 1);
     if (
       accepted &&
       sideContent(
@@ -2976,16 +2979,13 @@ export class AgentsService extends Service implements Agents {
         accepted,
       ) !== accepted.content
     )
-      return;
+      return this.update();
     const config = { ...(record.config as Record<string, unknown>) };
     const fields =
       side === "instructions"
         ? ["instructions"]
         : Object.keys(this.configAgent(identity, config).schema ?? {});
     for (const field of fields) delete config[field];
-    // The agent now shows the saved value: runtimes take it as a local save,
-    // not the earlier token they spent on the old head while it was sent.
-    this.saves.set(pubkey, (this.saves.get(pubkey) ?? 0) + 1);
     this.write({ ...record, config });
   }
 
