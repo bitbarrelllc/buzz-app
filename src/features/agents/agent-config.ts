@@ -285,6 +285,20 @@ export const pickSettings = (schema: SettingsSchema, config: object) =>
       .map((name) => [name, (config as Record<string, unknown>)[name]]),
   ) as Record<string, string>;
 
+/** A config with its synced fields taken only from accepted `settings`: a
+ * field they leave out gets the plugin's default, never this device's value.
+ * Everything outside the schema stays this device's. */
+export const withSynced = <C extends object>(
+  schema: SettingsSchema,
+  defaults: C,
+  config: C,
+  settings: Readonly<Record<string, string>>,
+): C => ({
+  ...config,
+  ...pickSettings(schema, defaults),
+  ...pickSettings(schema, settings),
+});
+
 /** A `buzz.agent.settings` body for a plugin: `{version: 1, agentType,
  * settings}`. Another agent type, or a value the plugin can't honour, is
  * invalid for start. */

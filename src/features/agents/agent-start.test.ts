@@ -112,12 +112,27 @@ describe("start resolution", () => {
       config: {
         ...local,
         model: "synced-model",
+        // Left out of the accepted settings, so Claude's default, not "low".
+        effort: "",
         scope: "channel",
         instructions: "synced text",
       },
       revisions: [s.id, i.id],
       synced: { model: "synced-model", scope: "channel" },
     });
+  });
+
+  it("starts a channel-scope agent on thread scope when the accepted settings leave scope out", () => {
+    const store = new AgentConfigStore(memoryStorage());
+    const s = revision({ agentType: "claude-code", settings: { model: "m" } });
+    install(store, settings, s);
+    const resolved = resolveStart(
+      input(store, "synced", {
+        local: { ...local, scope: "channel" },
+        instructions: { mode: "local", subject: instructions },
+      }),
+    );
+    expect(resolved).toMatchObject({ ok: true, config: { scope: "thread" } });
   });
 
   it("blocks on unavailable with no local fallback, even with local text", () => {

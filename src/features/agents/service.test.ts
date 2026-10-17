@@ -6772,6 +6772,10 @@ describe("Delete as a recoverable archive", () => {
         reject = no;
       });
       try {
+        const seen: unknown[] = [];
+        const off = g.f.service.subscribe(() =>
+          seen.push(g.f.service.find(bot)?.config),
+        );
         const before = g.relay.publishing.mock.calls.length;
         const savingB =
           side === "instructions"
@@ -6816,6 +6820,12 @@ describe("Delete as a recoverable archive", () => {
         if (side === "instructions")
           expect(shown.instructions).toBe("CONFIG B");
         else expect(shown.model).toBe("model-b");
+        off();
+        for (const value of seen) {
+          const view = value as { instructions?: string; model?: string };
+          expect(view.instructions).not.toBe("CONFIG C");
+          expect(view.model).not.toBe("model-c");
+        }
         g.deliver("4".repeat(64));
         await vi.waitFor(() =>
           expect(g.process.geese[0]?.turns).toHaveLength(2),
@@ -6832,6 +6842,11 @@ describe("Delete as a recoverable archive", () => {
               change.endsWith("model=model-b"),
             ),
           ).toBe(true);
+          expect(
+            g.process.geese[0]?.configured.some((change) =>
+              change.endsWith("model=model-c"),
+            ),
+          ).toBe(false);
           expect(g.runtime.outdated(bot, shown)).toBe(false);
         }
       } finally {
@@ -6880,6 +6895,145 @@ describe("Delete as a recoverable archive", () => {
           g.process.geese[0]?.turns[2]?.sessionId ?? "",
         ),
       ).toContain("CONFIG A");
+    } finally {
+      await g.close();
+    }
+  });
+
+  it("never overlays draft C onto an accepted settings head that omits a setting", async () => {
+    const g = await syncedGoose();
+    let accept!: () => void;
+    g.relay.held.value = new Promise((resolve) => {
+      accept = resolve;
+    });
+    try {
+      const opened = g.f.service.find(bot);
+      const historyBefore = g.f.service.configHistory(bot);
+      const settingsBefore = historyBefore?.sides.find(
+        (side) => side.side === "settings",
+      );
+      if (!opened || !historyBefore || !settingsBefore?.head)
+        throw new Error("no agent settings History");
+      const body = JSON.parse(settingsBefore.head.content);
+      delete body.settings.model;
+      body.settings.scope = "channel";
+      const before = g.relay.publishing.mock.calls.length;
+      const savingB = historyBefore.revise(
+        "settings",
+        artifactTemplate({
+          ...settingsBefore.expected,
+          title: "Settings",
+          content: JSON.stringify(body),
+          op: "update",
+          prev: settingsBefore.head.id,
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(g.relay.publishing.mock.calls.length).toBeGreaterThan(before),
+      );
+      const savingC = g.f.service.save(bot, {
+        config: {
+          ...(opened.config as object),
+          scope: "channel",
+          model: "model-c",
+        },
+        ...(opened.configBase ? { base: opened.configBase } : {}),
+      });
+      const refusal = expect(savingC).rejects.toThrow("kept as a draft");
+      accept();
+      expect(await savingB).toEqual({ status: "accepted" });
+      await refusal;
+      expect(g.storage.getItem("buzz.agents.v1")).toContain("model-c");
+      const history = g.f.service
+        .configHistory(bot)
+        ?.sides.find((side) => side.side === "settings");
+      expect(
+        JSON.parse(history?.head?.content ?? "{}").settings,
+      ).not.toHaveProperty("model");
+      const shown = g.f.service.find(bot)?.config as { model?: string };
+      // Complete an actual next turn before inspecting the process boundary.
+      g.deliver("a".repeat(64));
+      await vi.waitFor(() => expect(g.process.geese[0]?.turns).toHaveLength(2));
+      await vi.waitFor(() =>
+        expect(g.runtime.sessions(bot)[0]?.busy).toBe(false),
+      );
+      console.log(
+        "SPARSE SETTINGS OBSERVED",
+        JSON.stringify({
+          view: shown.model,
+          commands: g.process.geese[0]?.configured,
+        }),
+      );
+      expect.soft(shown.model).not.toBe("model-c");
+      expect
+        .soft(
+          g.process.geese[0]?.configured.some((change) =>
+            change.endsWith("model=model-c"),
+          ),
+        )
+        .toBe(false);
+    } finally {
+      accept();
+      g.relay.held.value = undefined;
+      await g.close();
+    }
+  });
+
+  it("applies a settings History revert and direct revise to an existing Goose conversation", async () => {
+    const g = await syncedGoose();
+    const next = async (id: string, model: string) => {
+      const count = g.process.geese[0]?.turns.length ?? 0;
+      g.deliver(id.repeat(64));
+      await vi.waitFor(() =>
+        expect(g.process.geese[0]?.turns).toHaveLength(count + 1),
+      );
+      await vi.waitFor(() =>
+        expect(g.runtime.sessions(bot)[0]?.busy).toBe(false),
+      );
+      expect(g.process.geese[0]?.configured.at(-1)).toMatch(
+        new RegExp(`model=${model}$`),
+      );
+    };
+    try {
+      const first = g.f.service
+        .configHistory(bot)
+        ?.sides.find((s) => s.side === "settings")?.head;
+      if (!first) throw new Error("no settings head");
+      await g.save("model-b", "CONFIG A");
+      await next("7", "model-b");
+      const history = g.f.service.configHistory(bot);
+      const side = history?.sides.find((s) => s.side === "settings");
+      if (!history || !side?.head) throw new Error("no History");
+      expect(
+        await history.revise(
+          "settings",
+          revertTemplate(side.expected, side.head, first, history.settings),
+        ),
+      ).toEqual({ status: "accepted" });
+      await next("8", "model-a");
+      const updated = g.f.service
+        .configHistory(bot)
+        ?.sides.find((s) => s.side === "settings");
+      if (!updated?.head) throw new Error("no updated head");
+      expect(
+        await history.revise(
+          "settings",
+          artifactTemplate({
+            ...updated.expected,
+            title: "Settings",
+            content: JSON.stringify({
+              ...JSON.parse(updated.head.content),
+              settings: {
+                ...JSON.parse(updated.head.content).settings,
+                model: "model-d",
+              },
+            }),
+            op: "update",
+            prev: updated.head.id,
+          }),
+        ),
+      ).toEqual({ status: "accepted" });
+      await next("9", "model-d");
     } finally {
       await g.close();
     }
