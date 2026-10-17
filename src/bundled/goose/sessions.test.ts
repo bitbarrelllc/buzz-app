@@ -903,3 +903,32 @@ it("applies the last local effort Save to a deferred opening before its next tur
     sessions.dispose();
   }
 });
+
+it("keeps an older remote snapshot through several local choice Saves", async () => {
+  const { sessions, change, choose, fake } = setup({
+    choice: { provider: "openai", model: "gpt-4.1" },
+  });
+  try {
+    await sessions.deliver("a", "old remote config A", 1);
+    // The host delivers newer remote B, but an existing session keeps A.
+    change({ choice: { provider: "openai", model: "gpt-default" } }, false);
+    choose({ provider: "openai", model: "gpt-4.1", effort: "high" });
+    choose({ provider: "openai", model: "gpt-default", effort: "high" });
+    await sessions.deliver("a", "after two local Saves", 2);
+    expect(fake.geese[0]?.closed).toEqual([]);
+    expect(fake.geese[0]?.configured).toContain(
+      "session-1 thinking_effort=high",
+    );
+    expect(
+      sessions.outdated(
+        JSON.stringify({
+          workspace: "~/.buzz",
+          systemPrompt: "prompt",
+          choice: { provider: "openai", model: "gpt-default", effort: "high" },
+        }),
+      ),
+    ).toBe(true);
+  } finally {
+    sessions.dispose();
+  }
+});
