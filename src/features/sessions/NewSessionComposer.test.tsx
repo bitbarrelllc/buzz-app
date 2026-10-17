@@ -2425,7 +2425,7 @@ it.each(["remember", "off", "unavailable", "existing"])(
   },
 );
 
-it("uploads files attached before a new chat exists into the created chat", async () => {
+it("uploads files as soon as they are attached to a new chat, then sends them", async () => {
   const test = setup(),
     onStarted = vi.fn(),
     user = userEvent.setup();
@@ -2436,13 +2436,9 @@ it("uploads files attached before a new chat exists into the created chat", asyn
     size: 5,
     sha256: "f".repeat(64),
   };
-  const created: unknown[] = [];
-  const upload = vi.fn(async (_file: File, _channelId: string) => {
-    // Files wait for the chat: nothing uploads before it is created.
-    created.push(test.workSessions.create.mock.calls[0]?.[0]);
-    return attachment;
-  });
-  Object.assign(test.session, { attachments: { upload } });
+  const upload = vi.fn();
+  const uploadForNewChat = vi.fn(async () => attachment);
+  Object.assign(test.session, { attachments: { upload, uploadForNewChat } });
   render(
     <NewSessionComposer
       session={test.session}
@@ -2455,20 +2451,46 @@ it("uploads files attached before a new chat exists into the created chat", asyn
     screen.getByLabelText("Choose attachments"),
     new File(["notes"], "notes.txt", { type: "text/plain" }),
   );
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(upload).not.toHaveBeenCalled();
+  await waitFor(() => expect(uploadForNewChat).toHaveBeenCalledOnce());
+  expect(test.workSessions.create).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
-  const id = test.workSessions.create.mock.calls[0]?.[0];
-  expect(upload).toHaveBeenCalledOnce();
-  expect(created).toEqual([id]);
-  expect(upload.mock.calls[0]?.[1]).toBe(id);
+  expect(uploadForNewChat).toHaveBeenCalledOnce();
+  expect(upload).not.toHaveBeenCalled();
   expect(test.messages.send).toHaveBeenCalledWith(
-    id,
+    test.workSessions.create.mock.calls[0]?.[0],
     "See attached",
     ["a".repeat(64)],
     [attachment],
   );
+});
+
+it("a failed upload blocks a new chat before anything is created", async () => {
+  const test = setup(),
+    onStarted = vi.fn(),
+    user = userEvent.setup();
+  const uploadForNewChat = vi.fn(async () => {
+    throw new Error("Upload failed. Retry or remove this file.");
+  });
+  Object.assign(test.session, { attachments: { uploadForNewChat } });
+  render(
+    <NewSessionComposer
+      session={test.session}
+      scope="test"
+      onStarted={onStarted}
+    />,
+  );
+  await user.type(screen.getByRole("textbox"), "See attached");
+  await user.upload(
+    screen.getByLabelText("Choose attachments"),
+    new File(["notes"], "notes.txt", { type: "text/plain" }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Retry notes.txt" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  expect(test.workSessions.create).not.toHaveBeenCalled();
+  expect(test.messages.send).not.toHaveBeenCalled();
 });
 
 it("a recovered start says when its attached files were lost, then sends without them", async () => {
@@ -2476,7 +2498,7 @@ it("a recovered start says when its attached files were lost, then sends without
     onStarted = vi.fn(),
     user = userEvent.setup();
   Object.assign(test.session, {
-    attachments: { upload: vi.fn(async () => ({})) },
+    attachments: { uploadForNewChat: vi.fn(async () => ({})) },
   });
   writeView("test", "sessions:pending", {
     id: "22222222-2222-4222-8222-222222222222",
@@ -2505,7 +2527,7 @@ it("a recovered start says when its attached files were lost, then sends without
   );
 });
 
-it("a start interrupted mid-upload reopens editable so its files can be retried", async () => {
+it("resumes a new chat's interrupted upload after navigating away and back", async () => {
   const test = setup(),
     onStarted = vi.fn(),
     user = userEvent.setup();
@@ -2516,13 +2538,13 @@ it("a start interrupted mid-upload reopens editable so its files can be retried"
     size: 5,
     sha256: "f".repeat(64),
   };
-  const upload = vi.fn(
-    (_file: File, _channelId: string, signal: AbortSignal) =>
+  const uploadForNewChat = vi.fn(
+    (_file: File, signal: AbortSignal) =>
       new Promise<typeof attachment>((_resolve, reject) =>
         signal.addEventListener("abort", () => reject(signal.reason)),
       ),
   );
-  Object.assign(test.session, { attachments: { upload } });
+  Object.assign(test.session, { attachments: { uploadForNewChat } });
   const view = render(
     <NewSessionComposer
       session={test.session}
@@ -2535,11 +2557,10 @@ it("a start interrupted mid-upload reopens editable so its files can be retried"
     screen.getByLabelText("Choose attachments"),
     new File(["notes"], "notes.txt", { type: "text/plain" }),
   );
-  await user.click(screen.getByRole("button", { name: "Send message" }));
-  await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+  await waitFor(() => expect(uploadForNewChat).toHaveBeenCalledOnce());
   view.unmount();
 
-  upload.mockImplementation(async () => attachment);
+  uploadForNewChat.mockImplementation(async () => attachment);
   render(
     <NewSessionComposer
       session={test.session}
@@ -2547,15 +2568,11 @@ it("a start interrupted mid-upload reopens editable so its files can be retried"
       onStarted={onStarted}
     />,
   );
-  await user.click(
-    await screen.findByRole("button", { name: "Retry notes.txt" }),
-  );
+  await waitFor(() => expect(uploadForNewChat).toHaveBeenCalledTimes(2));
   await user.click(screen.getByRole("button", { name: "Send message" }));
   await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
-  const id = test.workSessions.create.mock.calls[0]?.[0];
-  expect(test.workSessions.create).toHaveBeenCalledOnce();
   expect(test.messages.send).toHaveBeenCalledWith(
-    id,
+    test.workSessions.create.mock.calls[0]?.[0],
     "See attached",
     ["a".repeat(64)],
     [attachment],

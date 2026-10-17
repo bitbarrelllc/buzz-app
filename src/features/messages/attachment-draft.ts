@@ -5,6 +5,7 @@ import {
   UPLOAD_MAX_BYTES,
   UploadError,
   type UploadedAttachment,
+  type UploadProgress,
 } from "../relay/attachments";
 import { prepareAttachment } from "./prepare-attachment";
 
@@ -24,11 +25,7 @@ export type AttachmentDraft = {
   add(files: readonly File[], recording?: VoiceRecording): void;
   addUploaded(attachment: UploadedAttachment): void;
   adopt(files: readonly DraftAttachment[]): boolean;
-  /** A deferred draft names its destination here, once that conversation exists. */
-  prepareForSend(
-    signal: AbortSignal,
-    channelId?: string,
-  ): Promise<readonly UploadedAttachment[]>;
+  prepareForSend(signal: AbortSignal): Promise<readonly UploadedAttachment[]>;
   remove(id: string): void;
   retry(id: string): void;
   cancel(): void;
@@ -77,12 +74,12 @@ export const MAX_ATTACHMENT_FILES = 10;
 const MAX_RETAINED_BYTES = 2 * UPLOAD_MAX_BYTES;
 
 /** Tab-local files survive navigation, not reload. Delivery remains outbox-owned.
- * A deferred draft holds files without uploading until send names the conversation. */
+ * A new chat's draft uploads before its channel exists. */
 export function attachmentDraft(
   session: RelaySession,
   key: string,
   channelId: string,
-  deferred = false,
+  newChat = false,
 ): AttachmentDraft {
   let partition = drafts.get(session);
   if (!partition) {
@@ -95,7 +92,6 @@ export function attachmentDraft(
   let items: readonly DraftAttachment[] = [];
   const listeners = new Set<() => void>();
   let paused = false;
-  let destination = channelId;
   let active = new Map<string, UploadTask>();
   let pending = new Map<string, Promise<UploadedAttachment>>();
   const emit = () => {
@@ -165,7 +161,12 @@ export function attachmentDraft(
   ): Promise<UploadedAttachment> {
     if (item.uploaded) return item.uploaded;
     const attachments = session.attachments;
-    if (!attachments) throw new UploadError("unavailable");
+    const upload = newChat
+      ? attachments?.uploadForNewChat
+      : attachments &&
+        ((file: File, signal: AbortSignal, progress: UploadProgress) =>
+          attachments.upload(file, channelId, signal, progress));
+    if (!upload) throw new UploadError("unavailable");
     const controller = new AbortController();
     const combined = AbortSignal.any([signal, controller.signal]);
     const owner = active;
@@ -181,7 +182,7 @@ export function attachmentDraft(
       combined.throwIfAborted();
       task.update(item.id, { status: "uploading" });
       const result = await abortable(
-        attachments.upload(prepared, destination, combined, (sent, total) => {
+        upload(prepared, combined, (sent, total) => {
           if (
             !combined.aborted &&
             owner.get(item.id) === task &&
@@ -223,7 +224,7 @@ export function attachmentDraft(
     }
   }
   function pump() {
-    if (paused || deferred || active.size) return;
+    if (paused || active.size) return;
     const next = items.find((item) => item.status === "queued");
     if (next) start(next);
   }
@@ -336,9 +337,8 @@ export function attachmentDraft(
       emit();
       return true;
     },
-    async prepareForSend(signal: AbortSignal, channel = channelId) {
+    async prepareForSend(signal: AbortSignal) {
       paused = false;
-      destination = channel;
       if (!items.length) return [];
       const uploaded: UploadedAttachment[] = [];
       try {
@@ -422,11 +422,11 @@ export function useAttachmentDraft(
   session: RelaySession,
   key: string,
   channelId: string,
-  deferred = false,
+  newChat = false,
 ) {
   // Composer's destination key remounts this hook on a session/channel/thread change.
   const [store] = useState(() =>
-    attachmentDraft(session, key, channelId, deferred),
+    attachmentDraft(session, key, channelId, newChat),
   );
   const items = useSyncExternalStore(
     store.subscribe,

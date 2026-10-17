@@ -245,7 +245,7 @@ export type MessageComposerProps = {
     receiptOnly?: boolean;
     locked: boolean;
     disabled: boolean;
-    /** Hold files locally; submit uploads them once the conversation exists. */
+    /** Files upload before the conversation exists; submit sends them. */
     attachments?: boolean;
     submit: (draft: MentionDraft, attachments: AttachmentDraft) => void;
   };
@@ -593,12 +593,13 @@ function Composer({
     session,
     `${scope}:${draftKey}`,
     channelId,
-    !!submission,
+    !!submission?.attachments,
   );
   const picker = useRef<HTMLInputElement>(null);
   const form = useRef<HTMLFormElement>(null);
-  const canAttach =
-    (!submission || !!submission.attachments) && !!session.attachments;
+  const canAttach = submission
+    ? !!submission.attachments && !!session.attachments?.uploadForNewChat
+    : !!session.attachments;
   const voice = useVoiceCapture(
     attachments.store,
     !active || editingDisabled || !!editing.target || !canAttach,

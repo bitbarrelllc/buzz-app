@@ -279,6 +279,12 @@ export function NewSessionComposer({
         }
         current.attachmentCount = selected || undefined;
       }
+      // Finish uploads before anything is created, so a failed file blocks
+      // the start instead of leaving an empty chat behind.
+      const uploaded = current.messageId
+        ? []
+        : await files.prepareForSend(new AbortController().signal);
+      if (!mounted.current) return;
       save(current); // Freeze validated name and lifetime before the first asynchronous start operation.
       if (current.setup !== undefined) {
         current.setup = parseSessionSetup(current.setup);
@@ -457,12 +463,6 @@ export function NewSessionComposer({
               "This conversation is no longer in Solo. Open it in Multiplayer.",
             );
         }
-        // Files already uploaded by an earlier attempt are reused.
-        const uploaded = await files.prepareForSend(
-          new AbortController().signal,
-          current.id,
-        );
-        if (!mounted.current) return;
         current.messageId = session.messages.send(
           current.id,
           current.text,

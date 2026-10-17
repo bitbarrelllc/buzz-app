@@ -536,18 +536,20 @@ it("rejects eager upload errors until explicit Retry, including after Send hando
   await expect(work).resolves.toEqual([uploaded()]);
 });
 
-it("a deferred draft holds files until send names the created conversation", async () => {
+it("a new chat's draft uploads before its channel exists", async () => {
   const h = fixture();
-  const store = attachmentDraft(h.session, "deferred", "draft-id", true);
+  const uploadForNewChat = vi.fn(
+    async (_file: globalThis.File, _signal: AbortSignal) => uploaded(),
+  );
+  const session = {
+    attachments: { upload: h.upload, uploadForNewChat },
+  } as unknown as RelaySession;
+  const store = attachmentDraft(session, "new-chat", "draft-id", true);
   store.add([file()]);
-  store.resume();
-  await Promise.resolve();
+  await waitFor(() => expect(uploadForNewChat).toHaveBeenCalledOnce());
   expect(h.upload).not.toHaveBeenCalled();
-  expect(store.snapshot()[0]?.status).toBe("queued");
-
-  const sent = store.prepareForSend(new AbortController().signal, "created");
-  await waitFor(() => expect(h.upload).toHaveBeenCalledOnce());
-  expect(h.calls[0]?.channel).toBe("created");
-  h.calls[0]?.result.resolve(uploaded());
-  await expect(sent).resolves.toEqual([uploaded()]);
+  await waitFor(() => expect(store.snapshot()[0]?.status).toBe("ready"));
+  await expect(
+    store.prepareForSend(new AbortController().signal),
+  ).resolves.toEqual([uploaded()]);
 });
