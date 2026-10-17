@@ -836,3 +836,70 @@ it("a remote Goose thinking edit stays pinned until Restart to apply", async () 
     sessions.dispose();
   }
 });
+
+it("marks an opening session current after two local choice saves", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered = false;
+  const { sessions, fake, choose } = setup({}, false, {
+    serve: (serve) => async (handler) => {
+      entered = true;
+      await held;
+      return serve(handler);
+    },
+  });
+  try {
+    const opening = sessions.deliver("a", "first", 1);
+    await vi.waitFor(() => expect(entered).toBe(true));
+    choose({ provider: "openai", model: "gpt-4.1" });
+    choose({ provider: "openai", model: "gpt-default" });
+    release();
+    await opening;
+    expect(fake.geese[0]?.closed).toEqual([]);
+    expect(fake.geese[0]?.configured).toContain("session-1 model=gpt-default");
+    expect(
+      sessions.outdated(
+        JSON.stringify({
+          workspace: "~/.buzz",
+          systemPrompt: "prompt",
+          choice: { provider: "openai", model: "gpt-default" },
+        }),
+      ),
+    ).toBe(false);
+  } finally {
+    release();
+    sessions.dispose();
+  }
+});
+
+it("applies the last local effort Save to a deferred opening before its next turn", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered = false;
+  const { sessions, fake, choose } = setup({}, false, {
+    serve: (serve) => async (handler) => {
+      entered = true;
+      await held;
+      return serve(handler);
+    },
+  });
+  try {
+    const first = sessions.deliver("a", "first", 1);
+    await vi.waitFor(() => expect(entered).toBe(true));
+    choose({ provider: "openai", model: "gpt-4.1", effort: "high" });
+    release();
+    await first;
+    await sessions.deliver("a", "next", 2);
+    expect(fake.geese[0]?.configured).toContain(
+      "session-1 thinking_effort=high",
+    );
+    expect(fake.geese[0]?.closed).toEqual([]);
+  } finally {
+    release();
+    sessions.dispose();
+  }
+});

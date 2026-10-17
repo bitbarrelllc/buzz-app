@@ -153,8 +153,9 @@ export type SessionsOptions = Readonly<{
   onChange?(): void;
 }>;
 
-/** A local save of a choice, made while sessions ran on `before`. */
-type Chosen = { choice: Choice; before: string; after: string };
+/** A local save of a choice, made while sessions ran on `before`; `next` is
+ * the save after it. */
+type Chosen = { choice: Choice; before: string; after: string; next?: Chosen };
 
 /** Switches a session to a saved choice; one that ran on the config it was
  * saved over now runs on the config saved. */
@@ -196,9 +197,9 @@ export class AgentSessions {
    * prompted for the old one. */
   private readonly had = new Set<string>();
   private disposed = false;
-  /** The latest local save of a choice, which a session opening meanwhile
-   * read its settings before. */
-  private chosen: Chosen | undefined;
+  /** The latest local save of a choice, or none yet; a session opening
+   * replays each save after the one it read with its settings. */
+  private chosen: { next?: Chosen } = {};
 
   constructor(private readonly options: SessionsOptions) {}
 
@@ -365,7 +366,8 @@ export class AgentSessions {
    * opening sessions switch to it from their next turn. Those that ran on
    * `before` now run on the config saved. */
   choose(choice: Choice, before: string) {
-    const chosen = { choice, before, after: this.options.snapshot() };
+    const chosen: Chosen = { choice, before, after: this.options.snapshot() };
+    this.chosen.next = chosen;
     this.chosen = chosen;
     for (const live of this.live.values()) switchTo(live, chosen);
   }
@@ -466,7 +468,7 @@ export class AgentSessions {
       slot,
       at: Date.now(),
     };
-    if (this.chosen && this.chosen !== chosen) switchTo(live, this.chosen);
+    for (let next = chosen.next; next; next = next.next) switchTo(live, next);
     if (fingerprint !== this.options.fingerprint() && !this.disposed) {
       // Settings saved while it opened: it would work with the old ones.
       void this.close(live);
