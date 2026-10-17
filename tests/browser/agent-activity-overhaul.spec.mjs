@@ -218,9 +218,18 @@ test("message activity opens a grouped preview and the agent's profile without l
       await bubble.focus();
       // Native top-layer message actions must step aside for the activity
       // portal, including when its trigger retains keyboard focus.
+      await expect(messageActions).toHaveCSS("visibility", "hidden");
       await expect
         .poll(() =>
-          messageActions.evaluate((bar) => bar.matches(":popover-open")),
+          messageActions.evaluate((bar) => {
+            const box = bar.getBoundingClientRect();
+            return bar.contains(
+              document.elementFromPoint(
+                box.x + box.width / 2,
+                box.y + box.height / 2,
+              ),
+            );
+          }),
         )
         .toBe(false);
       await expect(
