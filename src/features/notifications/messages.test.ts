@@ -856,8 +856,20 @@ it("suppresses ordinary notifications after a channel is marked as a Huddle", as
   h.emit([
     metadata(h.relay, "room", "Huddle", Math.floor(Date.now() / 1000), [
       ["private"],
+      ["P", h.peer.pubkey],
       ["about", huddleDescription("00000000-0000-4000-8000-000000000001")],
     ]),
+    signed(h.peer, {
+      kind: 9007,
+      created_at: 10,
+      content: "",
+      tags: [
+        ["h", "room"],
+        ["visibility", "private"],
+        ["channel_type", "stream"],
+        ["about", huddleDescription("00000000-0000-4000-8000-000000000001")],
+      ],
+    }),
   ]);
   h.emit([h.make("private mention")], "live");
   await flush();
@@ -907,8 +919,20 @@ it("cancels a pending thread notification when metadata marks its room as a Hudd
     h.emit([
       metadata(h.relay, "room", "Huddle", now, [
         ["private"],
+        ["P", h.peer.pubkey],
         ["about", huddleDescription("00000000-0000-4000-8000-000000000001")],
       ]),
+      signed(h.peer, {
+        kind: 9007,
+        created_at: 10,
+        content: "",
+        tags: [
+          ["h", "room"],
+          ["visibility", "private"],
+          ["channel_type", "stream"],
+          ["about", huddleDescription("00000000-0000-4000-8000-000000000001")],
+        ],
+      }),
     ]);
   } finally {
     release("granted");

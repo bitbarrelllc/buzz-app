@@ -12,7 +12,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi, assert } from "vitest";
 import { ToastProvider } from "../../shared/design-system/ui/Toast";
 import { DiscoveryState } from "../relay/discovery";
-import { keypair, metadata, roster } from "../relay/testing";
+import { keypair, metadata, roster, signed } from "../relay/testing";
 import { huddleDescription } from "../huddle/lifecycle";
 import { createRelaySession } from "../relay/session";
 import { createSidebarPreferencesStore } from "../relay/sidebar-preferences-store";
@@ -601,7 +601,21 @@ it("keeps Huddle rooms out of the sidebar before and after metadata arrives", as
     metadata(relay, room, "Call room", 30, [
       ["private"],
       ["about", huddleDescription(parent)],
+      ["P", viewer.pubkey],
     ]),
+  );
+  discovery.accept(
+    signed(viewer, {
+      kind: 9007,
+      created_at: 10,
+      content: "",
+      tags: [
+        ["h", room],
+        ["visibility", "private"],
+        ["channel_type", "stream"],
+        ["about", huddleDescription(parent)],
+      ],
+    }),
   );
   list = {
     ...list,
@@ -617,7 +631,7 @@ it("keeps Huddle rooms out of the sidebar before and after metadata arrives", as
   expect(screen.queryByRole("button", { name: "Call room" })).toBeNull();
 });
 
-it("hides old trial rooms using signed expiry metadata while keeping ordinary private channels", async () => {
+it("keeps unproven trial rooms ordinary despite signed expiry metadata", async () => {
   const h = fixture();
   const relay = keypair(),
     viewer = keypair();
@@ -628,13 +642,13 @@ it("hides old trial rooms using signed expiry metadata while keeping ordinary pr
       id: "trial",
       name: "Huddle",
       tags: [["private"], ["ttl", "3600"]],
-      hidden: true,
+      hidden: false,
     },
     {
       id: legacy,
       name: `huddle-${legacy.slice(0, 8)}`,
       tags: [["private"], ["ttl", "60"], ["archived", "true"]],
-      hidden: true,
+      hidden: false,
     },
     { id: "ordinary", name: "Huddle", tags: [["private"]], hidden: false },
     {
@@ -681,7 +695,7 @@ it("hides old trial rooms using signed expiry metadata while keeping ordinary pr
     screen.getAllByRole("button", {
       name: /^Huddle(?:Temporary channel\. Cleans up after 1 hour without activity\.)?$/,
     }),
-  ).toHaveLength(3);
+  ).toHaveLength(4);
   expect(
     screen.queryByRole("button", { name: `huddle-${legacy.slice(0, 8)}` }),
   ).toBeNull();

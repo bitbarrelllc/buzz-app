@@ -74,9 +74,21 @@ it("adds a room member, recovers the signed invitation after discovery, and keep
               ["t", "stream"],
               ["private"],
               ["about", huddleDescription(parent)],
+              ["P", inviter.pubkey],
               ["ttl", "3600"],
             ]),
             roster(authority, room, members, clock),
+            signed(inviter, {
+              kind: 9007,
+              created_at: clock - 1,
+              content: "",
+              tags: [
+                ["h", room],
+                ["visibility", "private"],
+                ["channel_type", "stream"],
+                ["about", huddleDescription(parent)],
+              ],
+            }),
             ...notices,
           ];
           return events.filter((event) => {
